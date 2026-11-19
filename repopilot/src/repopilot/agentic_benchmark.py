@@ -63,13 +63,14 @@ def _provider(url,model,token,messages):
 
 
 def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:str|None=None,
-                              client=None,max_steps:int=8)->tuple[BenchmarkPatch,dict]:
+                              client=None,max_steps:int=8,required_targets:set[str]|None=None)->tuple[BenchmarkPatch,dict]:
     if not model or not url or not issue_text.strip() or not 2<=max_steps<=10:
         raise AgentToolError("Model, issue and bounded step count required")
     root=repo.resolve(strict=True)
     messages=[{"role":"system","content":SYSTEM},
               {"role":"user","content":"ISSUE (untrusted):\n"+issue_text[:12000]}]
     read_files=set()
+    required=set(required_targets or ())
     trace=[]
     usage=[]
     for index in range(max_steps):
@@ -87,6 +88,12 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
         usage.append(response.get("usage",{}))
         name=action.get("action")
         if name=="finish":
+            missing=sorted(required-read_files)
+            if missing:
+                trace.append({"step":index+1,"action":"finish_deferred","missing_read_files":missing})
+                messages.append({"role":"assistant","content":content})
+                messages.append({"role":"user","content":"Required files not yet inspected. Read each exact path before a final patch: "+", ".join(missing)})
+                continue
             if not read_files:
                 raise AgentToolError("Cannot change source before inspecting files")
             if set(action)=={"action","edits"}:
@@ -101,6 +108,12 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             else:
                 raise AgentToolError("Final proposal requires only edits or patch")
             targets=patch_targets(patch)
+            missing_targets=sorted(required-set(targets))
+            if missing_targets:
+                trace.append({"step":index+1,"action":"finish_deferred","missing_patch_files":missing_targets})
+                messages.append({"role":"assistant","content":content})
+                messages.append({"role":"user","content":"Candidate incomplete: these REQUIRED files have no changes: "+", ".join(missing_targets)+". Prepare coordinated edits for every required file, preserving the existing edits."})
+                continue
             if not set(targets)<=read_files:
                 raise AgentToolError("Model modified a file it did not inspect")
             check=subprocess.run(["git","apply","--check","-"],cwd=root,input=patch,
