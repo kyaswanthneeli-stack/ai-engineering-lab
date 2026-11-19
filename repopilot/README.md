@@ -14,7 +14,7 @@ RepoPilot is an independent Python engineering project exploring issue-to-patch 
 | Offline dashboard and execution-event report | Built | [Actual Ollama model run](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/model-run.html) and separate [reference patch dashboard](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/review-dashboard.html) |
 | Approval-gated draft PR via GitHub API | Built | CLI external API publisher has mock tests; actual [open, unmerged draft PR #2](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/2) was created via connected GitHub for the model-generated seeded fix; CI passed |
 | 12 SWE-bench Lite task preparation and result import | Built | Manifest, prediction export and official-result parser added; **0 official issues evaluated** |
-| Real SWE-bench model issue attempts | Attempt runner and GitHub Actions job available | A real pinned task attempt is separate from evaluation; check the run artifacts for its actual outcome |
+| Real SWE-bench model issue attempts | Attempt runner and GitHub Actions job available | One pinned pytest task failed proposal validation in an [actual model attempt](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44495694284); a revised model attempt is separate from evaluation |
 | SWE-bench model issue resolution rate | Not measured | **None** |
 
 [Open the recruiter-facing explanation](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/) · [View CI and downloadable run artifacts](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/workflows/repopilot.yml)
@@ -45,6 +45,19 @@ RepoPilot is an independent Python engineering project exploring issue-to-patch 
 - **Two-file change validation:** [Multi-file Docker CI](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44494911761) verifies one *reference patch* modifying `pricing.py` and `checkout.py`. This is not a claim that a model independently solved a multi-file issue.
 - **Real SWE-bench task attempts:** `python -m repopilot.benchmark_attempt INSTANCE_ID --manifest benchmarks/swebench-lite-12.json --output .runs/task-001` loads the official issue text and pinned base revision. It creates an unreviewed candidate or a failure report. See [the GitHub Actions attempt workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/workflows/repopilot-swebench-attempt.yml). A candidate is **not** an official success.
 - **Public evaluator integration:** Prediction exporter and result parser check provenance declarations and prevent missing or conflicting outcomes from becoming success claims.
+
+## Controlled retry loop
+
+The `run-repair` command provides up to three bounded model proposals. It retains each proposal, applies static review, uses the existing restricted verifier, and produces a review dashboard. The retry logic has automated tests; it has **not** been verified on arbitrary SWE-bench tasks.
+
+```sh
+# On a trusted, disposable worker with an already-configured model and Docker:
+python -m repopilot.cli run-repair fixtures/calculator-buggy \
+  https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/1 \
+  --max-attempts 3 --output .runs/retry-issue-1
+```
+
+It never automatically merges code or publishes a PR.
 
 ## Local usage
 
@@ -99,7 +112,7 @@ Opt-in pinned public GitHub repository checkout is implemented. There is **no ar
 
 The official [SWE-bench Lite](https://github.com/SWE-bench/SWE-bench) dataset has 300 issue/patch pairs. Its official evaluation harness requires task-specific environments and regression tests; passing RepoPilot's tiny calculator fixture does not mean a SWE-bench instance is resolved.
 
-Select 12 tasks with `select-swebench`, run actual model-generated patches against their pinned base revisions, evaluate with [official SWE-bench tooling](https://github.com/SWE-bench/SWE-bench/blob/main/docs/guides/evaluation.md), and publish every attempted task, including failures. The reporting module distinguishes reference fixtures and model-generated attempts. The [prediction export](src/repopilot/swebench_export.py) and [official-results import](src/repopilot/swebench_results.py) fail on missing or inconsistent evidence. The [evaluation protocol](benchmarks/README.md) lists task-specific setup requirements. **No benchmark score is available yet.**
+Select 12 tasks with `select-swebench`, run actual model-generated patches against their pinned base revisions, evaluate with [official SWE-bench tooling](https://github.com/SWE-bench/SWE-bench/blob/main/docs/guides/evaluation.md), and publish every attempted task, including failures. The reporting module distinguishes reference fixtures and model-generated attempts. The [prediction export](src/repopilot/swebench_export.py) and [official-results import](src/repopilot/swebench_results.py) fail on missing or inconsistent evidence. The [evaluation protocol](benchmarks/README.md) lists task-specific setup requirements. The first actual pinned SWE-bench task attempt for `pytest-dev__pytest-11148` produced **no valid patch** because the small model returned an unsupported patch structure after three tries; GitHub CI preserved the unsuccessful attempt and runtime. **No official SWE-bench score is available yet.**
 
 ## Human reviewer checklist
 
