@@ -89,8 +89,14 @@ def main(argv=None):
     parser.add_argument("instance_id")
     parser.add_argument("--manifest",type=Path,default=Path("benchmarks/swebench-lite-12.json"))
     parser.add_argument("--output",type=Path,default=Path(".runs/swebench-attempt"))
+    parser.add_argument("--agentic",action="store_true",help="Enable bounded model-directed read-only tool calls")
     args=parser.parse_args(argv)
-    result=attempt_one(args.manifest,args.instance_id,args.output)
+    if args.agentic:
+        from .agentic_benchmark import propose_agentic_benchmark
+        planner=propose_agentic_benchmark
+    else:
+        planner=propose_benchmark
+    result=attempt_one(args.manifest,args.instance_id,args.output,model_proposer=planner)
     print(json.dumps(result,indent=2))
     if result["status"]!="model_patch_proposed":
         raise SystemExit(1)
