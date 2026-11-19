@@ -154,6 +154,19 @@ class AgentTests(unittest.TestCase):
         self.assertIn("timeout after 2 attempt",str(caught.exception))
         self.assertNotIn("secret-key",str(caught.exception))
 
+    def test_native_ollama_urlwrapped_socket_timeout_is_classified(self):
+        class Opener:
+            def open(self,request,**kwargs):
+                raise urllib.error.URLError(TimeoutError("private provider path"))
+        with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1",
+                                     "REPOPILOT_NATIVE_RETRIES":"1"}), patch(
+             "repopilot.agentic_benchmark.urllib.request.build_opener",
+             return_value=Opener()):
+            with self.assertRaises(AgentToolError) as error:
+                _provider("http://127.0.0.1:11434/v1","mock",None,[])
+        self.assertIn("timeout after 1 attempt",str(error.exception))
+        self.assertNotIn("private provider path",str(error.exception))
+
     def test_native_ollama_http_400_does_not_retry(self):
         class Opener:
             calls=0
