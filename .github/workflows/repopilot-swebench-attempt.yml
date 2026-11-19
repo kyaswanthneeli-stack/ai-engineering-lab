@@ -12,7 +12,7 @@ permissions:
 jobs:
   real-swebench-attempt:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: repopilot
@@ -33,16 +33,16 @@ jobs:
             sleep 2
           done
           curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
-          docker exec repopilot-benchmark-ollama ollama pull qwen2.5-coder:3b
-      - name: Attempt one pinned real SWE-bench Lite issue (read-only tool-agent v4)
+          docker exec repopilot-benchmark-ollama ollama pull qwen2.5-coder:7b
+      - name: Attempt one pinned real SWE-bench Lite issue (bounded tool-agent v5 (7B))
         continue-on-error: true
         env:
           REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
-          REPOPILOT_MODEL: qwen2.5-coder:3b
+          REPOPILOT_MODEL: qwen2.5-coder:7b
         run: |
-          python -m repopilot.benchmark_attempt pytest-dev__pytest-11148 --agentic \
+          python -m repopilot.benchmark_attempt pytest-dev__pytest-11148 --agentic --max-steps 18 \
             --manifest benchmarks/swebench-lite-12.json \
-            --output .runs/official-attempt-pytest-11148-v4-agentic
+            --output .runs/official-attempt-pytest-11148-v5-agentic
       - name: Report actual outcome without claiming resolution
         if: always()
         run: |
@@ -61,12 +61,14 @@ jobs:
           print("ERROR TYPE:",result.get("error_type","none"))
           assert result["officially_evaluated"] is False
           assert result["officially_resolved"] is None
+          if result["status"]!="model_patch_proposed":
+              raise SystemExit("Model failed to propose a valid patch; see attempt evidence")
           PY
       - name: Upload honest attempt evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-real-swebench-pytest-11148-v4-unscored
+          name: repopilot-real-swebench-pytest-11148-v5-unscored
           path: repopilot/.runs/official-attempt-pytest-11148-v4-agentic/
           if-no-files-found: warn
           retention-days: 30
