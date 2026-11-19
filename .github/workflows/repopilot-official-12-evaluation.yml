@@ -3,7 +3,7 @@ name: RepoPilot official 12-task SWE-bench evaluation
 on:
   push:
     paths:
-      - '.github/workflows/repopilot-official-12-evaluation.yml'
+      - 'repopilot/src/repopilot/benchmark_batch.py'
   workflow_dispatch:
 
 concurrency:
@@ -136,13 +136,32 @@ jobs:
             --instance_ids "${INSTANCES[@]}" \
             --max_workers 1 \
             --run_id repopilot-12-qwen3b-v5
-      - name: Upload authoritative official harness logs and reports
+      - name: Package official results with portable filenames
+        if: always()
+        run: |
+          mkdir -p .runs/official-evidence
+          python - <<'PY'
+          import json,shutil,tarfile
+          from pathlib import Path
+          out=Path('.runs/official-evidence')
+          candidates=list(Path('.').glob('*repopilot-12-qwen3b-v5.json'))
+          candidates+=list(Path('logs/evaluation').rglob('results.json')) if Path('logs/evaluation').is_dir() else []
+          if candidates:
+              source=candidates[0]
+              json.loads(source.read_text())
+              shutil.copy2(source,out/'official-evaluation-result.json')
+          else:
+              print('No authoritative results JSON; evidence is incomplete')
+          if Path('logs/evaluation').is_dir():
+              with tarfile.open(out/'official-evaluation-logs.tar.gz','w:gz') as archive:
+                  archive.add('logs/evaluation',arcname='logs/evaluation')
+          shutil.copy2('.runs/swebench-batch/predictions.jsonl',out/'real-model-predictions.jsonl')
+          PY
+      - name: Upload official reports without unsafe colon filenames
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: repopilot-12-official-harness-v5
-          path: |
-            repopilot/logs/evaluation/
-            repopilot/*.json
+          path: repopilot/.runs/official-evidence/
           if-no-files-found: warn
           retention-days: 30
