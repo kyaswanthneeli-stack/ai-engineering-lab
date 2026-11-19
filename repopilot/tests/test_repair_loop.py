@@ -40,6 +40,28 @@ class RepairTests(unittest.TestCase):
             self.assertTrue((Path(td)/"run"/"dashboard.html").exists())
             self.assertTrue((Path(td)/"run"/"attempt-01-proposal.json").exists())
             self.assertTrue((Path(td)/"run"/"attempt-02-proposal.json").exists())
+    def test_docker_failure_feedback_reaches_retry_prompt(self):
+        with tempfile.TemporaryDirectory() as td:
+            prompts=[]
+            def model(repo,prompt,*args):
+                prompts.append(prompt)
+                return spec(),{"model":"mock"}
+            calls=[]
+            def verifier(repo,proposal,path):
+                calls.append(1)
+                if len(calls)==1:
+                    path.write_text(json.dumps({
+                        "outcome":"failed","failed_stage":"patched_tests",
+                        "after":{"exit_code":1,"output":"FAIL: test_rounding expected 0.33"}
+                    }))
+                    raise RuntimeError("patch failed")
+                return self.good_verifier(repo,proposal,path)
+            report=run_with_repair(Path(td),"https://github.com/example/repo/issues/1",
+                Path(td)/"attempt",issue_reader=issue,model_proposer=model,verifier=verifier)
+            self.assertEqual(report["successful_attempt"],2)
+            self.assertIn("test_rounding",prompts[1])
+            self.assertTrue(report["attempts"][0]["has_test_failure_evidence"])
+
     def test_all_attempts_fail_without_claiming_success(self):
         with tempfile.TemporaryDirectory() as td:
             out=Path(td)/"run"
