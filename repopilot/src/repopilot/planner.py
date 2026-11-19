@@ -7,6 +7,7 @@ import urllib.request
 import urllib.parse
 from .context_select import ranked_source_context, describe_context
 from .patches import validate_patch
+from .edit_plan import canonical_patch, EditPlanError
 from .spec import IssueSpec
 from dataclasses import replace
 from .patch_repair import reconstruct_single_hunk,PatchRepairError
@@ -21,11 +22,11 @@ Return exactly six keys: issue_id, summary, test_path, reproduction_test, patch,
 - reproduction_test MUST be a JSON STRING containing an ENTIRE Python unittest module:
   import unittest, import the function under test, define class TestReproduction(unittest.TestCase),
   and include a test_ method. Not a dict, not a method fragment.
-- patch: complete git unified diff (JSON string) changing ONLY an existing .py source file,
+- patch: EITHER a complete git unified diff JSON string, OR an object {\"edits\":[{\"path\":\"existing.py\",\"old\":\"exact existing text\",\"new\":\"replacement text\"}]} with 1-12 strictly exact replacements across existing Python files.\n  Prefer the edits object when unsure about git diff line numbers. Never include shell commands.\n  The patch must change ONLY existing .py source files.\n  For diff strings:
   with lines "diff --git a/FILE b/FILE", "--- a/FILE", "+++ b/FILE", "@@ ... @@".
   Include EXACT source lines (including inline comments and indentation) in removed/context lines.
   The diff MUST use correct hunk line numbers, matching original file length.
-  The patch MUST be a JSON STRING, not an object. End its decoded content with a newline.
+  If using a unified diff string, end its decoded content with a newline.\n  If using edits, include complete exact old text matching uniquely and keep indentation.
 - test_command: exactly ["python","-m","unittest","discover","-s","tests","-v"].
 All values must be JSON-compatible; escape newlines inside string values. No Markdown fences.
 Do not claim the test ran. Do not invent file names. Make the smallest useful change.
@@ -51,8 +52,10 @@ def _parse_candidate(result:dict,known_files:list[str],repo:Path) -> tuple[Issue
             if set(wrapper)=={key} and isinstance(wrapper[key],str):
                 data["patch"]=wrapper[key]
                 break
+    if isinstance(data.get("patch"),dict) and set(data["patch"])=={"edits"}:
+        data["patch"]=canonical_patch(repo,data["patch"]["edits"],allowed_files=set(known_files))
     if not isinstance(data.get("patch"),str):
-        raise ValueError("patch MUST be a single JSON string with unified-diff text")
+        raise ValueError("patch MUST be unified-diff text or a strict {edits:[{path,old,new}]} object")
     if not isinstance(data.get("reproduction_test"),str):
         raise ValueError("reproduction_test MUST be a complete Python unittest module as a JSON string")
     if data["patch"] and not data["patch"].endswith("\n"):
@@ -104,7 +107,7 @@ def propose(repo:Path,issue_text:str,model:str,url:str,token:str|None=None,clien
             endpoint=url.rstrip("/")+"/chat/completions"
             headers={"Content-Type":"application/json"}
             if token:headers["Authorization"]="Bearer "+token
-            body=json.dumps({"model":model,"temperature":0,"stream":False,"max_tokens":2400,
+            body=json.dumps({"model":model,"temperature":0,"stream":False,"max_tokens":3600,
               "messages":[{"role":"system","content":system},{"role":"user","content":prompt}],
               "response_format":{"type":"json_object"}}).encode()
             opener=urllib.request.build_opener(_RejectRedirect())
