@@ -78,6 +78,42 @@ class ContextSelectionTests(unittest.TestCase):
         finally:
             target.unlink(missing_ok=True)
 
+
+    def test_v2_filename_pass_finds_nested_source_beyond_ast_scan_limit(self):
+        # No exact filename appears in the issue; source content after the
+        # AST scan cap is not otherwise read.
+        for i in range(110):
+            (self.root/f"a{i:04d}.py").write_text("def unrelated():\n    pass\n")
+        nested=self.root/"deep_pkg"/"service"
+        nested.mkdir(parents=True)
+        (nested/"invoice_tax_reconciler.py").write_text(
+            "def reconcile_invoice_tax(price):\n    return price\n")
+        items=ranked_source_context(
+            self.root,"Invoice tax reconciliation yields wrong result",
+            max_files=2,scan_limit=1)
+        self.assertEqual(items[0].path,"deep_pkg/service/invoice_tax_reconciler.py")
+        self.assertIn("reconcile_invoice_tax",items[0].symbols)
+
+    def test_v2_bounded_filename_scan_never_follows_directory_symlinks(self):
+        outside=self.root.parent/"repopilot-v2-external-src"
+        outside.mkdir(exist_ok=True)
+        (outside/"invoice_tax_reconciler.py").write_text("def secret_marker(): pass\n")
+        (self.root/"linked_source").symlink_to(outside,target_is_directory=True)
+        try:
+            items=ranked_source_context(
+                self.root,"invoice tax reconciliation",
+                max_files=5,scan_limit=1)
+            self.assertNotIn("linked_source/invoice_tax_reconciler.py",
+                             [item.path for item in items])
+        finally:
+            (self.root/"linked_source").unlink()
+            (outside/"invoice_tax_reconciler.py").unlink()
+            outside.rmdir()
+
+    def test_v2_rejects_unbounded_filename_indexing(self):
+        with self.assertRaises(ValueError):
+            ranked_source_context(self.root,"tax",scan_limit=20001)
+
     def test_limits(self):
         items=ranked_source_context(self.root,"tax",max_files=1,max_chars=900)
         self.assertEqual(len(items),1)
