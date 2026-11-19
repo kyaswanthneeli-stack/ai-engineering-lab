@@ -1,0 +1,87 @@
+name: RepoPilot real multi-file coding agent challenge
+
+on:
+  push:
+    paths:
+      - '.github/workflows/repopilot-ollama-multifile.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  live-multifile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install RepoPilot
+        run: python -m pip install -e .
+      - name: Start real Ollama coding model
+        run: |
+          docker run -d --name repopilot-ollama-multi -p 127.0.0.1:11434:11434 ollama/ollama:latest
+          for i in $(seq 1 50); do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
+          docker exec repopilot-ollama-multi ollama pull qwen2.5-coder:3b
+          docker pull python:3.12-alpine
+      - name: Attempt actual AI-generated multi-file repair
+        id: agent
+        continue-on-error: true
+        env:
+          REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
+          REPOPILOT_MODEL: qwen2.5-coder:3b
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          python -m repopilot.cli run-pinned \
+            https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/3 \
+            "$SOURCE_SHA" --repo-subdir repopilot/fixtures/invoice-multifile \
+            --output .runs/ollama-multifile-issue3
+      - name: Verify authentic multi-file outcome
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from repopilot.pr import patch_targets
+          folder=Path('.runs/ollama-multifile-issue3')
+          if not (folder/'run.json').is_file():
+              raise SystemExit('NO RUN: infrastructure failed before attempt')
+          report=json.loads((folder/'run.json').read_text())
+          print('MODEL GENERATED:',report.get('model_generated_proposal',False))
+          print('OUTCOME:',report.get('outcome'))
+          print('ERROR:',report.get('error_type','none'))
+          if report.get('outcome')!='verified_in_sandbox':
+              raise SystemExit('NOT VERIFIED: model attempt failed; inspect uploaded evidence')
+          if report.get('model_generated_proposal') is not True:
+              raise SystemExit('NOT AI GENERATED')
+          spec=json.loads((folder/'proposal.json').read_text())
+          targets=patch_targets(spec['patch'])
+          print('MODEL PATCH TARGETS:',targets)
+          if len(targets)<2 or not {'pricing.py','checkout.py'}<=set(targets):
+              raise SystemExit('MODEL DID NOT MAKE TWO-FILE FIX')
+          assert report['baseline']['exit_code']==0
+          assert report['before']['exit_code']!=0
+          assert report['after']['exit_code']==0
+          print('VERIFIED: genuine multi-file AI proposal, baseline/reproduction/regression Docker tests')
+          PY
+      - name: Upload complete multi-file evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-real-multifile-issue3
+          path: repopilot/.runs/ollama-multifile-issue3/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Stop model
+        if: always()
+        run: docker rm -f repopilot-ollama-multi || true
