@@ -34,7 +34,7 @@ jobs:
           done
           curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
           docker exec repopilot-benchmark-ollama ollama pull qwen2.5-coder:3b
-      - name: Attempt one pinned real SWE-bench Lite issue
+      - name: Attempt one pinned real SWE-bench Lite issue (parser revision 2)
         continue-on-error: true
         env:
           REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
@@ -42,14 +42,14 @@ jobs:
         run: |
           python -m repopilot.benchmark_attempt pytest-dev__pytest-11148 \
             --manifest benchmarks/swebench-lite-12.json \
-            --output .runs/official-attempt-pytest-11148
+            --output .runs/official-attempt-pytest-11148-v2
       - name: Report actual outcome without claiming resolution
         if: always()
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          path=Path(".runs/official-attempt-pytest-11148/attempt.json")
+          path=Path(".runs/official-attempt-pytest-11148-v2/attempt.json")
           if not path.is_file():
               raise SystemExit("Infrastructure/setup failure: no attempt report was created")
           result=json.loads(path.read_text())
@@ -66,8 +66,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-real-swebench-pytest-11148-unscored
-          path: repopilot/.runs/official-attempt-pytest-11148/
+          name: repopilot-real-swebench-pytest-11148-v2-unscored
+          path: repopilot/.runs/official-attempt-pytest-11148-v2/
           if-no-files-found: warn
           retention-days: 30
       - name: Stop local model
