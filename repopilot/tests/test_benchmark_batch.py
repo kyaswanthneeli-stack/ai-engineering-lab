@@ -147,6 +147,42 @@ class BenchmarkBatchTests(unittest.TestCase):
         self.assertFalse(result["officially_evaluated"])
         self.assertTrue(previous.is_file())
 
+    def test_targeted_retry_only_accepts_unsubmitted_failures(self):
+        previous=self.root/"targeted-previous.json"
+        items=[{"instance_id":x["instance_id"],
+                "status":"model_timeout" if x["instance_id"] in {
+                    "sample__project-2","sample__project-11"}
+                else "model_patch_proposed"} for x in self.tasks]
+        previous.write_text(json.dumps({
+            "pinned_manifest_tasks":12,"selected_tasks":12,
+            "model_predictions":10,"missing_predictions":2,
+            "officially_evaluated":False,"tasks":items}))
+        called=[]
+        def fake_run(command,**kwargs):
+            called.append(command[3])
+            folder=Path(command[command.index("--output")+1])
+            folder.mkdir(parents=True)
+            (folder/"attempt.json").write_text(
+                json.dumps({"status":"failed_model_attempt"}))
+        with patch("repopilot.benchmark_batch.load_manifest",
+                   return_value=self.tasks),patch(
+                       "repopilot.benchmark_batch.subprocess.run",
+                       side_effect=fake_run):
+            result=collect(
+                self.manifest,self.root/"specific-retry",retry_from=previous,
+                instance_ids=["sample__project-11"])
+        self.assertEqual(called,["sample__project-11"])
+        self.assertEqual(result["selected_tasks"],1)
+        self.assertTrue(result["retry_only_unsubmitted_failures"])
+        self.assertEqual(result["model_predictions"],0)
+        with patch("repopilot.benchmark_batch.load_manifest",
+                   return_value=self.tasks):
+            with self.assertRaisesRegex(ValueError,"only previously unsubmitted"):
+                collect(
+                    self.manifest,self.root/"rejected-retry",
+                    retry_from=previous,instance_ids=["sample__project-0"])
+        self.assertFalse((self.root/"rejected-retry").exists())
+
     def test_retry_rejects_wrong_manifest_or_inconsistent_previous_counts(self):
         from repopilot.benchmark_batch import retryable_task_ids
         previous=self.root/"wrong.json"
