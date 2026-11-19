@@ -302,6 +302,34 @@ class AgentTests(unittest.TestCase):
         self.assertIn("ranked_preinspect",
                       [x["action"] for x in meta["tool_trace"]])
 
+    def test_opt_in_issue_paths_preinspected_before_model_call(self):
+        seen=[]
+        def client(url,model,token,messages):
+            seen.append(list(messages))
+            return {"choices":[{"message":{"content":json.dumps({
+                "action":"finish","edits":[{
+                    "path":"pricing.py","old":"return sum(values)",
+                    "new":"return round(sum(values),2)"}]})}}]}
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"Please fix `pricing.py` subtotal rounding",
+            "mock","http://127.0.0.1:11434/v1",
+            client=client,max_steps=2,auto_issue_paths=True)
+        self.assertIn("round(sum(values),2)",patch.patch)
+        self.assertIn("pricing.py",meta["inspected_files"])
+        self.assertTrue(any(x["action"]=="issue_path_preinspect"
+                            for x in meta["tool_trace"]))
+        self.assertIn("FINAL PATCH MODE",seen[0][0]["content"])
+
+    def test_opt_in_issue_paths_rejects_unsafe_filename(self):
+        response={"choices":[{"message":{"content":json.dumps({
+            "action":"read","path":"pricing.py"})}}]}
+        with self.assertRaises(AgentToolError):
+            propose_agentic_benchmark(
+                self.repo,"Do not read ../out_of_repo.py",
+                "mock","http://127.0.0.1:11434/v1",
+                client=lambda *a:response,max_steps=2,
+                auto_issue_paths=True)
+
     def test_refuses_to_modify_uninspected_file(self):
         steps=[
             {"action":"read","path":"pricing.py"},
