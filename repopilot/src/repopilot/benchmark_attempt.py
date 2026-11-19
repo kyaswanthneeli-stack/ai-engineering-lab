@@ -40,6 +40,23 @@ def bounded_issue_context(statement: str, max_chars: int = 6500) -> str:
     return statement[:head] + marker + statement[-tail:]
 
 
+def configured_issue_context_limit()->int:
+    """Validated inference-only issue context bound; never changes dataset rows.
+
+    Smaller local models can explicitly opt into a shorter text budget. The
+    default and official issue metadata remain unchanged. A malformed setting
+    is an error rather than silently changing the inference experiment.
+    """
+    raw=os.getenv("REPOPILOT_ISSUE_CONTEXT_CHARS","6500")
+    try:
+        budget=int(raw)
+    except (TypeError,ValueError) as exc:
+        raise ValueError("Invalid REPOPILOT_ISSUE_CONTEXT_CHARS") from exc
+    if not 2000<=budget<=12000:
+        raise ValueError("REPOPILOT_ISSUE_CONTEXT_CHARS must be in 2000..12000")
+    return budget
+
+
 def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
                 checkout=pinned_checkout,model_proposer=propose_benchmark,model=None,url=None,token=None)->dict:
     tasks={t["instance_id"]:t for t in load_manifest(manifest)}
@@ -74,14 +91,16 @@ def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
         if not isinstance(issue,str) or not issue.strip():
             raise ValueError("Official issue statement missing")
         report["status"]="attempted"
-        report["issue_context_trimmed"]=len(issue)>6500
+        issue_budget=configured_issue_context_limit()
+        report["issue_context_chars"]=issue_budget
+        report["issue_context_trimmed"]=len(issue)>issue_budget
         owner,repo=task["repo"].split("/")
         with tempfile.TemporaryDirectory(prefix="repopilot-swebench-") as tmp:
             # Checkout helper only parses the URL to derive the public repo;
             # the issue statement is read from the official pinned dataset.
             work=checkout(f"https://github.com/{owner}/{repo}/issues/1",
                           task["base_commit"],Path(tmp)/"repo")
-            spec,meta=model_proposer(work,bounded_issue_context(issue),
+            spec,meta=model_proposer(work,bounded_issue_context(issue,issue_budget),
                                      model or os.getenv("REPOPILOT_MODEL",""),
                                      url or os.getenv("REPOPILOT_BASE_URL",""),
                                      token if token is not None else os.getenv("REPOPILOT_API_KEY"))
