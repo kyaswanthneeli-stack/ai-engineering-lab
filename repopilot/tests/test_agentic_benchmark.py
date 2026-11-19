@@ -327,6 +327,52 @@ class AgentTests(unittest.TestCase):
         self.assertTrue(any(
             step.get("error_type")=="UninspectedPatchTarget"
             for step in meta["tool_trace"]))
+
+    def test_candidate_path_is_inspected_before_new_proposal(self):
+        """First unsafe patch is discarded; second must use inspected source."""
+        steps=[
+            {"action":"read","path":"pricing.py"},
+            {"action":"finish","edits":[
+                {"path":"checkout.py","old":"return subtotal(values)",
+                 "new":"return round(subtotal(values),2)"}]},
+            {"action":"finish","edits":[
+                {"path":"checkout.py","old":"return subtotal(values)",
+                 "new":"return round(subtotal(values),2)"}]}
+        ]
+        seen=[]
+        it=iter(steps)
+        def client(url,model,token,messages):
+            seen.append(list(messages))
+            return {"choices":[{"message":{"content":json.dumps(next(it))}}]}
+        result,meta=propose_agentic_benchmark(
+            self.repo,"round invoice totals","mock","http://127.0.0.1:11434/v1",
+            client=client,max_steps=4)
+        self.assertIn("round(subtotal(values),2)",result.patch)
+        self.assertEqual(meta["inspected_files"],["checkout.py","pricing.py"])
+        self.assertTrue(any(x.get("action")=="candidate_preinspect"
+                            and x.get("target")=="checkout.py"
+                            for x in meta["tool_trace"]))
+        self.assertTrue(any("Your previous candidate was REJECTED" in m["content"]
+                            and "return subtotal(values)" in m["content"]
+                            for m in seen[2]))
+
+    def test_candidate_inspection_rejects_traversal_and_missing_paths(self):
+        steps=[
+            {"action":"read","path":"pricing.py"},
+            {"action":"finish","edits":[
+                {"path":"../outside.py","old":"x=1","new":"x=2"}]},
+            {"action":"finish","edits":[
+                {"path":"pricing.py","old":"return sum(values)",
+                 "new":"return round(sum(values),2)"}]}
+        ]
+        result,meta=propose_agentic_benchmark(
+            self.repo,"round subtotal","mock","http://127.0.0.1:11434/v1",
+            client=self.sequence(steps),max_steps=4)
+        self.assertIn("round(sum(values),2)",result.patch)
+        self.assertNotIn("../outside.py",meta["inspected_files"])
+        self.assertFalse(any(x.get("action")=="candidate_preinspect"
+                             for x in meta["tool_trace"]))
+
     def test_forbids_model_shell_access(self):
         with self.assertRaises(AgentToolError):
             propose_agentic_benchmark(self.repo,"fix","mock","http://127.0.0.1:11434/v1",
