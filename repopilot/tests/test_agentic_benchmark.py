@@ -1,8 +1,10 @@
 import json
 import tempfile
 import unittest
+import urllib.error
+from unittest.mock import patch
 from pathlib import Path
-from repopilot.agentic_benchmark import propose_agentic_benchmark,AgentToolError
+from repopilot.agentic_benchmark import propose_agentic_benchmark,AgentToolError,_provider
 
 
 class AgentTests(unittest.TestCase):
@@ -17,6 +19,58 @@ class AgentTests(unittest.TestCase):
         def client(*args):
             return {"choices":[{"message":{"content":json.dumps(next(it))}}],"usage":{"total_tokens":5}}
         return client
+
+    def test_provider_transient_503_retries_then_returns_response(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def read(self,n): return b'{"choices":[{"message":{"content":"{}"}}]}'
+        class Opener:
+            calls=0
+            def open(self,*args,**kwargs):
+                self.calls+=1
+                if self.calls==1:
+                    raise urllib.error.HTTPError("http://localhost",503,"unavailable",None,None)
+                return Response()
+        opener=Opener()
+        with patch("repopilot.agentic_benchmark.urllib.request.build_opener",return_value=opener), patch("repopilot.agentic_benchmark.time.sleep"):
+            result=_provider("http://127.0.0.1:11434/v1","mock",None,[])
+        self.assertEqual(opener.calls,2)
+        self.assertEqual(result["choices"][0]["message"]["content"],"{}")
+
+    def test_provider_persistent_503_reports_code_without_leaking_url(self):
+        class Opener:
+            def open(self,*args,**kwargs):
+                raise urllib.error.HTTPError("http://localhost/private?q=secret",503,"secret",None,None)
+        with patch("repopilot.agentic_benchmark.urllib.request.build_opener",return_value=Opener()), patch("repopilot.agentic_benchmark.time.sleep"):
+            with self.assertRaises(AgentToolError) as context:
+                _provider("http://127.0.0.1:11434/v1","mock","TOP_SECRET_KEY",[])
+        self.assertIn("HTTP 503 after 2 attempt",str(context.exception))
+        self.assertNotIn("TOP_SECRET_KEY",str(context.exception))
+        self.assertNotIn("private",str(context.exception))
+
+    def test_provider_invalid_json_is_classified(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def read(self,n): return b'not json'
+        class Opener:
+            def open(self,*args,**kwargs): return Response()
+        with patch("repopilot.agentic_benchmark.urllib.request.build_opener",return_value=Opener()):
+            with self.assertRaisesRegex(AgentToolError,"invalid JSON"):
+                _provider("http://127.0.0.1:11434/v1","mock",None,[])
+
+    def test_provider_missing_content_is_classified(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def read(self,n): return b'{"choices":[{"message":{}}]}'
+        class Opener:
+            def open(self,*args,**kwargs): return Response()
+        with patch("repopilot.agentic_benchmark.urllib.request.build_opener",return_value=Opener()):
+            with self.assertRaisesRegex(AgentToolError,"missing choices"):
+                _provider("http://127.0.0.1:11434/v1","mock",None,[])
+
     def test_read_two_modules_then_emit_valid_multi_file_patch(self):
         steps=[
             {"action":"list","prefix":""},
