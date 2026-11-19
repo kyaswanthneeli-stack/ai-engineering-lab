@@ -47,6 +47,11 @@ jobs:
           REPOPILOT_MAX_TOKENS: '1200'
         run: |
           curl -fsS "${REPOPILOT_BASE_URL}/models" >/dev/null
+          # Warm the local model with a tiny request before the large issue prompts.
+          curl -fsS --retry 2 --max-time 120 \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"qwen2.5-coder:3b","prompt":"hello","stream":false,"options":{"num_predict":8}}' \
+            http://127.0.0.1:11434/api/generate >/dev/null
           python -m repopilot.benchmark_batch \
             --manifest benchmarks/swebench-lite-12.json \
             --output .runs/swebench-batch \
@@ -73,7 +78,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-12-model-attempts-v3-unscored
+          name: repopilot-12-model-attempts-v4-unscored
           path: repopilot/.runs/swebench-batch/
           if-no-files-found: warn
           retention-days: 30
@@ -96,7 +101,7 @@ jobs:
           python-version: '3.11'
       - uses: actions/download-artifact@v4
         with:
-          name: repopilot-12-model-attempts-v3-unscored
+          name: repopilot-12-model-attempts-v4-unscored
           path: repopilot/.runs/swebench-batch/
       - name: Install official SWE-bench harness
         run: python -m pip install 'swebench>=3.0,<5.0'
@@ -115,12 +120,12 @@ jobs:
             --predictions_path .runs/swebench-batch/predictions.jsonl \
             --instance_ids "${INSTANCES[@]}" \
             --max_workers 1 \
-            --run_id repopilot-12-qwen3b-v3
+            --run_id repopilot-12-qwen3b-v4
       - name: Upload authoritative official harness logs and reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-12-official-harness-v3
+          name: repopilot-12-official-harness-v4
           path: |
             repopilot/logs/evaluation/
             repopilot/*.json
