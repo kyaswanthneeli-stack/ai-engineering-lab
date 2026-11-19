@@ -18,7 +18,7 @@ class ContextSelectionTests(unittest.TestCase):
         self.assertIn("FILE billing.py",describe_context(items))
     def test_explicit_mentioned_file_is_ranked_even_after_scan_limit(self):
         # Issue files must be considered even when outside the capped scan.
-        (self.root/"zz_target.py").write_text("def target():\\n    return 5\\n")
+        (self.root/"zz_target.py").write_text("def target():\n    return 5\n")
         items=ranked_source_context(
             self.root,"Fix `zz_target.py` with the incorrect target logic.",
             max_files=1,scan_limit=1)
