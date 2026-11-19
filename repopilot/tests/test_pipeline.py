@@ -1,4 +1,5 @@
 import json
+import base64
 import tempfile
 import unittest
 from pathlib import Path
@@ -35,6 +36,35 @@ class PipelineTests(unittest.TestCase):
     def test_draft_pr_rejects_unverified(self):
         with self.assertRaises(PublishError):
             publish_approved_draft(Path("."),SPEC,{"outcome":"failed","issue_id":"issue-2"},"a/b","I_APPROVE_DRAFT_PR")
+    def test_mock_draft_pr_created_in_reviewed_subdirectory(self):
+        class FakeApi:
+            def __init__(self):
+                self.calls=[]
+            def call(self,method,path,data=None):
+                self.calls.append((method,path,data))
+                if (method,path)==("GET",""):
+                    return {"full_name":"a/b","default_branch":"main"}
+                if path=="/git/ref/heads/main":
+                    return {"object":{"sha":"012345abcdef"}}
+                if method=="GET" and "/contents/nested/a.py" in path:
+                    return {"type":"file","encoding":"base64","content":base64.b64encode(b"x = 1\\n").decode(),"sha":"blob1"}
+                if method=="POST" and path=="/pulls":
+                    assert data["draft"] is True
+                    return {"html_url":"https://github.com/a/b/pull/2","number":2}
+                return {}
+        with tempfile.TemporaryDirectory() as t:
+            src=Path(t)
+            (src/"a.py").write_text("x = 1\\n")
+            spec=IssueSpec.from_dict({**{k:getattr(SPEC,k) for k in ("issue_id","summary","test_path","reproduction_test","patch")},
+                                     "issue_id":"a/b#2","test_command":list(SPEC.test_command)})
+            verified={"outcome":"verified_in_sandbox","issue_id":"a/b#2","baseline":{"exit_code":0},
+                "before":{"exit_code":1},"after":{"exit_code":0}}
+            api=FakeApi()
+            result=publish_approved_draft(src,spec,verified,"a/b","I_APPROVE_DRAFT_PR",api=api,repo_subdir="nested")
+            self.assertEqual(result["url"],"https://github.com/a/b/pull/2")
+            paths=[p for method,p,_ in api.calls if method=="PUT"]
+            self.assertIn("/contents/nested/a.py",paths)
+            self.assertIn("/contents/nested/tests/test_reproduction.py",paths)
     def test_patch_targets(self):
         self.assertEqual(patch_targets(PATCH),["a.py"])
 if __name__=="__main__":unittest.main()
