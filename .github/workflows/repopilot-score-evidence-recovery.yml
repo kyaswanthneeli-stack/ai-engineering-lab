@@ -1,0 +1,104 @@
+name: RepoPilot recover official SWE-bench evidence
+
+on:
+  push:
+    paths:
+      - '.github/workflows/repopilot-score-evidence-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  recover-official-evaluation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    defaults:
+      run:
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Reuse the six authentic model-generated predictions from the completed batch
+        uses: actions/download-artifact@v4
+        with:
+          name: repopilot-12-model-attempts-v5-unscored
+          run-id: 44547336463
+          github-token: ${{ github.token }}
+          path: repopilot/.runs/score-input/
+      - name: Verify six pinned real predictions before scoring
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path('benchmarks/swebench-lite-12.json').read_text())['tasks']
+          allowed={x['instance_id'] for x in manifest}
+          rows=[json.loads(x) for x in Path('.runs/score-input/predictions.jsonl').read_text().splitlines() if x.strip()]
+          ids=[x['instance_id'] for x in rows]
+          assert len(rows)==6 and len(set(ids))==6 and set(ids)<=allowed, 'Unexpected model predictions'
+          assert all(x['model_patch'].startswith('diff --git a/') and x['model_patch'].endswith('\n') for x in rows)
+          print('Verified pinned real model predictions:',len(rows))
+          print('Instance IDs:',ids)
+          PY
+      - name: Install official SWE-bench harness
+        run: python -m pip install 'swebench>=3.0,<5.0'
+      - name: Rerun official harness only, without regenerating any model patches
+        run: |
+          mapfile -t INSTANCES < <(python - <<'PY'
+          import json
+          from pathlib import Path
+          for line in Path('.runs/score-input/predictions.jsonl').read_text().splitlines():
+              if line.strip():
+                  print(json.loads(line)['instance_id'])
+          PY
+          )
+          test "${#INSTANCES[@]}" -eq 6
+          python -m swebench.harness.run_evaluation \
+            --dataset_name princeton-nlp/SWE-bench_Lite \
+            --split test \
+            --predictions_path .runs/score-input/predictions.jsonl \
+            --instance_ids "${INSTANCES[@]}" \
+            --max_workers 1 \
+            --run_id "repopilot-evidence-${GITHUB_RUN_ID}"
+      - name: Preserve official result in portable artifact
+        if: always()
+        run: |
+          mkdir -p .runs/score-evidence
+          python - <<'PY'
+          import json,shutil,tarfile
+          from pathlib import Path
+          destination=Path('.runs/score-evidence')
+          originals=[p for p in Path('.').glob('*repopilot-evidence-*.json') if p.is_file()]
+          originals+=list(Path('logs/evaluation').rglob('results.json')) if Path('logs/evaluation').is_dir() else []
+          originals=list(dict.fromkeys(originals))
+          if originals:
+              authoritative=originals[0]
+              json.loads(authoritative.read_text())
+              shutil.copy2(authoritative,destination/'official-evaluation-result.json')
+              print('Official result copied from',authoritative)
+          else:
+              print('No official result JSON produced; evidence remains incomplete')
+          if Path('logs/evaluation').is_dir():
+              with tarfile.open(destination/'official-evaluation-logs.tar.gz','w:gz') as archive:
+                  archive.add('logs/evaluation',arcname='logs/evaluation')
+          shutil.copy2('.runs/score-input/predictions.jsonl',
+                       destination/'real-model-predictions.jsonl')
+          (destination/'provenance.json').write_text(json.dumps({
+              'source_github_run':44547336463,
+              'selected_tasks':12,'submitted_predictions':6,
+              'official_harness_result_available':bool(originals),
+              'prediction_source':'model-generated predictions in source run artifact',
+              'not_regenerated':True
+          },indent=2)+'\n')
+          PY
+      - name: Upload portable authoritative evidence without invalid colon filenames
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-official-six-predictions-evidence
+          path: repopilot/.runs/score-evidence/
+          if-no-files-found: warn
+          retention-days: 30
