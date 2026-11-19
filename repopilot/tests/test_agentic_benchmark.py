@@ -68,6 +68,38 @@ class AgentTests(unittest.TestCase):
                              "{invalid" in m["content"]
                              for hist in inputs for m in hist))
 
+    def test_invalid_finish_schema_is_rejected_then_corrected(self):
+        steps=[
+            {"action":"finish","reason":"needs change"},
+            {"action":"finish","edits":[{"path":"pricing.py",
+                "old":"return sum(values)",
+                "new":"return round(sum(values),2)"}]}
+        ]
+        observed=[]
+        it=iter(steps)
+        def client(url,model,token,messages):
+            observed.append(list(messages))
+            return {"choices":[{"message":{"content":json.dumps(next(it))}}]}
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"fix rounding","mock","http://127.0.0.1:11434/v1",
+            client=client,max_steps=3,required_targets={"pricing.py"})
+        self.assertIn("round(sum(values),2)",patch.patch)
+        self.assertIn("finish_schema_rejected",
+            [step["action"] for step in meta["tool_trace"]])
+        self.assertTrue(any("No extra keys" in x["content"] for x in observed[1]))
+
+    def test_repeated_invalid_finish_schema_exhausts_step_budget(self):
+        calls=[]
+        def client(url,model,token,messages):
+            calls.append(1)
+            return {"choices":[{"message":{"content":json.dumps(
+                {"action":"finish","thought":"cannot solve"})}}]}
+        with self.assertRaisesRegex(AgentToolError,"Invalid finish schema after step budget"):
+            propose_agentic_benchmark(
+                self.repo,"fix rounding","mock","http://127.0.0.1:11434/v1",
+                client=client,max_steps=3,required_targets={"pricing.py"})
+        self.assertEqual(len(calls),3)
+
     def test_repeated_invalid_model_json_exhausts_bounded_budget(self):
         calls=[]
         def client(url,model,token,messages):
