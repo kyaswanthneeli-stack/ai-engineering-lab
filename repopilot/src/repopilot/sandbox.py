@@ -28,8 +28,11 @@ def run_tests(repo:Path,command:tuple[str,...],timeout:int=30)->RunResult:
         return RunResult(p.returncode,round((time.monotonic()-start)*1000),(p.stdout+p.stderr)[-12000:])
     except subprocess.TimeoutExpired:
         try:
-            subprocess.run(["docker","rm","-f",container],timeout=8,capture_output=True,check=False)
-            message="Timed out; forced container cleanup requested"
+            cleanup=subprocess.run(["docker","rm","-f",container],timeout=8,capture_output=True,check=False)
+            if cleanup.returncode==0:
+                message="Timed out; Docker reported forced container removal"
+            else:
+                message="Timed out; Docker cleanup failed, discard worker"
         except (OSError,subprocess.TimeoutExpired):
             message="Timed out; cleanup unconfirmed, discard worker"
         return RunResult(124,round((time.monotonic()-start)*1000),message,True)

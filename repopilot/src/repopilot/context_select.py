@@ -45,7 +45,7 @@ def ranked_source_context(repo:Path,issue:str,*,max_files:int=8,max_chars:int=32
     terms=_tokens(issue[:12000])
     candidates=[]
     # Issue-referenced files get priority in large repositories.
-    mentions=set(re.findall(r"[A-Za-z0-9_./-]+\\.py", issue[:12000]))
+    mentions=set(re.findall(r"[A-Za-z0-9_./-]+\.py", issue[:12000]))
     explicit=[]
     for name in sorted(mentions):
         target=root/name
@@ -53,8 +53,30 @@ def ranked_source_context(repo:Path,issue:str,*,max_files:int=8,max_chars:int=32
                 target.is_file() and not target.is_symlink() and
                 target.resolve().is_relative_to(root) and target.stat().st_size<=100000):
             explicit.append((target,name))
+    # A traceback often gives only a basename (e.g. config.py) while the
+    # repository stores it under a package. Search only that exact basename,
+    # with a finite candidate cap, independently of the regular scan limit.
+    # Never allow issue text to escape the workspace or read symlink targets.
+    nested=[]
+    for name in sorted(mentions):
+        base=PurePosixPath(name).name
+        if not base or base!=name or not base.endswith(".py"):
+            continue
+        for target in root.rglob(base):
+            rel=target.relative_to(root)
+            if any(part in _SKIP for part in rel.parts):
+                continue
+            if (target.is_symlink() or not target.is_file() or
+                    not target.resolve().is_relative_to(root) or
+                    target.stat().st_size>100000):
+                continue
+            nested.append((target,rel.as_posix()))
+            if len(nested)>=24:
+                break
+        if len(nested)>=24:
+            break
     visited=set()
-    for path,rel in [*explicit,*_safe_python_paths(root,scan_limit)]:
+    for path,rel in [*explicit,*nested,*_safe_python_paths(root,scan_limit)]:
         if rel in visited:
             continue
         visited.add(rel)

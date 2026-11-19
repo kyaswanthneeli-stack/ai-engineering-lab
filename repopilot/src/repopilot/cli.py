@@ -15,7 +15,7 @@ from .pr import publish_approved_draft
 from .swebench import write_manifest
 from .checkout import pinned_checkout
 from .checkout_scope import resolve_repo_subdir
-from .graph import import_graph
+from .graph import import_graph,dependent_modules
 import tempfile
 
 def main(argv=None):
@@ -23,6 +23,8 @@ def main(argv=None):
     sub=parser.add_subparsers(dest="cmd",required=True)
     a=sub.add_parser("index");a.add_argument("repo",type=Path)
     ggraph=sub.add_parser("graph",help="Read-only static Python module graph");ggraph.add_argument("repo",type=Path)
+    ggraph.add_argument("--impact",nargs="+",metavar="MODULE",help="Trace direct and transitive static dependents of changed modules")
+    ggraph.add_argument("--max-depth",type=int,default=5)
     b=sub.add_parser("propose");b.add_argument("repo",type=Path);b.add_argument("issue_file",type=Path)
     b.add_argument("--output",type=Path,default=Path(".runs/proposal.json"))
     c=sub.add_parser("verify");c.add_argument("repo",type=Path);c.add_argument("spec",type=Path)
@@ -57,7 +59,9 @@ def main(argv=None):
     if args.cmd=="index":
         print(json.dumps([vars(s) for s in index_python(args.repo)],indent=2))
     elif args.cmd=="graph":
-        print(json.dumps(import_graph(args.repo),indent=2))
+        graph=import_graph(args.repo)
+        print(json.dumps(dependent_modules(graph,args.impact,max_depth=args.max_depth)
+                         if args.impact else graph,indent=2))
     elif args.cmd=="propose":
         spec,meta=propose(args.repo,args.issue_file.read_text(),os.getenv("REPOPILOT_MODEL",""),os.getenv("REPOPILOT_BASE_URL",""),os.getenv("REPOPILOT_API_KEY"))
         save_proposal(spec,meta,args.output)
