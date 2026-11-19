@@ -131,6 +131,8 @@ def _read_native_ollama_stream(response, *, started:float, max_seconds:int)->dic
         if time.monotonic()-started>max_seconds:
             raise ProviderTransportError("Local Ollama stream exceeded wall-clock budget")
         raw=response.readline(65537)
+        if time.monotonic()-started>max_seconds:
+            raise ProviderTransportError("Local Ollama stream exceeded wall-clock budget")
         if not raw:
             raise ProviderTransportError("Local Ollama stream ended before final response")
         total_bytes+=len(raw)
