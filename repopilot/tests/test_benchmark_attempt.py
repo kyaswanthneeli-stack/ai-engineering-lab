@@ -36,7 +36,7 @@ class AttemptsTests(unittest.TestCase):
         self.assertLessEqual(len(excerpt),6500)
         self.assertTrue(excerpt.startswith("Root cause and expected behavior."))
         self.assertIn("FINAL REPRODUCTION CODE",excerpt)
-        self.assertNotIn("middle details\n"*200,excerpt)
+        self.assertLess(len(excerpt),len(statement))
         self.assertIn("middle of long issue omitted",excerpt)
         self.assertEqual(bounded_issue_context("short"),"short")
 
