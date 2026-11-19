@@ -13,7 +13,7 @@ permissions:
 jobs:
   agentic-multifile:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 50
     defaults:
       run:
         working-directory: repopilot
@@ -33,7 +33,11 @@ jobs:
             sleep 2
           done
           curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
-          docker exec repopilot-agent-model ollama pull qwen2.5-coder:7b
+          for attempt in 1 2 3; do
+            if docker exec repopilot-agent-model ollama pull qwen2.5-coder:7b; then break; fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep $((attempt * 10))
+          done
       - name: Agent inspect, propose, and verify multi-file fix
         env:
           REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
@@ -49,7 +53,7 @@ jobs:
           from repopilot.pr import patch_targets
           from repopilot.review import review_proposal
           repo=Path('fixtures/invoice-multifile')
-          run=Path('.runs/agentic-invoice-issue3-v9-7b')
+          run=Path('.runs/agentic-invoice-issue3-v10-7b')
           run.mkdir(parents=True,exist_ok=False)
           report={'model':'qwen2.5-coder:7b','model_generated':False,
                   'verified':False,'issue':'https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/3',
@@ -92,8 +96,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-agentic-multifile-attempt-v9-7b
-          path: repopilot/.runs/agentic-invoice-issue3-v9-7b/
+          name: repopilot-agentic-multifile-attempt-v10-7b
+          path: repopilot/.runs/agentic-invoice-issue3-v10-7b/
           if-no-files-found: warn
           retention-days: 30
       - name: Stop model
