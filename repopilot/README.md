@@ -91,6 +91,8 @@ Before publishing a draft PR, verify the GitHub issue, compare the exact local s
 
 ## Recruiter demo
 
+For an accurate 90-second recording and LinkedIn Featured description, see [the recruiter demonstration kit](RECRUITER_DEMO.md).
+
 GitHub Actions produces an artifact named `repopilot-verification-fixture` containing an offline HTML dashboard, verification JSON and an explicitly labeled reference-fixture benchmark report. A real model response or PR appears only after an independently verifiable run.
 
 This project is deliberately distinct from the existing portfolio's browser simulations. Real provider inference and Docker verification have now been demonstrated for **one seeded integration issue only**. Independent SWE-bench issue resolution and success rates are not measured.
