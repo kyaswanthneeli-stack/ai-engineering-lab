@@ -32,7 +32,7 @@ class GitHubApi:
         self.base=f"https://api.github.com/repos/{repo}"
         self.token=token
     def call(self,method:str,path:str,data=None):
-        if not path.startswith("/") or "://" in path:
+        if (path and not path.startswith("/")) or "://" in path:
             raise PublishError("Invalid GitHub API path")
         payload=json.dumps(data).encode() if data is not None else None
         request=urllib.request.Request(self.base+path,data=payload,method=method,headers={
@@ -48,7 +48,7 @@ class GitHubApi:
         except Exception as exc:
             raise PublishError(f"GitHub request failed ({method} {path.split('?')[0]})") from exc
 
-def publish_approved_draft(repo:Path,spec:IssueSpec,verification:dict,remote:str,approval:str,api:GitHubApi=None)->dict:
+def publish_approved_draft(repo:Path,spec:IssueSpec,verification:dict,remote:str,approval:str,api:GitHubApi=None,repo_subdir:str="")->dict:
     if approval!="I_APPROVE_DRAFT_PR":
         raise PublishError("Explicit human approval is required")
     if verification.get("outcome")!="verified_in_sandbox" or verification.get("before",{}).get("exit_code") in (None,0) or verification.get("after",{}).get("exit_code")!=0:
@@ -60,6 +60,14 @@ def publish_approved_draft(repo:Path,spec:IssueSpec,verification:dict,remote:str
     if not spec.issue_id.startswith(remote+"#"):
         raise PublishError("Issue must belong to target repository")
     targets=patch_targets(spec.patch)
+    if repo_subdir:
+        from pathlib import PurePosixPath
+        prefix=PurePosixPath(repo_subdir)
+        if prefix.is_absolute() or ".." in prefix.parts or "\\\\" in repo_subdir:
+            raise PublishError("Unsafe source subdirectory")
+        repo_subdir=prefix.as_posix().strip("/")
+    def remote_path(name):
+        return (repo_subdir+"/"+name) if repo_subdir else name
     if len(targets)>10:
         raise PublishError("Too many files")
     if api is None:
@@ -83,7 +91,7 @@ def publish_approved_draft(repo:Path,spec:IssueSpec,verification:dict,remote:str
             local=root/name
             if not local.is_file() or local.is_symlink():
                 raise PublishError("Patch target missing")
-            remote_file=api.call("GET","/contents/"+quote(name,safe="/")+"?ref="+quote(default,safe=""))
+            remote_file=api.call("GET","/contents/"+quote(remote_path(name),safe="/")+"?ref="+quote(default,safe=""))
             if remote_file.get("type")!="file" or remote_file.get("encoding")!="base64":
                 raise PublishError("Remote file not regular")
             original=base64.b64decode(remote_file["content"])
@@ -98,12 +106,12 @@ def publish_approved_draft(repo:Path,spec:IssueSpec,verification:dict,remote:str
         # A branch already present causes a GitHub conflict rather than overwrite.
         api.call("POST","/git/refs",{"ref":"refs/heads/"+branch,"sha":base_sha})
         for name in targets:
-            api.call("PUT","/contents/"+quote(name,safe="/"),{
+            api.call("PUT","/contents/"+quote(remote_path(name),safe="/"),{
                 "message":"RepoPilot: proposed fix for "+spec.issue_id,
                 "content":base64.b64encode((root/name).read_bytes()).decode(),
                 "sha":originals[name],"branch":branch
             })
-        api.call("PUT","/contents/"+quote(spec.test_path,safe="/"),{
+        api.call("PUT","/contents/"+quote(remote_path(spec.test_path),safe="/"),{
             "message":"RepoPilot: regression test for "+spec.issue_id,
             "content":base64.b64encode(spec.reproduction_test.encode()).decode(),"branch":branch
         })
