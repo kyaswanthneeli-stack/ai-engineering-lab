@@ -46,14 +46,24 @@ class Tests(unittest.TestCase):
             calls=[]
             def runner(work,command,timeout):
                 calls.append(1)
-                return RunResult(1 if len(calls)==1 else 0,4,"test")
+                return RunResult(1 if len(calls)==2 else 0,4,"test")
             result=execute(root,IssueSpec.from_dict(RAW),Path(t,"result.json"),runner=runner)
             self.assertEqual(result["outcome"],"verified_in_sandbox")
-            self.assertEqual(len(calls),2)
+            self.assertEqual(len(calls),3)
     def test_verify_rejects_false_repro(self):
         with tempfile.TemporaryDirectory() as t:
             root=Path(t,"repo");root.mkdir()
             (root/"calculator.py").write_text("def divide(a, b):\n    if b == 0:\n        return 0  # BUG: should raise ZeroDivisionError\n    return a / b\n")
             with self.assertRaises(VerificationError):
-                execute(root,IssueSpec.from_dict(RAW),Path(t,"r.json"),runner=lambda *a,**kw:RunResult(0,1,"passed"))
+                calls=[]
+                def falsely_passing(work,command,timeout):
+                    calls.append(1)
+                    return RunResult(0,1,"passed")
+                execute(root,IssueSpec.from_dict(RAW),Path(t,"r.json"),runner=falsely_passing)
+    def test_verify_rejects_preexisting_failures(self):
+        with tempfile.TemporaryDirectory() as t:
+            root=Path(t,"repo");root.mkdir()
+            (root/"calculator.py").write_text("def divide(a, b):\n    if b == 0:\n        return 0  # BUG: should raise ZeroDivisionError\n    return a / b\n")
+            with self.assertRaisesRegex(VerificationError,"Original test suite"):
+                execute(root,IssueSpec.from_dict(RAW),Path(t,"r.json"),runner=lambda *a,**kw:RunResult(1,1,"unrelated failed"))
 if __name__=="__main__":unittest.main()
