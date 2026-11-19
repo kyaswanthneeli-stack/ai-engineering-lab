@@ -44,6 +44,10 @@ class AgentToolError(BenchmarkProposalError):
     pass
 
 
+class ProviderTransportError(AgentToolError):
+    """A provider HTTP/connection/timeout failure; NOT a model patch failure."""
+
+
 def _safe_candidate_feedback(exc:Exception)->str:
     """Keep validation diagnostics useful without echoing model/source text."""
     if isinstance(exc,SyntaxError):
@@ -132,12 +136,12 @@ def _local_ollama_chat(url,model,messages,token_budget):
                 (TimeoutError,socket.timeout)) else "connection failure")
             retry=True
         if not retry or attempt==attempts-1:
-            raise AgentToolError(
+            raise ProviderTransportError(
                 "Local Ollama native API "+category+
                 " after "+str(attempt+1)+" attempt(s)")
         time.sleep(2)
     if payload is None:
-        raise AgentToolError("Local Ollama native API returned no response")
+        raise ProviderTransportError("Local Ollama native API returned no response")
     if len(payload)>1_000_000:
         raise AgentToolError("Local Ollama native response exceeded size limit")
     try:
@@ -218,10 +222,10 @@ def _provider(url,model,token,messages):
         except AgentToolError:
             raise  # Invalid JSON or shape is a model protocol error, not a timeout.
         if not retry or attempt==1:
-            raise AgentToolError("Model provider "+category+
+            raise ProviderTransportError("Model provider "+category+
                                  " after "+str(attempt+1)+" attempt(s)")
         time.sleep(2)
-    raise AgentToolError("Model provider exhausted retry budget")
+    raise ProviderTransportError("Model provider exhausted retry budget")
 
 
 def _parse_model_action(content):
