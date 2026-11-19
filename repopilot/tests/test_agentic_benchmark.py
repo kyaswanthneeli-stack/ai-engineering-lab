@@ -34,6 +34,24 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(meta["agent_steps"],5)
         self.assertEqual(meta["inspected_files"],["checkout.py","pricing.py"])
         self.assertEqual(len(meta["tool_trace"]),4)
+    def test_defers_early_finish_until_all_required_files_changed(self):
+        steps=[
+            {"action":"read","path":"pricing.py"},
+            {"action":"finish","edits":[{"path":"pricing.py","old":"return sum(values)","new":"return round(sum(values), 2)"}]},
+            {"action":"read","path":"checkout.py"},
+            {"action":"finish","edits":[{"path":"pricing.py","old":"return sum(values)","new":"return round(sum(values), 2)"}]},
+            {"action":"finish","edits":[
+                {"path":"pricing.py","old":"return sum(values)","new":"return round(sum(values), 2)"},
+                {"path":"checkout.py","old":"return subtotal(values)","new":"return round(subtotal(values), 2)"}
+            ]}
+        ]
+        patch,meta=propose_agentic_benchmark(self.repo,"both modules need rounding","mock",
+            "http://127.0.0.1:11434/v1",client=self.sequence(steps),
+            required_targets={"pricing.py","checkout.py"})
+        self.assertEqual(patch.patch.count("diff --git"),2)
+        self.assertEqual(meta["agent_steps"],5)
+        self.assertEqual(sum(x["action"]=="finish_deferred" for x in meta["tool_trace"]),2)
+
     def test_refuses_to_modify_uninspected_file(self):
         steps=[
             {"action":"read","path":"pricing.py"},
