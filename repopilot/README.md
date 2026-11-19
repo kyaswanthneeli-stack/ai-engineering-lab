@@ -46,6 +46,21 @@ RepoPilot is an independent Python engineering project exploring issue-to-patch 
 - **Real SWE-bench task attempts:** `python -m repopilot.benchmark_attempt INSTANCE_ID --manifest benchmarks/swebench-lite-12.json --output .runs/task-001` loads the official issue text and pinned base revision. It creates an unreviewed candidate or a failure report. See [the GitHub Actions attempt workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/workflows/repopilot-swebench-attempt.yml). A candidate is **not** an official success.
 - **Public evaluator integration:** Prediction exporter and result parser check provenance declarations and prevent missing or conflicting outcomes from becoming success claims.
 
+## Full pinned GitHub-to-verified-patch command
+
+The integrated `run-pinned` CLI accepts a public GitHub issue URL and the exact 40-character source commit, clones the public repository, optionally selects a guarded subdirectory, requests a model patch, applies static review and runs baseline/reproduction/regression tests in Docker. It generates a report and dashboard. It does **not** silently publish or merge changes. The approval-gated `draft-pr` command is separate.
+
+```sh
+# Requires configured Ollama or compatible model provider, git and Docker
+python -m repopilot.cli run-pinned \
+  https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/1 \
+  FULL_PINNED_COMMIT_SHA \
+  --repo-subdir repopilot/fixtures/calculator-buggy \
+  --output .runs/github-issue-to-patch
+```
+
+The [real GitHub Actions integration workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/workflows/repopilot-ollama.yml) exercises this command against the synthetic issue. Any measured model outcome should be taken from the corresponding completed CI run, not inferred from the existence of the workflow.
+
 ## Controlled retry loop
 
 The `run-repair` command provides up to three bounded model proposals. It retains each proposal, applies static review, uses the existing restricted verifier, and produces a review dashboard. The retry logic has automated tests; it has **not** been verified on arbitrary SWE-bench tasks.
