@@ -18,7 +18,7 @@ from .swebench_export import load_manifest
 
 _ALLOWED_PROGRESS_STAGES=frozenset({
     "initialized", "dataset_verified", "pinned_checkout_complete",
-    "model_response_received",
+    "model_call_started", "model_call_completed", "model_response_received",
 })
 
 
@@ -38,8 +38,17 @@ def _read_stage(task_output:Path,instance_id:str)->dict:
     elapsed=item.get("stage_elapsed_ms")
     if type(elapsed) is not int or elapsed<0:
         return {}
-    return {"last_completed_stage":item["last_completed_stage"],
-            "stage_elapsed_ms":elapsed}
+    stage=item["last_completed_stage"]
+    step=item.get("model_step")
+    if stage.startswith("model_call_"):
+        if type(step) is not int or not 1<=step<=24:
+            return {}
+    elif step is not None:
+        return {}
+    result={"last_completed_stage":stage,"stage_elapsed_ms":elapsed}
+    if step is not None:
+        result["model_step"]=step
+    return result
 
 
 _RETRYABLE_STATUSES = frozenset({
