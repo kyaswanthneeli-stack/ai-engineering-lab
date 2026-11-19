@@ -81,6 +81,49 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         raise AgentToolError("Provider redirects not permitted")
 
 
+def _local_ollama_chat(url,model,messages,token_budget):
+    """Fallback only for a local Ollama /v1 endpoint returning HTTP 404.
+
+    The model is still required to generate every proposed patch. Never
+    transmit issue/source text to an unapproved remote fallback host.
+    """
+    parts=urllib.parse.urlsplit(url)
+    if (parts.scheme!="http" or parts.hostname not in
+            {"127.0.0.1","localhost","::1"} or
+            parts.port!=11434 or parts.path.rstrip("/")!="/v1"):
+        raise AgentToolError("Native model fallback is restricted to local Ollama")
+    endpoint=urllib.parse.urlunsplit(
+        (parts.scheme,parts.netloc,"/api/chat","",""))
+    body=json.dumps({
+        "model":model,"stream":False,"format":"json",
+        "options":{"temperature":0,"num_predict":token_budget},
+        "messages":messages,
+    }).encode("utf-8")
+    request=urllib.request.Request(
+        endpoint,data=body,method="POST",
+        headers={"Content-Type":"application/json"})
+    try:
+        with urllib.request.build_opener(_NoRedirect()).open(
+                request,timeout=120) as response:
+            payload=response.read(1_000_001)
+    except urllib.error.HTTPError as exc:
+        raise AgentToolError("Local Ollama native API HTTP "+str(exc.code)) from exc
+    except (TimeoutError,socket.timeout,urllib.error.URLError) as exc:
+        raise AgentToolError("Local Ollama native chat failed or timed out") from exc
+    if len(payload)>1_000_000:
+        raise AgentToolError("Local Ollama native response exceeded size limit")
+    try:
+        result=json.loads(payload)
+    except (UnicodeDecodeError,ValueError) as exc:
+        raise AgentToolError("Local Ollama native response was invalid JSON") from exc
+    if (not isinstance(result,dict) or
+            not isinstance(result.get("message"),dict) or
+            not isinstance(result["message"].get("content"),str)):
+        raise AgentToolError("Local Ollama native response missing message content")
+    return {"choices":[{"message":{"content":result["message"]["content"]}}],
+            "usage":{"prompt_tokens":result.get("prompt_eval_count"),
+                     "completion_tokens":result.get("eval_count")}}
+
 def _provider(url,model,token,messages):
     parts=urllib.parse.urlsplit(url)
     if parts.scheme not in {"http","https"} or not parts.hostname or parts.username or parts.password:
@@ -124,6 +167,10 @@ def _provider(url,model,token,messages):
                     raise AgentToolError("Model response missing choices/message/content")
                 return result
         except urllib.error.HTTPError as exc:
+            if (exc.code==404 and urllib.parse.urlsplit(url).hostname in
+                    {"127.0.0.1","localhost","::1"} and
+                    urllib.parse.urlsplit(url).port==11434):
+                return _local_ollama_chat(url,model,messages,token_budget)
             category="HTTP "+str(exc.code)
             retry=exc.code in {408,429,500,502,503,504}
         except (TimeoutError,socket.timeout) as exc:
