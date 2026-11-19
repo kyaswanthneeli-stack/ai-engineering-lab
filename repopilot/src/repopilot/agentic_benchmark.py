@@ -80,6 +80,10 @@ def _safe_candidate_feedback(exc:Exception)->str:
             "Use action=finish containing only edits, line_edits, files or patch, with no explanation fields.",
         "Candidate changed a file outside inspected source":
             "Your proposal touches uninspected or unmatched source. Modify ONLY the exact approved source path in the inspected-files list.",
+        "Line edit range outside inspected window":
+            "Your line_edits range must lie ENTIRELY within a previously numbered inspected read window. Use an inspected line range.",
+        "Each line edit requires only path, start_line, end_line, new":
+            "Each line_edits entry needs EXACTLY path, start_line, end_line, new; no other keys.",
     }
     return safe_reasons.get(reason,"Candidate failed bounded source/patch validation.")
 
@@ -570,7 +574,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 # reads. Never apply that uninspected candidate. Safely read
                 # existing proposed targets (or issue-ranked source) and
                 # require an entirely NEW model-generated patch.
-                proposals=action.get("files",action.get("edits",[]))
+                proposals=action.get("files",action.get("edits",action.get("line_edits",[])))
                 candidates=[]
                 if isinstance(proposals,list):
                     candidates=[item.get("path") for item in proposals
@@ -732,7 +736,13 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                         raise AgentToolError("Model modified a file it did not inspect")
                     patch=canonical_patch(root,edits,allowed_files=read_files)
                 elif set(action)=={"action","line_edits"}:
-                    patch=canonical_line_patch(root,action["line_edits"],
+                    proposed=action["line_edits"]
+                    if isinstance(proposed,list) and any(
+                        isinstance(edit,dict) and edit.get("path") not in read_files
+                        for edit in proposed
+                    ):
+                        raise AgentToolError("Model modified a file it did not inspect")
+                    patch=canonical_line_patch(root,proposed,
                         allowed_files=read_files,inspected_windows=inspected_windows)
                 elif set(action)=={"action","patch"}:
                     patch=action["patch"]
@@ -756,7 +766,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 # proposes a patch. Safely inspect at most two such existing
                 # Python files, then require a NEW model proposal. The
                 # uninspected candidate is always discarded, never applied.
-                proposed=action.get("files",action.get("edits",[]))
+                proposed=action.get("files",action.get("edits",action.get("line_edits",[])))
                 names=[]
                 if isinstance(proposed,list):
                     names=[entry.get("path") for entry in proposed
@@ -777,6 +787,9 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                     except (InspectionError,TypeError,ValueError):
                         continue
                     read_files.add(candidate)
+                    if inspected.get("lines"):
+                        inspected_windows.setdefault(candidate,[]).append(
+                            (inspected["lines"][0]["line"], inspected["lines"][-1]["line"]))
                     recovered.append(inspected)
                     trace.append({"step":index+1,"action":"candidate_preinspect",
                                   "target":candidate,
