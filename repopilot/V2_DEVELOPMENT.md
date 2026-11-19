@@ -122,6 +122,14 @@ Before this change, a force-stopped worker often left no `attempt.json` record. 
 
 The checkpoint feature has been verified by unit tests, full CI, and restricted Docker tests. **The eight historical timeout events predate this feature**, so their internal stages cannot be retroactively determined. A future bounded model run can distinguish source-setup bottlenecks from slow local model inference without exposing source code or changing the original evidence.
 
+## Opt-in streaming inference for local Ollama
+
+The [Qwen2.5-Coder 1.5B fallback](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44612051924) completed with **one submitted patch, zero officially resolved cases, and one invalid-model attempt**. It does **not** improve the official resolved count. Slow local inference remains a key availability problem in this pinned cohort.
+
+The v2 native-Ollama provider now supports `REPOPILOT_OLLAMA_STREAM=1` for loopback-only `/api/chat` NDJSON streaming. The provider reconstructs model output from individually validated bounded chunks, requires an explicit terminal `done=true`, enforces per-line, cumulative response and event-count caps, and applies a separate wall-clock cap set through `REPOPILOT_NATIVE_WALL_TIMEOUT` (bounded 60–600 seconds). The socket inactivity timeout and at-most-three transport retries remain independently bounded. Incomplete, malformed, oversized and late streams are rejected; partial output **cannot** become a patch or benchmark prediction. The default nonstreaming path remains supported.
+
+Automated regression tests cover valid reconstructed tool-call JSON, incomplete streams, malformed JSON, reported stream errors, oversized chunks, and terminal chunks arriving beyond the wall-clock deadline. A dedicated [real model + restricted Docker smoke workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44618124054) checks whether a genuine streamed model response can produce a patch that independently passes the synthetic calculator regression suite. That is **not** a SWE-bench issue, and its result must not be assumed before the workflow completes.
+
 ## Engineering practice
 
 Keep v1.0.0 at [its immutable release](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v1.0.0). Use a separate v2 feature branch and an open review PR. Every milestone must have tests and evidence before being merged. Do not overwrite or reinterpret the original benchmark artifacts.
