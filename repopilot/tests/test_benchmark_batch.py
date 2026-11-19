@@ -24,7 +24,7 @@ class BenchmarkBatchTests(unittest.TestCase):
 
     def test_only_real_model_proposals_exported(self):
         def fake_run(command, **kwargs):
-            identifier = command[command.index("--output")-1] if False else command[3]
+            identifier = command[3]
             output = Path(command[command.index("--output")+1])
             output.mkdir(parents=True)
             if identifier.endswith("-0"):
