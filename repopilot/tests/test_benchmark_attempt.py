@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from pathlib import Path
-from repopilot.benchmark_attempt import attempt_one,main
+from repopilot.benchmark_attempt import attempt_one,main,bounded_issue_context
 
 SHA="a"*40
 INSTANCE="sample__repo-123"
@@ -29,6 +29,21 @@ class AttemptsTests(unittest.TestCase):
         class Spec:
             patch="diff --git a/main.py b/main.py\n--- a/main.py\n+++ b/main.py\n@@ -1 +1 @@\n-def bug():return 1\n+def bug():return 2\n"
         return Spec(),{"model":"mock-coder","provider_reported_usage_by_attempt":[{"total_tokens":10}]}
+
+    def test_long_real_issue_bounded_for_cpu_model_without_fabricated_patch(self):
+        statement="Root cause and expected behavior.\n"+("middle details\n"*1600)+"\nFINAL REPRODUCTION CODE"
+        excerpt=bounded_issue_context(statement)
+        self.assertLessEqual(len(excerpt),6500)
+        self.assertTrue(excerpt.startswith("Root cause and expected behavior."))
+        self.assertIn("FINAL REPRODUCTION CODE",excerpt)
+        self.assertNotIn("middle details\n"*200,excerpt)
+        self.assertIn("middle of long issue omitted",excerpt)
+        self.assertEqual(bounded_issue_context("short"),"short")
+
+    def test_reject_unbounded_issue_context_request(self):
+        with self.assertRaises(ValueError):
+            bounded_issue_context("issue",50000)
+
     def test_records_real_model_patch_as_unreviewed_not_resolved(self):
         output=self.root/"run"
         result=attempt_one(self.manifest,INSTANCE,output,dataset_loader=self.dataset,
