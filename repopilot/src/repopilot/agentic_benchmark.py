@@ -260,7 +260,12 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             ranked=ranked_source_context(root,issue_text,max_files=2,
                                          max_chars=9000,scan_limit=1800)
             for item in ranked:
-                if item.score<8:
+                # Positive lexical/symbol evidence is sufficient to safely
+                # inspect source. An arbitrary score cutoff previously caused
+                # nearly all real tasks to start with zero inspected files.
+                # Inspection is read-only; proposed edits remain separately
+                # checked against the inspected-path allowlist.
+                if item.score<=0:
                     continue
                 try:
                     result=read_python(root,item.path,start=1,count=120)
@@ -396,10 +401,13 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                         candidates=list(patch_targets(action["patch"]))
                     except (TypeError,ValueError):
                         pass
-                if not candidates:
-                    ranked=ranked_source_context(root,issue_text,max_files=2,
-                                                 max_chars=9000,scan_limit=1800)
-                    candidates=[item.path for item in ranked]
+                # Model-suggested paths may be invented. Fall back to
+                # issue-ranked existing source, but only with positive
+                # path/symbol/body evidence. Never trust a fabricated path.
+                ranked=ranked_source_context(root,issue_text,max_files=3,
+                                             max_chars=12000,scan_limit=1800)
+                ranked_paths=[item.path for item in ranked if item.score>0]
+                candidates=list(dict.fromkeys([*candidates,*ranked_paths]))
                 recovered=[]
                 for candidate in candidates:
                     if len(recovered)>=2:
@@ -417,7 +425,23 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                     trace.append({"step":index+1,"action":"initial_finish_preinspect",
                                   "target":candidate,"result_items":len(inspected["lines"])})
                 if not recovered:
-                    raise AgentToolError("Cannot change source before inspecting files")
+                    # The model may have hallucinated an entirely unknown
+                    # path. This is not an authorization to edit or an
+                    # irrecoverable failure: request a real read-only tool
+                    # action on its next bounded turn instead.
+                    trace.append({"step":index+1,
+                                  "action":"finish_rejected_no_source"})
+                    if index==max_steps-1:
+                        raise AgentToolError(
+                            "No existing Python source inspected within step budget")
+                    messages.append({"role":"user","content":
+                        "Your finish candidate was REJECTED, NOT applied. "
+                        "No requested file exists in the repository, and no "
+                        "source has been inspected. Your next reply MUST "
+                        "use action=list, search, or read on EXISTING Python "
+                        "source. Do not propose another patch until reading "
+                        "a real file."})
+                    continue
                 messages.append({"role":"user","content":
                     "The previous finish action was REJECTED and NOT applied. "
                     "The following exact existing Python source was safely "
