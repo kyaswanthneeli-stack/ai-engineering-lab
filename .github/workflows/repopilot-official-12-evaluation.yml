@@ -43,13 +43,13 @@ jobs:
       - name: Run all 12 pinned tasks using actual model-generated patches
         env:
           REPOPILOT_MODEL: qwen2.5-coder:3b
-          REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
-          REPOPILOT_MAX_TOKENS: '1200'
+          REPOPILOT_BASE_URL: http://127.0.0.1:11434/v2
+          REPOPILOT_MAX_TOKENS: '950'
         run: |
           python -m repopilot.benchmark_batch \
             --manifest benchmarks/swebench-lite-12.json \
             --output .runs/swebench-batch \
-            --per-task-timeout 240 --max-steps 10
+            --per-task-timeout 300 --max-steps 10
       - id: count
         name: Summarize attempted and unsubmitted tasks without inventing scores
         if: always()
@@ -65,12 +65,14 @@ jobs:
           print('SELECTED:',summary.get('selected_tasks','setup failed'))
           print('MODEL PREDICTIONS:',count)
           print('OFFICIALLY EVALUATED: NO')
+          if count==0:
+              print('::warning::No valid model-generated predictions; official SWE-bench evaluation must be skipped.')
           PY
       - name: Save authentic attempts and prediction files
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-12-model-attempts-v1-unscored
+          name: repopilot-12-model-attempts-v2-unscored
           path: repopilot/.runs/swebench-batch/
           if-no-files-found: warn
           retention-days: 30
@@ -93,7 +95,7 @@ jobs:
           python-version: '3.11'
       - uses: actions/download-artifact@v4
         with:
-          name: repopilot-12-model-attempts-v1-unscored
+          name: repopilot-12-model-attempts-v2-unscored
           path: repopilot/.runs/swebench-batch/
       - name: Install official SWE-bench harness
         run: python -m pip install 'swebench>=3.0,<5.0'
@@ -112,12 +114,12 @@ jobs:
             --predictions_path .runs/swebench-batch/predictions.jsonl \
             --instance_ids "${INSTANCES[@]}" \
             --max_workers 1 \
-            --run_id repopilot-12-qwen3b-v1
+            --run_id repopilot-12-qwen3b-v2
       - name: Upload authoritative official harness logs and reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-12-official-harness-v1
+          name: repopilot-12-official-harness-v2
           path: |
             repopilot/logs/evaluation/
             repopilot/*.json
