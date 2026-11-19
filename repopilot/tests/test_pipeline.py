@@ -6,6 +6,7 @@ from pathlib import Path
 from repopilot.pipeline import run_issue
 from repopilot.spec import IssueSpec
 from repopilot.pr import publish_approved_draft,PublishError,patch_targets
+from repopilot.integrity import proposal_digest
 
 PATCH="diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x = 1\n+x = 2\n"
 SPEC=IssueSpec.from_dict({"issue_id":"issue-2","summary":"demo","test_path":"tests/test_reproduction.py","reproduction_test":"import unittest\nclass TestBug(unittest.TestCase):\n def test_bug(self):\n  self.assertEqual(1,1)\n","patch":PATCH,"test_command":["python","-m","unittest","discover","-s","tests","-v"]})
@@ -58,13 +59,27 @@ class PipelineTests(unittest.TestCase):
             spec=IssueSpec.from_dict({**{k:getattr(SPEC,k) for k in ("issue_id","summary","test_path","reproduction_test","patch")},
                                      "issue_id":"a/b#2","test_command":list(SPEC.test_command)})
             verified={"outcome":"verified_in_sandbox","issue_id":"a/b#2","baseline":{"exit_code":0},
-                "before":{"exit_code":1},"after":{"exit_code":0}}
+                "before":{"exit_code":1},"after":{"exit_code":0},"proposal_sha256":proposal_digest(spec)}
             api=FakeApi()
             result=publish_approved_draft(src,spec,verified,"a/b","I_APPROVE_DRAFT_PR",api=api,repo_subdir="nested")
             self.assertEqual(result["url"],"https://github.com/a/b/pull/2")
             paths=[p for method,p,_ in api.calls if method=="PUT"]
             self.assertIn("/contents/nested/a.py",paths)
             self.assertIn("/contents/nested/tests/test_reproduction.py",paths)
+    def test_draft_pr_rejects_changed_patch_after_verification(self):
+        real_spec=IssueSpec.from_dict({
+            "issue_id":"a/b#2","summary":"test","test_path":"tests/test_reproduction.py",
+            "reproduction_test":SPEC.reproduction_test,"patch":PATCH,
+            "test_command":list(SPEC.test_command)})
+        verified={"issue_id":"a/b#2","outcome":"verified_in_sandbox",
+                  "baseline":{"exit_code":0},"before":{"exit_code":1},
+                  "after":{"exit_code":0},"proposal_sha256":proposal_digest(real_spec)}
+        altered=IssueSpec.from_dict({
+            "issue_id":"a/b#2","summary":"test","test_path":"tests/test_reproduction.py",
+            "reproduction_test":SPEC.reproduction_test+"# changed after verification\\n",
+            "patch":PATCH,"test_command":list(SPEC.test_command)})
+        with self.assertRaisesRegex(PublishError,"does not match"):
+            publish_approved_draft(Path("."),altered,verified,"a/b","I_APPROVE_DRAFT_PR")
     def test_patch_targets(self):
         self.assertEqual(patch_targets(PATCH),["a.py"])
 if __name__=="__main__":unittest.main()
