@@ -67,6 +67,42 @@ class AgentTests(unittest.TestCase):
         self.assertTrue(any(
             '"line": 271' in m["content"] for m in seen[0]))
 
+
+    def test_v2_identical_invalid_finish_is_rejected_without_revalidation(self):
+        invalid={"action":"finish","edits":[{
+            "path":"pricing.py","old":"invented_exact_text()",
+            "new":"return 999"}]}
+        valid={"action":"finish","edits":[{
+            "path":"pricing.py","old":"return sum(values)",
+            "new":"return round(sum(values), 2)"}]}
+        history=[]
+        steps=iter([invalid,invalid,valid])
+        def client(url,model,token,messages):
+            history.append(list(messages))
+            return {"choices":[{"message":{"content":json.dumps(next(steps))}}]}
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"fix subtotal","mock","http://127.0.0.1:11434/v1",
+            client=client,max_steps=4,required_targets={"pricing.py"})
+        self.assertIn("round(sum(values), 2)",patch.patch)
+        actions=[t["action"] for t in meta["tool_trace"]]
+        self.assertEqual(actions.count("duplicate_finish_rejected"),1)
+        self.assertEqual(actions.count("finish_rejected"),1)
+        self.assertTrue(any("identical to an earlier rejected patch" in m["content"]
+                            for m in history[2]))
+
+    def test_v2_repeated_invalid_patch_exhausts_bounded_steps(self):
+        bad={"action":"finish","edits":[{"path":"pricing.py",
+             "old":"not in file","new":"replacement"}]}
+        calls=[]
+        def client(url,model,token,messages):
+            calls.append(1)
+            return {"choices":[{"message":{"content":json.dumps(bad)}}]}
+        with self.assertRaisesRegex(AgentToolError,"Agent exhausted bounded"):
+            propose_agentic_benchmark(
+                self.repo,"fix subtotal","mock","http://127.0.0.1:11434/v1",
+                client=client,max_steps=4,required_targets={"pricing.py"})
+        self.assertEqual(len(calls),4)
+
     def test_opt_in_local_native_ollama_skips_compatible_api(self):
         with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1",
                                       "REPOPILOT_MAX_TOKENS":"512"}), patch(
