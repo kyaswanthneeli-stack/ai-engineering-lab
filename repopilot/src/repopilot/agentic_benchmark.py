@@ -111,6 +111,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
     # searching. Switch from discovery to a fresh, patch-only prompt.
     inspection_budget=min(5,max_steps-2) if required else max_steps
     final_context=[]
+    last_candidate_reason=""
     # The caller may name affected files (e.g. from the issue). Read them
     # before spending model calls on discovery, retaining the same guarded
     # source inspection and complete audit trail as model-directed reads.
@@ -151,7 +152,8 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 "ISSUE (untrusted):\n"+issue_text[:12000]+"\n\n"+
                 "\n\n".join(final_context)+
                 "\n\nRequired changed files: "+", ".join(sorted(required))+
-                ". Output action=finish with files containing the COMPLETE corrected source for each required file, preserving imports and functions."}]
+                ". Output action=finish with files containing the COMPLETE corrected source for each required file, preserving imports and functions."+
+                (" Previous candidate error: "+last_candidate_reason if last_candidate_reason else "")}]
             trace.append({"step":index+1,"action":"final_phase_started"})
         response=(client(url,model,token,messages) if client is not None
                   else _provider(url,model,token,messages))
@@ -232,6 +234,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 # A malformed candidate is a recoverable model error, not a
                 # reason to spend the entire run on a new model process.
                 reason=_safe_candidate_feedback(exc)
+                last_candidate_reason=reason
                 trace.append({"step":index+1,"action":"finish_rejected",
                               "error_type":type(exc).__name__,
                               "reason":reason})
