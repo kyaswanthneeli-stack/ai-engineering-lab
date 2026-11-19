@@ -310,8 +310,24 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 else:
                     raise AgentToolError("Final proposal requires only edits or patch")
                 targets=patch_targets(patch)
-            except AgentToolError:
-                raise
+            except AgentToolError as exc:
+                # A candidate that names an uninspected file is NEVER applied.
+                # For already-inspected runs, allow one or more bounded safe
+                # correction turns instead of failing the entire benchmark.
+                # Other tool/security errors still fail closed.
+                if (str(exc)!="Model modified a file it did not inspect" or
+                        not read_files or index==max_steps-1):
+                    raise
+                trace.append({"step":index+1,"action":"finish_rejected",
+                              "error_type":"UninspectedPatchTarget",
+                              "reason":"Candidate changed a file outside inspected source"})
+                messages.append({"role":"user","content":
+                    "Rejected: at least one patch target was not inspected. "
+                    "Only these inspected files are permitted: "+
+                    ", ".join(sorted(read_files)[:15])+
+                    ". Return action=finish changing only inspected files; "
+                    "do NOT invent paths, shell commands, or new files."})
+                continue
             except (ValueError,TypeError,KeyError,SyntaxError) as exc:
                 # A malformed candidate is a recoverable model error, not a
                 # reason to spend the entire run on a new model process.
