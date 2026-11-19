@@ -113,6 +113,62 @@ class AgentTests(unittest.TestCase):
             "http://127.0.0.1:11434/v1","mock",[],512)
         self.assertEqual(response["choices"][0]["message"]["content"],"{}")
 
+    def test_native_ollama_timeout_retries_then_valid_response(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def read(self,n): return b'{"message":{"content":"{}"},"eval_count":5}'
+        class Opener:
+            calls=0
+            def open(self,request,**kwargs):
+                self.calls+=1
+                if self.calls==1:
+                    raise TimeoutError("test-only timeout")
+                return Response()
+        opener=Opener()
+        with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1",
+                                     "REPOPILOT_NATIVE_RETRIES":"2",
+                                     "REPOPILOT_NATIVE_TIMEOUT":"160"}), patch(
+             "repopilot.agentic_benchmark.urllib.request.build_opener",
+             return_value=opener), patch("repopilot.agentic_benchmark.time.sleep") as wait:
+            response=_provider("http://127.0.0.1:11434/v1","mock",None,[])
+        self.assertEqual(opener.calls,2)
+        self.assertEqual(response["choices"][0]["message"]["content"],"{}")
+        self.assertEqual(response["usage"]["completion_tokens"],5)
+        wait.assert_called_once_with(2)
+
+    def test_native_ollama_persistent_timeout_reports_classification(self):
+        class Opener:
+            calls=0
+            def open(self,request,**kwargs):
+                self.calls+=1
+                raise TimeoutError("untrusted host detail secret-key")
+        opener=Opener()
+        with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1",
+                                     "REPOPILOT_NATIVE_RETRIES":"2"}), patch(
+             "repopilot.agentic_benchmark.urllib.request.build_opener",
+             return_value=opener), patch("repopilot.agentic_benchmark.time.sleep"):
+            with self.assertRaises(AgentToolError) as caught:
+                _provider("http://127.0.0.1:11434/v1","mock",None,[])
+        self.assertEqual(opener.calls,2)
+        self.assertIn("timeout after 2 attempt",str(caught.exception))
+        self.assertNotIn("secret-key",str(caught.exception))
+
+    def test_native_ollama_http_400_does_not_retry(self):
+        class Opener:
+            calls=0
+            def open(self,request,**kwargs):
+                self.calls+=1
+                raise urllib.error.HTTPError(
+                    request.full_url,400,"private secret",None,None)
+        opener=Opener()
+        with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1"}), patch(
+             "repopilot.agentic_benchmark.urllib.request.build_opener",
+             return_value=opener):
+            with self.assertRaisesRegex(AgentToolError,"HTTP 400 after 1 attempt"):
+                _provider("http://127.0.0.1:11434/v1","mock",None,[])
+        self.assertEqual(opener.calls,1)
+
     def test_opt_in_native_never_sends_remote_source_or_token(self):
         with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1"}):
             with self.assertRaisesRegex(AgentToolError,"restricted to local Ollama"):
