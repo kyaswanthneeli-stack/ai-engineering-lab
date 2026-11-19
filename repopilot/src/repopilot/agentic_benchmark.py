@@ -117,6 +117,48 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 
+def _read_native_ollama_stream(response, *, started:float, max_seconds:int)->dict:
+    """Collect bounded, local Ollama NDJSON events; require terminal done=true.
+
+    Stream content remains model-supplied and untrusted. Never emit a partial
+    model patch if the socket stalls, the stream ends early, or JSON is invalid.
+    Neither prompt nor model output is copied into failure diagnostics.
+    """
+    pieces=[]
+    total_bytes=0
+    usage={}
+    for _ in range(4096):
+        if time.monotonic()-started>max_seconds:
+            raise ProviderTransportError("Local Ollama stream exceeded wall-clock budget")
+        raw=response.readline(65537)
+        if not raw:
+            raise ProviderTransportError("Local Ollama stream ended before final response")
+        total_bytes+=len(raw)
+        if len(raw)>65536 or total_bytes>1_000_000:
+            raise AgentToolError("Local Ollama stream exceeded response size limit")
+        try:
+            event=json.loads(raw)
+        except (UnicodeDecodeError,ValueError) as exc:
+            raise AgentToolError("Local Ollama stream contained invalid JSON") from exc
+        if not isinstance(event,dict):
+            raise AgentToolError("Local Ollama stream event must be an object")
+        if "error" in event:
+            raise AgentToolError("Local Ollama stream returned a model error")
+        message=event.get("message")
+        if not isinstance(message,dict) or not isinstance(message.get("content"),str):
+            raise AgentToolError("Local Ollama stream missing message content")
+        pieces.append(message["content"])
+        if event.get("done") is True:
+            usage={"prompt_tokens":event.get("prompt_eval_count"),
+                   "completion_tokens":event.get("eval_count")}
+            result="".join(pieces)
+            if not result:
+                raise AgentToolError("Local Ollama stream returned empty model output")
+            return {"choices":[{"message":{"content":result}}],
+                    "usage":usage}
+    raise AgentToolError("Local Ollama stream exceeded event count limit")
+
+
 def _local_ollama_chat(url,model,messages,token_budget):
     """Fallback only for a local Ollama /v1 endpoint returning HTTP 404.
 
@@ -130,8 +172,9 @@ def _local_ollama_chat(url,model,messages,token_budget):
         raise AgentToolError("Native model fallback is restricted to local Ollama")
     endpoint=urllib.parse.urlunsplit(
         (parts.scheme,parts.netloc,"/api/chat","",""))
+    streaming=os.getenv("REPOPILOT_OLLAMA_STREAM","0").strip()=="1"
     body=json.dumps({
-        "model":model,"stream":False,"format":"json",
+        "model":model,"stream":streaming,"format":"json",
         # Long-running pinned benchmark cohorts should not repeatedly evict
         # the same local model between tasks. Still bounded and loopback-only.
         "keep_alive":"20m",
@@ -149,6 +192,7 @@ def _local_ollama_chat(url,model,messages,token_budget):
     try:
         attempts=max(1,min(int(os.getenv("REPOPILOT_NATIVE_RETRIES","2")),3))
         timeout=max(30,min(int(os.getenv("REPOPILOT_NATIVE_TIMEOUT","120")),240))
+        wall_timeout=max(60,min(int(os.getenv("REPOPILOT_NATIVE_WALL_TIMEOUT","300")),600))
     except ValueError as exc:
         raise AgentToolError("Invalid bounded Ollama retry/timeout configuration") from exc
     payload=None
@@ -156,6 +200,9 @@ def _local_ollama_chat(url,model,messages,token_budget):
         try:
             with urllib.request.build_opener(_NoRedirect()).open(
                     request,timeout=timeout) as response:
+                if streaming:
+                    return _read_native_ollama_stream(
+                        response,started=time.monotonic(),max_seconds=wall_timeout)
                 payload=response.read(1_000_001)
             break
         except urllib.error.HTTPError as exc:
