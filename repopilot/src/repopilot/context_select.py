@@ -144,7 +144,8 @@ def issue_window_start(repo: Path, relative_path: str, issue: str, *,
     lines = source.splitlines()
     if len(lines) <= count:
         return 1
-    max_start = len(lines) - count + 1
+    # A near-end target is allowed a shorter result rather than padding the
+    # window with unrelated preceding code to fill the whole line budget.
 
     # A traceback's original file and line is more useful than a top-of-file
     # excerpt, but a line in some other file cannot redirect inspection.
@@ -156,7 +157,7 @@ def issue_window_start(repo: Path, relative_path: str, issue: str, *,
                 mentioned == basename):
             line_no = int(match.group("line"))
             if 1 <= line_no <= len(lines):
-                return min(max(1, line_no - 12), max_start)
+                return max(1, line_no - 12)
 
     try:
         tree = ast.parse(source)
@@ -175,7 +176,7 @@ def issue_window_start(repo: Path, relative_path: str, issue: str, *,
         score += 12 * len(overlap)
         if score > best_score:
             best_score, best_line = score, node.lineno
-    return min(max(1, best_line - 12), max_start) if best_score else 1
+    return max(1, best_line - 12) if best_score else 1
 
 
 def describe_context(items:list[ContextItem])->str:
