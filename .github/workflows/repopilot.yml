@@ -29,3 +29,17 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Index sample
         run: python -m repopilot.cli index examples/calculator
+      - name: Prepare pinned Docker test image
+        run: docker pull python:3.12-alpine
+      - name: Verify sample issue in restricted Docker container
+        run: python -m repopilot.cli verify examples/calculator examples/issue.json --output .runs/sample-verification.json
+      - name: Inspect reproduction evidence
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          result=json.loads(Path('.runs/sample-verification.json').read_text())
+          assert result['outcome']=='verified_in_sandbox'
+          assert result['before']['exit_code'] != 0 and result['after']['exit_code'] == 0
+          print('PASS: reproduction failed before patch and passed afterward')
+          PY
