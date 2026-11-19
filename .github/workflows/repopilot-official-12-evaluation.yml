@@ -1,9 +1,9 @@
 name: RepoPilot official 12-task SWE-bench evaluation
 
+# Full official SWE-bench evaluation is intentionally opt-in.
+# Routine code changes run fast CI; large, model-and-Docker-heavy evaluations
+# must never start automatically on every source push.
 on:
-  push:
-    paths:
-      - 'repopilot/src/repopilot/benchmark_batch.py'
   workflow_dispatch:
 
 concurrency:
