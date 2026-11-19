@@ -24,6 +24,16 @@ class ContextSelectionTests(unittest.TestCase):
             max_files=1,scan_limit=1)
         self.assertEqual(items[0].path,"zz_target.py")
 
+    def test_basename_mentioned_in_issue_locates_nested_source(self):
+        nested=self.root/"package"/"deep"
+        nested.mkdir(parents=True)
+        (nested/"target_module.py").write_text(
+            "def repair_target_module():\n    return 3\n")
+        items=ranked_source_context(
+            self.root,"Bug in target_module.py when calling repair_target_module",
+            max_files=1,scan_limit=1)
+        self.assertEqual(items[0].path,"package/deep/target_module.py")
+
     def test_limits(self):
         items=ranked_source_context(self.root,"tax",max_files=1,max_chars=900)
         self.assertEqual(len(items),1)
