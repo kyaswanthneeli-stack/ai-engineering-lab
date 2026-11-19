@@ -115,7 +115,7 @@ class RepairTests(unittest.TestCase):
                     candidate=replace(
                         candidate,
                         reproduction_test=candidate.reproduction_test+
-                            "# alternate reproduction details\\n")
+                            f"# alternate reproduction details {len(prompts)}\\n")
                 return candidate,{"model":"mock"}
             def verifier(repo,proposal,path):
                 calls.append(proposal.patch)
