@@ -127,7 +127,7 @@ def _provider(url,model,token,messages):
             raise  # Invalid JSON or shape is a model protocol error, not a timeout.
         if not retry or attempt==1:
             raise AgentToolError("Model provider "+category+
-                                 " after "+str(attempt+1)+" attempt(s)") from exc
+                                 " after "+str(attempt+1)+" attempt(s)")
         time.sleep(2)
     raise AgentToolError("Model provider exhausted retry budget")
 
