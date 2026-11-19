@@ -23,6 +23,22 @@ from .swebench_export import load_manifest
 
 REPO=re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
+def bounded_issue_context(statement: str, max_chars: int = 6500) -> str:
+    """Preserve the issue's title/description and final reproduction evidence.
+
+    Oversized prompts routinely stall small CPU-hosted models. This is an
+    inference-context reduction only: the official dataset row is unmodified.
+    """
+    if not isinstance(statement, str) or not 2000 <= max_chars <= 12000:
+        raise ValueError("Invalid issue statement or bounded context size")
+    if len(statement) <= max_chars:
+        return statement
+    marker = "\\n\\n[RepoPilot: middle of long issue omitted for bounded inference]\\n\\n"
+    head = int(max_chars * 0.70)
+    tail = max_chars - head - len(marker)
+    return statement[:head] + marker + statement[-tail:]
+
+
 def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
                 checkout=pinned_checkout,model_proposer=propose_benchmark,model=None,url=None,token=None)->dict:
     tasks={t["instance_id"]:t for t in load_manifest(manifest)}
@@ -57,13 +73,14 @@ def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
         if not isinstance(issue,str) or not issue.strip():
             raise ValueError("Official issue statement missing")
         report["status"]="attempted"
+        report["issue_context_trimmed"]=len(issue)>6500
         owner,repo=task["repo"].split("/")
         with tempfile.TemporaryDirectory(prefix="repopilot-swebench-") as tmp:
             # Checkout helper only parses the URL to derive the public repo;
             # the issue statement is read from the official pinned dataset.
             work=checkout(f"https://github.com/{owner}/{repo}/issues/1",
                           task["base_commit"],Path(tmp)/"repo")
-            spec,meta=model_proposer(work,issue[:12000],
+            spec,meta=model_proposer(work,bounded_issue_context(issue),
                                      model or os.getenv("REPOPILOT_MODEL",""),
                                      url or os.getenv("REPOPILOT_BASE_URL",""),
                                      token if token is not None else os.getenv("REPOPILOT_API_KEY"))
