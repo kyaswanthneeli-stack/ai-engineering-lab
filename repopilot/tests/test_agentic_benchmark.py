@@ -119,6 +119,48 @@ class AgentTests(unittest.TestCase):
                 client=lambda *args:response,max_steps=8,
                 required_targets={"pricing.py","checkout.py"})
 
+    def test_complete_file_mode_uses_only_model_generated_source(self):
+        steps=[{"action":"finish","files":[
+            {"path":"pricing.py","content":
+             "def subtotal(values):\n    return round(sum(values),2)\n"},
+            {"path":"checkout.py","content":
+             "from pricing import subtotal\ndef total(values):\n"
+             "    return round(subtotal(values),2)\n"}
+        ]}]
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"round totals","mock","http://127.0.0.1:11434/v1",
+            client=self.sequence(steps),max_steps=2,
+            required_targets={"pricing.py","checkout.py"})
+        self.assertEqual(patch.patch.count("diff --git"),2)
+        self.assertEqual(meta["agent_steps"],1)
+
+    def test_complete_file_mode_refuses_uninspected_file(self):
+        steps=[{"action":"finish","files":[
+            {"path":"checkout.py","content":"x=2\n"}]}]
+        with self.assertRaises(AgentToolError):
+            propose_agentic_benchmark(self.repo,"fix","mock",
+                "http://127.0.0.1:11434/v1",client=self.sequence(steps),
+                max_steps=2)
+
+    def test_complete_file_mode_rejects_invalid_syntax_then_corrects(self):
+        steps=[
+            {"action":"finish","files":[
+                {"path":"pricing.py","content":"def broken(:\n"},
+                {"path":"checkout.py","content":"x=1\n"}]},
+            {"action":"finish","files":[
+                {"path":"pricing.py","content":
+                    "def subtotal(values):\n    return round(sum(values),2)\n"},
+                {"path":"checkout.py","content":
+                    "from pricing import subtotal\ndef total(values):\n"
+                    "    return round(subtotal(values),2)\n"}]}
+        ]
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"fix","mock","http://127.0.0.1:11434/v1",
+            client=self.sequence(steps),max_steps=3,
+            required_targets={"pricing.py","checkout.py"})
+        self.assertEqual(patch.patch.count("diff --git"),2)
+        self.assertIn("finish_rejected",[x["action"] for x in meta["tool_trace"]])
+
     def test_refuses_to_modify_uninspected_file(self):
         steps=[
             {"action":"read","path":"pricing.py"},
