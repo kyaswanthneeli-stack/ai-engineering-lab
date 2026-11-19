@@ -1,0 +1,48 @@
+name: RepoPilot 12 public SWE-bench Lite tasks
+
+on:
+  push:
+    paths:
+      - '.github/workflows/repopilot-swebench.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  select-official-tasks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    defaults:
+      run:
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install task selector and official dataset reader
+        run: |
+          python -m pip install -e .
+          python -m pip install 'datasets>=3.0,<5.0'
+      - name: Select 12 real public issues using fixed seed
+        run: python -m repopilot.cli select-swebench --limit 12 --seed 73 --output .runs/swebench-lite-12.json
+      - name: Validate task evidence, not invented success
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path('.runs/swebench-lite-12.json').read_text())
+          assert data['dataset']=='SWE-bench/SWE-bench_Lite'
+          assert len(data['tasks'])==12
+          assert len({x['instance_id'] for x in data['tasks']})==12
+          assert all(x['status']=='not_attempted' and x['model_result'] is None for x in data['tasks'])
+          print("Selected 12 public SWE-bench Lite instances. Resolved issues: NOT MEASURED.")
+          for t in data['tasks']:print(t['instance_id'])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-swebench-lite-12-selection-unattempted
+          path: repopilot/.runs/swebench-lite-12.json
+          if-no-files-found: error
+          retention-days: 30
