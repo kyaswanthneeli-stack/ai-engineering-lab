@@ -1,0 +1,48 @@
+name: RepoPilot v2 diagnose failed Pytest model attempt
+
+on:
+  push:
+    paths:
+      - '.github/workflows/repopilot-v2-pytest-diagnose.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download actual two-task pilot evidence
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 44573511295
+          name: repopilot-v2-official-pilot-evidence
+          path: evidence
+      - name: Print bounded and sanitized failure classification
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          files=list(Path('evidence').rglob('attempt.json'))
+          print('Individual attempt files:',len(files))
+          for path in sorted(files):
+              record=json.loads(path.read_text())
+              print(json.dumps({
+                  'instance_id':record.get('instance_id'),
+                  'status':record.get('status'),
+                  'error_type':record.get('error_type'),
+                  'error':str(record.get('error') or '')[:500],
+                  'agent_steps':record.get('agent_steps'),
+                  'inspected_files':record.get('inspected_files'),
+                  'tool_trace_actions':[item.get('action') for item in record.get('tool_trace',[])][:24],
+                  'elapsed_ms':record.get('elapsed_ms')
+              },indent=2))
+          summary=Path('evidence/summary.json')
+          if summary.is_file():
+              data=json.loads(summary.read_text())
+              print('Pilot summary:',json.dumps({k:v for k,v in data.items() if k!='tasks'},indent=2))
+              print('Task outcomes:',json.dumps(data.get('tasks',[]),indent=2)[:5000])
+          PY
