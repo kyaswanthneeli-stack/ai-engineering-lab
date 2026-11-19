@@ -61,6 +61,7 @@ def collect(manifest: Path, output: Path, *, per_task_timeout: int = 240,
                   "base_commit": task["base_commit"],
                   "status": report.get("status", "unknown"),
                   "error_type": report.get("error_type"),
+                  "failure_category": report.get("failure_category"),
                   "elapsed_ms": round((time.monotonic()-started)*1000),
                   "officially_evaluated": False, "officially_resolved": None}
         if report.get("status") == "model_patch_proposed":
