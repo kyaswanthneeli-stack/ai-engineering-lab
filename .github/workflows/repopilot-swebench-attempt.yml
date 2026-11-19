@@ -40,16 +40,16 @@ jobs:
           REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
           REPOPILOT_MODEL: qwen2.5-coder:3b
         run: |
-          python -m repopilot.benchmark_attempt pytest-dev__pytest-11148 \
+          python -m repopilot.benchmark_attempt pytest-dev__pytest-11148 --agentic \
             --manifest benchmarks/swebench-lite-12.json \
-            --output .runs/official-attempt-pytest-11148-v4
+            --output .runs/official-attempt-pytest-11148-v4-agentic
       - name: Report actual outcome without claiming resolution
         if: always()
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          path=Path(".runs/official-attempt-pytest-11148-v4/attempt.json")
+          path=Path(".runs/official-attempt-pytest-11148-v4-agentic/attempt.json")
           if not path.is_file():
               raise SystemExit("Infrastructure/setup failure: no attempt report was created")
           result=json.loads(path.read_text())
@@ -67,7 +67,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: repopilot-real-swebench-pytest-11148-v4-unscored
-          path: repopilot/.runs/official-attempt-pytest-11148-v4/
+          path: repopilot/.runs/official-attempt-pytest-11148-v4-agentic/
           if-no-files-found: warn
           retention-days: 30
       - name: Stop local model
