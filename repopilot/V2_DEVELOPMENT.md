@@ -14,7 +14,7 @@ Make RepoPilot more reliable for real Python projects and larger source trees wh
 | 2. Large-repository selection | Filename-token candidate selection beyond the initial AST parse cap; safely prune generated and symlink directories | CI tests for nested sources after 100+ earlier files and strict 20,000-file metadata cap | Filename discovery implemented and CI passed; import-relationship context pending |
 | 3. Agent reliability | Reject repeat invalid patch proposals without redundant validation while permitting resubmission after legitimate new source inspection | CI tests for invalid-repeat rejection and proposals becoming valid after inspection, plus one live local-model smoke test | Duplicate-invalid suppression and real-model calculator smoke passed; impact on real SWE-bench success unmeasured |
 | 4. Verification and review | Generate additional reproduction tests with clear provenance and evaluate candidate patches in restricted disposable environments | Baseline/reproduction/patched evidence, source-only patch allowlist, reviewer approval | Planned |
-| 5. Official benchmark comparison | Run the same pinned SWE-bench cohort and compare genuine official outcomes on overlapping evaluated instances | Two-task pilot and full 12-task runs with actual model patches; real evaluator reports; strict per-instance comparison before claiming improved resolution | Comparator and safe subset runner implemented/tested. Both real benchmark runs in progress; official v2 result pending |
+| 5. Official benchmark comparison | Run the same pinned SWE-bench cohort and compare genuine official outcomes on overlapping evaluated instances | Real model predictions and independent official evaluator reports; per-instance, per-denominator reporting | Full 12-task Qwen3B evaluation finished: 4 patches submitted, 1 officially resolved, 8 timeouts; no resolution improvement demonstrated over v1 |
 | 6. v2.0 release | Produce a new versioned package, public demo, release notes, security/limitations statement | Green CI, Docker checks, actual benchmark result, wheel and source distribution | Planned |
 
 ## First implementation: issue-centered bounded source windows
@@ -109,6 +109,18 @@ To test the cause of missing submissions without buying API credits or altering 
 The `REPOPILOT_ISSUE_CONTEXT_CHARS` option is validated in `2000..12000`, defaults to the prior **6,500** characters, and preserves the start and end of long issue statements. It only changes the model input during an explicitly configured experiment; it never edits the official benchmark rows or generates reference patches. Regression tests verify retained reproduction evidence and invalid-budget rejection.
 
 The fallback experiment saves model-generated predictions and all missing attempts separately, and conditionally invokes the official SWE-bench harness only for actual model patches. **A run with zero patches or zero officially resolved issues must not be called a successful resolution**. The small-model run is a separate cohort-specific trial, not an official leaderboard score. At documentation time its outcome was pending; consult its actual GitHub Actions artifact before recording results.
+
+## Full benchmark result and timeout bottleneck — November 2026
+
+The [full 12-task Qwen2.5-Coder 3B run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44580636292) completed. **12 pinned issues were selected; 4 model-generated patches were officially evaluated; 1 resolved, 3 unresolved; 8 never produced a submitted patch.** The v1 baseline was 1 officially resolved out of 6 evaluated, from the same 12 pinned selections. These are separate run statistics and do **not** prove that v2 improved resolution.
+
+The independent [diagnostic reconstruction](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44613958799) confirmed all eight unsubmitted issues hit the **300-second per-task process timeout**. The four submitted patches were from `sympy__sympy-14774`, `pydata__xarray-4493`, `django__django-12125` and `matplotlib__matplotlib-22835`. A separate [small-model fallback experiment](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44612051924) generated a Pytest patch, but the official evaluator **did not** resolve it; a second selected task generated no patch.
+
+### Stage-level timeout diagnostics added
+
+Before this change, a force-stopped worker often left no `attempt.json` record. `benchmark_attempt` now atomically writes **source-free `stage.json` checkpoints** after initialization, matching the official dataset row, finishing the pinned checkout, and receiving a model response. `benchmark_batch` validates these files against the pinned task identity and approved stages and records `last_completed_stage`, `stage_elapsed_ms`, and aggregated `timeout_last_completed_stage_counts`. A timeout always remains **unscored** without a real model-generated patch; checkpoint data cannot become a prediction.
+
+The checkpoint feature has been verified by unit tests, full CI, and restricted Docker tests. **The eight historical timeout events predate this feature**, so their internal stages cannot be retroactively determined. A future bounded model run can distinguish source-setup bottlenecks from slow local model inference without exposing source code or changing the original evidence.
 
 ## Engineering practice
 
