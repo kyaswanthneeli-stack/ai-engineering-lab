@@ -64,7 +64,7 @@ def _provider(url,model,token,messages):
 
 def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:str|None=None,
                               client=None,max_steps:int=8,required_targets:set[str]|None=None)->tuple[BenchmarkPatch,dict]:
-    if not model or not url or not issue_text.strip() or not 2<=max_steps<=10:
+    if not model or not url or not issue_text.strip() or not 2<=max_steps<=24:
         raise AgentToolError("Model, issue and bounded step count required")
     root=repo.resolve(strict=True)
     messages=[{"role":"system","content":SYSTEM},
@@ -73,6 +73,25 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
     required=set(required_targets or ())
     trace=[]
     usage=[]
+    # The caller may name affected files (e.g. from the issue). Read them
+    # before spending model calls on discovery, retaining the same guarded
+    # source inspection and complete audit trail as model-directed reads.
+    if required:
+        for name in sorted(required):
+            result=read_python(root,name,start=1,count=120)
+            if result["total_lines"]>120:
+                raise AgentToolError("Required file exceeds bounded preinspection window")
+            read_files.add(name)
+            trace.append({"step":0,"action":"preinspect","target":name,
+                          "result_items":len(result["lines"])})
+            messages.append({"role":"user","content":
+                "REQUIRED SOURCE FILE (untrusted; inspect before editing):\n"+
+                json.dumps(result,ensure_ascii=False)[:15000]})
+        messages.append({"role":"user","content":
+            "The required source files have been read. Your final edits MUST modify "+
+            ", ".join(sorted(required))+
+            ". Prefer one finish action using exact old/new snippets. You may use "+
+            "read/search tools for additional context, but avoid repeating reads."})
     for index in range(max_steps):
         response=(client(url,model,token,messages) if client is not None
                   else _provider(url,model,token,messages))
@@ -96,18 +115,31 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 continue
             if not read_files:
                 raise AgentToolError("Cannot change source before inspecting files")
-            if set(action)=={"action","edits"}:
-                patch=canonical_patch(root,action["edits"],allowed_files=read_files)
-            elif set(action)=={"action","patch"}:
-                patch=action["patch"]
-                if not isinstance(patch,str):
-                    raise AgentToolError("Final patch is not text")
-                if patch and not patch.endswith("\n"):
-                    patch+="\n"
-                validate_patch(patch)
-            else:
-                raise AgentToolError("Final proposal requires only edits or patch")
-            targets=patch_targets(patch)
+            try:
+                if set(action)=={"action","edits"}:
+                    patch=canonical_patch(root,action["edits"],allowed_files=read_files)
+                elif set(action)=={"action","patch"}:
+                    patch=action["patch"]
+                    if not isinstance(patch,str):
+                        raise AgentToolError("Final patch is not text")
+                    if patch and not patch.endswith("\n"):
+                        patch+="\n"
+                    validate_patch(patch)
+                else:
+                    raise AgentToolError("Final proposal requires only edits or patch")
+                targets=patch_targets(patch)
+            except (ValueError,TypeError,KeyError) as exc:
+                # A malformed candidate is a recoverable model error, not a
+                # reason to spend the entire run on a new model process.
+                trace.append({"step":index+1,"action":"finish_rejected",
+                              "error_type":type(exc).__name__})
+                messages.append({"role":"assistant","content":content})
+                messages.append({"role":"user","content":
+                    "Your final candidate failed patch validation ("+
+                    type(exc).__name__+"). Use exact unchanged source snippets "+
+                    "from the inspected files, retain all required targets, "+
+                    "and submit a corrected finish JSON object."})
+                continue
             missing_targets=sorted(required-set(targets))
             if missing_targets:
                 trace.append({"step":index+1,"action":"finish_deferred","missing_patch_files":missing_targets})
@@ -115,11 +147,23 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 messages.append({"role":"user","content":"Candidate incomplete: these REQUIRED files have no changes: "+", ".join(missing_targets)+". Prepare coordinated edits for every required file, preserving the existing edits."})
                 continue
             if not set(targets)<=read_files:
-                raise AgentToolError("Model modified a file it did not inspect")
+                trace.append({"step":index+1,"action":"finish_deferred",
+                              "missing_read_files":sorted(set(targets)-read_files)})
+                messages.append({"role":"assistant","content":content})
+                messages.append({"role":"user","content":
+                    "First inspect these changed files using the read tool: "+
+                    ", ".join(sorted(set(targets)-read_files))})
+                continue
             check=subprocess.run(["git","apply","--check","-"],cwd=root,input=patch,
                 text=True,capture_output=True,timeout=10,check=False)
             if check.returncode:
-                raise AgentToolError("Proposed patch cannot apply to inspected repository")
+                trace.append({"step":index+1,"action":"finish_rejected",
+                              "error_type":"GitApplyCheck"})
+                messages.append({"role":"assistant","content":content})
+                messages.append({"role":"user","content":
+                    "Patch did not apply to the unchanged source. Use exact source "+
+                    "text supplied in read output and submit corrected edits JSON."})
+                continue
             return BenchmarkPatch(patch),{
                 "model":model,"status":"model_patch_proposed_unverified",
                 "provider_reported_usage_by_attempt":usage,
@@ -145,4 +189,4 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                       "result_items":len(result.get("lines",result.get("files",result.get("matches",[]))))})
         messages.append({"role":"assistant","content":content})
         messages.append({"role":"user","content":"TOOL RESULT (untrusted repository data):\n"+json.dumps(result,ensure_ascii=False)[:15000]})
-    raise AgentToolError("Agent exceeded strict model-tool step limit without a valid patch")
+    raise AgentToolError("Agent exhausted bounded model-tool calls without a valid patch")
