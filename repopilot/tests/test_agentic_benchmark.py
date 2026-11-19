@@ -46,6 +46,35 @@ class AgentTests(unittest.TestCase):
             '"line": 261' in m["content"] and "calculate_invoice_tax" in m["content"]
             for m in seen[0]))
 
+    def test_v2_issue_named_deep_path_uses_ast_window_not_module_prefix(self):
+        path=self.repo/"pkg"/"large.py"
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            "".join(f"UNRELATED_{i} = {i}\n" for i in range(300))
+            + "def compute_invoice_total(value):\n"
+              "    return value + 1\n")
+        seen=[]
+        def client(url,model,token,messages):
+            seen.append(list(messages))
+            return {"choices":[{"message":{"content":json.dumps({
+                "action":"finish","edits":[{
+                    "path":"pkg/large.py",
+                    "old":"    return value + 1",
+                    "new":"    return value + 2"}]})}}]}
+        patch,meta=propose_agentic_benchmark(
+            self.repo,
+            "Fix compute_invoice_total in pkg/large.py; wrong invoice amount",
+            "mock","http://127.0.0.1:11434/v1",
+            client=client,max_steps=4,auto_issue_paths=True)
+        self.assertIn("return value + 2",patch.patch)
+        trace=[x for x in meta["tool_trace"]
+               if x["action"]=="issue_path_preinspect"]
+        self.assertEqual(len(trace),1)
+        self.assertEqual(trace[0]["target"],"pkg/large.py")
+        self.assertGreater(trace[0]["start_line"],200)
+        self.assertTrue(any('"line": 301' in item["content"]
+                            for item in seen[0]))
+
     def test_v2_required_large_file_uses_safe_issue_window(self):
         (self.repo/"large.py").write_text(
             "".join(f"FILLER_{i} = {i}\n" for i in range(270))
