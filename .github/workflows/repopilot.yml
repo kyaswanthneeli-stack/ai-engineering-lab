@@ -43,3 +43,26 @@ jobs:
           assert result['before']['exit_code'] != 0 and result['after']['exit_code'] == 0
           print('PASS: reproduction failed before patch and passed afterward')
           PY
+      - name: Generate offline dashboard and fixture-only benchmark
+        run: |
+          python -m repopilot.cli dashboard .runs/sample-verification.json --output .runs/dashboard.html
+          python -m repopilot.cli benchmark .runs/sample-verification.json --dataset "reference-patch fixture, NOT model solved" > .runs/benchmark-fixture.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path('.runs/benchmark-fixture.json').read_text())
+          assert data['attempts']==1
+          assert data['model_generated_attempts']==0
+          assert data['model_success_rate'] is None
+          print('Correctly excluded fixture from AI resolution claims')
+          PY
+      - name: Upload reviewer evidence (fixture only)
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-verification-fixture
+          path: |
+            repopilot/.runs/dashboard.html
+            repopilot/.runs/benchmark-fixture.json
+            repopilot/.runs/sample-verification.json
+          if-no-files-found: error
+          retention-days: 30
