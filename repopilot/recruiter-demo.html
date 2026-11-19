@@ -67,7 +67,7 @@ footer {margin-top:65px;border-top:1px solid var(--border);padding-top:22px;font
 <section class="row" aria-label="Verified evidence metrics">
 <article class="card"><div class="kicker">Live model run</div><div class="metric ok">2 files</div><p><strong>Qwen2.5-Coder 7B</strong> generated changes for <code>pricing.py</code> and <code>checkout.py</code> in a controlled issue.</p></article>
 <article class="card"><div class="kicker">Docker regression</div><div class="metric ok">0 / 1 / 0</div><p>Exit codes for baseline tests, bug reproduction before the fix, and patched regression tests, respectively.</p></article>
-<article class="card"><div class="kicker">Official SWE-bench</div><div class="metric warn">N/A</div><p>A 12-task batch ran but produced no accepted predictions. The official harness was therefore skipped; no resolution score is claimed.</p></article>
+<article class="card"><div class="kicker">Official SWE-bench</div><div class="metric ok">1 / 6</div><p>Official SWE-bench harness: six model-generated predictions evaluated, one resolved, five unresolved. Another six selected tasks had no valid prediction.</p></article>
 </section>
 <section id="walkthrough">
 <h2>Follow one genuine issue-to-verification run</h2>
@@ -103,10 +103,10 @@ footer {margin-top:65px;border-top:1px solid var(--border);padding-top:22px;font
 <li><a href="https://github.com/kyaswanthneeli-stack/ai-engineering-lab/tree/main/repopilot">Public source and tests</a></li></ul>
 </div></div></section>
 <section id="benchmark"><h2>Benchmark status without inflated claims</h2>
-<div class="notice"><p><strong>Snapshot: November 19, 2026.</strong> The first pinned 12-task SWE-bench Lite run attempted all twelve tasks. It produced zero valid model predictions: eleven model attempts failed and one exceeded its timeout. Because the prediction file was empty, official harness evaluation was skipped. That is <em>not</em> a 0% officially measured resolution score. Later runs must be independently inspected before updating this snapshot.</p></div>
-<div class="cta"><a class="secondary" href="https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44528360120">View all 12 actual attempts</a><a class="secondary" href="benchmark-status.html">Open benchmark table</a></div>
+<div class="notice"><p><strong>Verified November 19, 2026 result.</strong> The later pinned 12-task SWE-bench Lite batch attempted all tasks: six genuine model-generated predictions reached the official harness, which resolved one and failed to resolve five (zero evaluation errors). Six timed-out tasks had no prediction and were not evaluated. The original official <a href="https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44547336463">evaluation log</a> proves the 1/6 result; its artifact uploader failed on a colon-containing filename, so portable evidence is being recovered. The selected-cohort result is 1 of 12, different from the submitted-patch rate of 1 of 6.</p></div>
+<div class="cta"><a class="secondary" href="https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44547336463">View scored real SWE-bench run</a><a class="secondary" href="benchmark-status.html">Open benchmark table</a></div>
 </section>
-<footer>RepoPilot is an engineering demonstration with real audit evidence. It does not provide unreviewed merges, arbitrary execution privileges, or a claimed official SWE-bench score. The interactive steps are explanatory, not a live AI simulator.</footer>
+<footer>RepoPilot is an engineering demonstration with real audit evidence. It does not provide unreviewed merges or arbitrary execution privileges. The official SWE-bench result is 1 resolved of 6 evaluated patches, out of 12 selected tasks. The interactive steps are explanatory, not a live AI simulator.</footer>
 </main>
 <script>
 (function () {
