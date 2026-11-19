@@ -16,6 +16,32 @@ import time
 from .swebench_export import load_manifest
 
 
+_ALLOWED_PROGRESS_STAGES=frozenset({
+    "initialized", "dataset_verified", "pinned_checkout_complete",
+    "model_response_received",
+})
+
+
+def _read_stage(task_output:Path,instance_id:str)->dict:
+    """Read trusted local diagnostic metadata, never source/model responses."""
+    path=task_output/"stage.json"
+    try:
+        if not path.is_file() or path.stat().st_size>4096:
+            return {}
+        item=json.loads(path.read_text(encoding="utf-8"))
+    except (OSError,ValueError,TypeError,UnicodeError):
+        return {}
+    if (not isinstance(item,dict) or item.get("instance_id")!=instance_id
+            or item.get("last_completed_stage") not in _ALLOWED_PROGRESS_STAGES
+            or item.get("officially_evaluated") is not False):
+        return {}
+    elapsed=item.get("stage_elapsed_ms")
+    if type(elapsed) is not int or elapsed<0:
+        return {}
+    return {"last_completed_stage":item["last_completed_stage"],
+            "stage_elapsed_ms":elapsed}
+
+
 _RETRYABLE_STATUSES = frozenset({
     "model_timeout", "provider_unavailable", "failed_model_attempt",
     "attempt_failed_without_evidence", "execution_failed",
@@ -122,6 +148,7 @@ def collect(manifest: Path, output: Path, *, per_task_timeout: int = 240,
                   "failure_category": report.get("failure_category"),
                   "elapsed_ms": round((time.monotonic()-started)*1000),
                   "officially_evaluated": False, "officially_resolved": None}
+        record.update(_read_stage(task_output,instance_id))
         if report.get("status") == "model_patch_proposed":
             file = task_output / "unreviewed-prediction.json"
             if file.is_file():
@@ -157,6 +184,12 @@ def collect(manifest: Path, output: Path, *, per_task_timeout: int = 240,
         key=record["status"]
         status_counts[key]=status_counts.get(key,0)+1
     status_counts=dict(sorted(status_counts.items()))
+    timeout_stage_counts={}
+    for record in records:
+        if record["status"]=="model_timeout":
+            stage=record.get("last_completed_stage","unknown")
+            timeout_stage_counts[stage]=timeout_stage_counts.get(stage,0)+1
+    timeout_stage_counts=dict(sorted(timeout_stage_counts.items()))
     summary = {"dataset": "princeton-nlp/SWE-bench_Lite",
                "pinned_manifest_tasks": len(manifest_tasks),
                "selected_tasks": len(tasks),
@@ -165,6 +198,7 @@ def collect(manifest: Path, output: Path, *, per_task_timeout: int = 240,
                "missing_predictions": len(tasks)-len(predictions),
                "attempt_status_counts": status_counts,
                "timeout_without_patch": status_counts.get("model_timeout",0),
+               "timeout_last_completed_stage_counts": timeout_stage_counts,
                "provider_unavailable_without_patch": status_counts.get("provider_unavailable",0),
                "failed_model_attempt_without_patch": status_counts.get("failed_model_attempt",0),
                "officially_evaluated": False,
