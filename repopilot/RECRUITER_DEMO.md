@@ -11,7 +11,7 @@ Evidence status: November 19, 2026. This page documents actual completed runs, n
 - **CI evidence:** [successful real inference + Docker + candidate branch](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44540507015).
 - **Actual issue-to-PR:** [draft PR #10](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/10) was opened against main from the verified generated candidate branch. It is **unmerged**, awaiting code review.
 - **Separate earlier seeded issue:** [draft PR #2](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/2) has its own verified Ollama 3B + Docker evidence.
-- **Independent benchmark:** a [pinned 12-task SWE-bench Lite batch](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44528360120) attempted every selected issue but yielded **zero valid predictions** (11 failures and one timeout). **Official SWE-bench scoring was skipped**, so there is **no official resolution-rate measurement**.
+- **Official real-world benchmark:** the later [pinned 12-task SWE-bench Lite batch](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44547336463) attempted all twelve selected issues and submitted **six model-generated predictions** to the official harness. The harness completed all six, found **one resolved and five unresolved, with zero evaluation errors**. Six tasks timed out without predictions, so the selected-cohort result is **1 of 12** and the submitted-patch resolution rate is **1 of 6**. An artifact-upload filename error occurred only after the evaluator finished; [portable evidence recovery](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44558575315) is underway.
 
 ## Ninety-second interview walkthrough
 
@@ -22,7 +22,7 @@ Evidence status: November 19, 2026. This page documents actual completed runs, n
 | 25–43 sec | Interactive demo **Inspection** and **AI edits** | Qwen 7B proposed edits only for guarded inspected source. The system rejects unsafe targets and validates candidate diffs. |
 | 43–61 sec | [Actual GitHub Actions run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44540507015) | Baseline tests passed, the curated bug reproduction failed before repair, and Docker passed after the generated changes. |
 | 61–76 sec | [Draft PR #10](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/10) | The verified model-generated candidate was published to a branch and opened for **human review**. It is not merged automatically. |
-| 76–90 sec | [Honest benchmark tracker](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/benchmark-status.html) | We attempted twelve pinned SWE-bench Lite tasks; no valid predictions emerged, so official scoring was skipped. I report that limitation instead of inventing an accuracy claim. |
+| 76–90 sec | [Honest benchmark tracker](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/benchmark-status.html) | We attempted twelve pinned SWE-bench Lite tasks and scored the six generated patches with the official harness: one resolved, five unresolved, six tasks unsubmitted. I distinguish evaluated-patch success from selected-task coverage. |
 
 ## Suggested LinkedIn Featured item
 
@@ -30,7 +30,7 @@ Evidence status: November 19, 2026. This page documents actual completed runs, n
 
 **URL:** https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/recruiter-demo.html
 
-**Description:** Built RepoPilot, a Python issue-to-patch coding agent using Ollama/Qwen, bounded repository inspection, guarded model edits and network-restricted Docker verification. Demonstrated a real Qwen 7B-generated two-file fix with a recorded baseline → failing regression → passing patched suite, and published it as an unmerged draft PR for review. GitHub logs and source are linked. Independent SWE-bench evaluation is still in progress; no official score claimed.
+**Description:** Built RepoPilot, a Python issue-to-patch coding agent using Ollama/Qwen, bounded repository inspection, guarded model edits and network-restricted Docker verification. Demonstrated a real Qwen 7B-generated two-file fix with a recorded baseline → failing regression → passing patched suite, and published it as an unmerged draft PR for review. GitHub logs and source are linked. Official SWE-bench Lite evaluation completed on six submitted predictions with one resolved issue (1/6 submitted, 1/12 selected); all evidence and limitations are linked.
 
 ## Recording checklist
 
@@ -40,4 +40,4 @@ Record the actual browser pages and CI artifacts. Do not portray the walkthrough
 
 > Built RepoPilot, an AI-assisted Python issue-to-patch workflow integrating Ollama/Qwen, bounded code inspection, safe patch validation, Docker regression verification, and human-reviewed GitHub pull requests; demonstrated a real model-generated two-file fix with auditable CI evidence.
 
-Do not state a SWE-bench solve percentage or generalized autonomous coding reliability until official evaluation produces it.
+Report the actual official 1/6 submitted-patch result and the 1/12 selected-cohort result separately; do not imply that unsubmitted tasks were officially evaluated or that the project has generalized autonomous coding reliability.
