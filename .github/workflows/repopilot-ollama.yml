@@ -33,7 +33,7 @@ jobs:
           done
           curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
       - name: Pull small public coding model
-        run: docker exec repopilot-ollama ollama pull qwen2.5-coder:1.5b
+        run: docker exec repopilot-ollama ollama pull qwen2.5-coder:3b
       - name: Pull restricted test image
         run: docker pull python:3.12-alpine
       - name: Attempt actual model-generated fix
@@ -41,7 +41,7 @@ jobs:
         continue-on-error: true
         env:
           REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
-          REPOPILOT_MODEL: qwen2.5-coder:1.5b
+          REPOPILOT_MODEL: qwen2.5-coder:3b
           REPOPILOT_DEBUG_CANDIDATE: '1' # Public synthetic fixture only; do not use for private repos
         run: |
           python -m repopilot.cli run examples/calculator https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/1 --output .runs/ollama-issue-1
