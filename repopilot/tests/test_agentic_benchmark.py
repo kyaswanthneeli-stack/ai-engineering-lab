@@ -210,6 +210,44 @@ class AgentTests(unittest.TestCase):
         self.assertIn("does not match",str(context.exception))
         self.assertNotIn("private_marker",str(context.exception))
 
+    def test_unscoped_benchmark_forces_patch_after_bounded_search(self):
+        calls=[]
+        def client(url,model,token,messages):
+            calls.append(list(messages))
+            if len(calls)<=6:
+                value={"action":"read","path":"pricing.py"}
+            else:
+                self.assertIn("FINAL PATCH MODE",messages[0]["content"])
+                value={"action":"finish","files":[{
+                    "path":"pricing.py",
+                    "content":"def subtotal(values):\n    return round(sum(values), 2)\n"}]}
+            return {"choices":[{"message":{"content":json.dumps(value)}}]}
+        patch,meta=propose_agentic_benchmark(self.repo,"round subtotal","mock",
+            "http://127.0.0.1:11434/v1",client=client,max_steps=8)
+        self.assertIn("return round",patch.patch)
+        self.assertEqual(meta["agent_steps"],7)
+        self.assertIn("final_phase_started",
+                      [x["action"] for x in meta["tool_trace"]])
+
+    def test_unscoped_benchmark_recovers_from_invalid_tool_paths(self):
+        calls=[]
+        def client(url,model,token,messages):
+            calls.append(list(messages))
+            if len(calls)<=6:
+                value={"action":"read","path":"does_not_exist.py"}
+            else:
+                self.assertIn("FINAL PATCH MODE",messages[0]["content"])
+                value={"action":"finish","edits":[{
+                    "path":"pricing.py","old":"return sum(values)",
+                    "new":"return round(sum(values), 2)"}]}
+            return {"choices":[{"message":{"content":json.dumps(value)}}]}
+        patch,meta=propose_agentic_benchmark(self.repo,
+            "Fix pricing.py subtotal rounding","mock",
+            "http://127.0.0.1:11434/v1",client=client,max_steps=8)
+        self.assertIn("round(sum(values)",patch.patch)
+        self.assertIn("ranked_preinspect",
+                      [x["action"] for x in meta["tool_trace"]])
+
     def test_refuses_to_modify_uninspected_file(self):
         steps=[
             {"action":"read","path":"pricing.py"},
