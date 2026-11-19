@@ -65,6 +65,14 @@ The agent's validation-recovery prompt previously requested whole-file `files` r
 
 The [targeted Pytest recovery workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44581523248) reruns the actual pinned task and explicitly fails its final gate unless an independently evaluated prediction **resolves** `pytest-dev__pytest-11148`. Evidence is uploaded even when no patch is generated or the official evaluator rejects it. At the time of this note, the result was **not yet known**. No claim of improved official SWE-bench performance is justified until it finishes.
 
+## Verified v1-to-v2 benchmark audit and ongoing native test
+
+An independently reproduced [12-task official score audit](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44594457844) confirms the previous v2 development run generated **4 valid model predictions**, of which **1 resolved and 3 remained unresolved** in the official harness. Eight other selected tasks produced no valid predictions; none of those eight is counted as an officially evaluated resolution. The comparable four evaluated issues across v1 and v2 showed **zero resolved-count change**. See [full per-issue evidence](benchmarks/V2_OFFICIAL_COMPARISON_2026-11-19.md).
+
+Follow-up improvements include AST/traceback-centered reads for **issue-mentioned source paths**, local Ollama model reuse to reduce cold-start churn, and manual-only expensive full-benchmark scheduling. Current development CI completed [196 Python tests plus restricted Docker verification](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44595002312), with **81% measured code coverage**.
+
+A separate [12-task Qwen3B native-Ollama official run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44595055900) was started from the updated code. Its outcome must not be assumed before the independent official evaluator finishes. A separate [Pytest-only attempt](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44593908576) tests the changed deep-source inspection and recovery prompting. Neither is evidence of additional solved cases until actual scoring confirms it.
+
 ## Engineering practice
 
 Keep v1.0.0 at [its immutable release](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v1.0.0). Use a separate v2 feature branch and an open review PR. Every milestone must have tests and evidence before being merged. Do not overwrite or reinterpret the original benchmark artifacts.
