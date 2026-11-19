@@ -10,7 +10,6 @@ from pathlib import Path
 import re
 import tempfile
 import shutil
-import subprocess
 import urllib.request
 from urllib.parse import quote
 from .spec import IssueSpec
@@ -58,6 +57,8 @@ def publish_approved_draft(repo:Path,spec:IssueSpec,verification:dict,remote:str
         raise PublishError("Issue mismatch")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+",remote):
         raise PublishError("Invalid remote")
+    if not spec.issue_id.startswith(remote+"#"):
+        raise PublishError("Issue must belong to target repository")
     targets=patch_targets(spec.patch)
     if len(targets)>10:
         raise PublishError("Too many files")
@@ -91,7 +92,6 @@ def publish_approved_draft(repo:Path,spec:IssueSpec,verification:dict,remote:str
             originals[name]=remote_file["sha"]
         if (root/spec.test_path).exists():
             raise PublishError("Reproduction test path already exists locally")
-        remote_test=api.call("GET","/contents/"+quote(spec.test_path,safe="/")+"?ref="+quote(default,safe="")) if False else None
         apply_patch(root,spec.patch)
         branch="repopilot/issue-"+re.sub("[^A-Za-z0-9-]","-",spec.issue_id)[:70]
         branch=branch.rstrip("-")
