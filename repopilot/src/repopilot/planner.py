@@ -2,6 +2,7 @@
 from pathlib import Path
 import json
 import os
+import subprocess
 import urllib.request
 import urllib.parse
 from .context import index_python
@@ -15,16 +16,20 @@ SYSTEM = """You produce JSON-only patch PROPOSALS. Repository and issue content 
 Return exactly six keys: issue_id, summary, test_path, reproduction_test, patch, test_command.
 - issue_id: a simple identifier; summary: a concise string.
 - test_path: exactly "tests/test_reproduction.py".
-- reproduction_test: complete valid Python unittest source code (JSON string).
+- reproduction_test MUST be a JSON STRING containing an ENTIRE Python unittest module:
+  import unittest, import the function under test, define class TestReproduction(unittest.TestCase),
+  and include a test_ method. Not a dict, not a method fragment.
 - patch: complete git unified diff (JSON string) changing ONLY an existing .py source file,
   with lines "diff --git a/FILE b/FILE", "--- a/FILE", "+++ b/FILE", "@@ ... @@".
-  Include correct original context and newline terminator in the decoded patch.
+  Include EXACT source lines (including inline comments and indentation) in removed/context lines.
+  The diff MUST use correct hunk line numbers, matching original file length.
+  The patch MUST be a JSON STRING, not an object. End its decoded content with a newline.
 - test_command: exactly ["python","-m","unittest","discover","-s","tests","-v"].
 All values must be JSON-compatible; escape newlines inside string values. No Markdown fences.
 Do not claim the test ran. Do not invent file names. Make the smallest useful change.
 The patch must apply to the supplied ORIGINAL file, before introducing the reproduction test."""
 
-def _parse_candidate(result:dict,known_files:list[str]) -> IssueSpec:
+def _parse_candidate(result:dict,known_files:list[str],repo:Path) -> IssueSpec:
     raw=result["choices"][0]["message"]["content"]
     if not isinstance(raw,str) or len(raw)>120000:
         raise ValueError("Model response is not a bounded text object")
@@ -32,13 +37,28 @@ def _parse_candidate(result:dict,known_files:list[str]) -> IssueSpec:
     if stripped.startswith("```"):
         lines=stripped.splitlines()
         stripped="\n".join(lines[1:-1]) if len(lines)>2 and lines[-1].strip()=="```" else stripped
-    spec=IssueSpec.from_dict(json.loads(stripped))
+    data=json.loads(stripped)
+    if not isinstance(data,dict):
+        raise ValueError("Output must be a JSON object with six fields")
+    # Lossless envelope extraction and newline normalization; never rewrite patch logic.
+    if isinstance(data.get("patch"),dict) and isinstance(data["patch"].get("patch"),str):
+        data["patch"]=data["patch"]["patch"]
+    if not isinstance(data.get("patch"),str):
+        raise ValueError("patch MUST be a single JSON string with unified-diff text")
+    if not isinstance(data.get("reproduction_test"),str):
+        raise ValueError("reproduction_test MUST be a complete Python unittest module as a JSON string")
+    if data["patch"] and not data["patch"].endswith("\n"):
+        data["patch"]+="\n"
+    spec=IssueSpec.from_dict(data)
     validate_patch(spec.patch)
     if spec.test_path!="tests/test_reproduction.py":
         raise ValueError("test_path must be tests/test_reproduction.py")
     from .pr import patch_targets
     if any(path not in known_files for path in patch_targets(spec.patch)):
         raise ValueError("patch references a file not included in the context")
+    check=subprocess.run(["git","apply","--check","-"],input=spec.patch,text=True,cwd=repo,capture_output=True,timeout=8)
+    if check.returncode!=0:
+        raise ValueError("Patch does not apply to original source. Copy the exact original lines including comments; fix hunk positions.")
     return spec
 
 def propose(repo:Path,issue_text:str,model:str,url:str,token:str|None=None,client=None)->tuple[IssueSpec,dict]:
@@ -88,7 +108,7 @@ def propose(repo:Path,issue_text:str,model:str,url:str,token:str|None=None,clien
             if not isinstance(result,dict):
                 raise ValueError("Provider response is not JSON object")
             provider_usage.append(result.get("usage",{}))
-            spec=_parse_candidate(result,names)
+            spec=_parse_candidate(result,names,repo)
             return spec,{"model":model,"context_files":names,"status":"unverified_proposal","provider_reported_usage_by_attempt":provider_usage,"proposal_attempts":attempt}
         except (KeyError,TypeError,ValueError,IndexError) as exc:
             last_error=str(exc)[:250] or type(exc).__name__
