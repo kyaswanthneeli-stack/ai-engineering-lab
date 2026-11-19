@@ -257,6 +257,53 @@ class BenchmarkBatchTests(unittest.TestCase):
         stage.write_text("{broken")
         self.assertEqual(_read_stage(path,"sample__project-0"),{})
 
+    def test_model_call_progress_survives_task_timeout_without_exported_patch(self):
+        def fake_run(command,**kwargs):
+            output=Path(command[command.index("--output")+1])
+            output.mkdir(parents=True)
+            output.joinpath("stage.json").write_text(json.dumps({
+                "instance_id":command[3],
+                "last_completed_stage":"model_call_started",
+                "model_step":3,
+                "stage_elapsed_ms":74000,
+                "officially_evaluated":False,
+                "officially_resolved":None}))
+            raise subprocess.TimeoutExpired(command,30)
+        with patch("repopilot.benchmark_batch.load_manifest",
+                   return_value=self.tasks),patch(
+                       "repopilot.benchmark_batch.subprocess.run",
+                       side_effect=fake_run):
+            result=collect(self.manifest,self.root/"model-step-timeouts")
+        self.assertEqual(result["model_predictions"],0)
+        self.assertEqual(result["timeout_last_completed_stage_counts"],
+                         {"model_call_started":12})
+        self.assertEqual(result["tasks"][0]["model_step"],3)
+        self.assertIsNone(result["officially_resolved"])
+
+    def test_model_call_checkpoint_requires_real_bounded_step(self):
+        from repopilot.benchmark_batch import _read_stage
+        folder=self.root/"model-checkpoint-validation"
+        folder.mkdir()
+        stage=folder/"stage.json"
+        for bad_step in (None,0,25,True,"1",1.0,-1):
+            stage.write_text(json.dumps({
+                "instance_id":"sample__project-0",
+                "last_completed_stage":"model_call_started",
+                "model_step":bad_step,
+                "stage_elapsed_ms":100,
+                "officially_evaluated":False}))
+            self.assertEqual(_read_stage(folder,"sample__project-0"),{})
+        stage.write_text(json.dumps({
+            "instance_id":"sample__project-0",
+            "last_completed_stage":"model_call_completed",
+            "model_step":4,
+            "stage_elapsed_ms":900,
+            "officially_evaluated":False}))
+        self.assertEqual(_read_stage(folder,"sample__project-0"),{
+            "last_completed_stage":"model_call_completed",
+            "model_step":4,
+            "stage_elapsed_ms":900})
+
     def test_timeout_is_unscored_and_does_not_create_prediction(self):
         with patch("repopilot.benchmark_batch.load_manifest",
                    return_value=self.tasks), patch(
