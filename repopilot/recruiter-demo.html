@@ -67,7 +67,7 @@ footer {margin-top:65px;border-top:1px solid var(--border);padding-top:22px;font
 <section class="row" aria-label="Verified evidence metrics">
 <article class="card"><div class="kicker">Live model run</div><div class="metric ok">2 files</div><p><strong>Qwen2.5-Coder 7B</strong> generated changes for <code>pricing.py</code> and <code>checkout.py</code> in a controlled issue.</p></article>
 <article class="card"><div class="kicker">Docker regression</div><div class="metric ok">0 / 1 / 0</div><p>Exit codes for baseline tests, bug reproduction before the fix, and patched regression tests, respectively.</p></article>
-<article class="card"><div class="kicker">Official SWE-bench</div><div class="metric ok">1 / 6</div><p>Official SWE-bench harness: six model-generated predictions evaluated, one resolved, five unresolved. Another six selected tasks had no valid prediction.</p></article>
+<article class="card"><div class="kicker">Official SWE-bench</div><div class="metric ok">1 / 6</div><p>Official SWE-bench harness: six model-generated predictions evaluated, one resolved (<code>sympy__sympy-14774</code>), five unresolved. Another six selected tasks had no valid prediction. <a href="https://github.com/kyaswanthneeli-stack/ai-engineering-lab/blob/main/repopilot/benchmarks/official-score-2026-11-19.json">View official result JSON</a>.</p></article>
 </section>
 <section id="walkthrough">
 <h2>Follow one genuine issue-to-verification run</h2>
