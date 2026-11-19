@@ -38,7 +38,7 @@ jobs:
           # a failed or solved benchmark task.
           for attempt in 1 2 3 4; do
             echo "Ollama model download attempt ${attempt}/4"
-            if docker exec repopilot-benchmark-ollama ollama pull qwen2.5-coder:3b; then
+            if docker exec repopilot-benchmark-ollama ollama pull qwen2.5-coder:1.5b; then
               echo "Ollama model download completed"
               break
             fi
@@ -48,7 +48,7 @@ jobs:
             fi
             sleep $((attempt * 15))
           done
-          docker exec repopilot-benchmark-ollama ollama list | grep -F 'qwen2.5-coder:3b'
+          docker exec repopilot-benchmark-ollama ollama list | grep -F 'qwen2.5-coder:1.5b'
       - name: Preflight available model with native-compatible local fallback
         env:
           REPOPILOT_MAX_TOKENS: '256'
@@ -60,10 +60,10 @@ jobs:
           tags=json.load(urllib.request.urlopen(base+"/api/tags",timeout=15))
           models=[x.get("name") for x in tags.get("models",[])]
           print("Models visible on local Ollama:",models)
-          if "qwen2.5-coder:3b" not in models:
-              raise SystemExit("::error::Ollama model pull did not register a local qwen2.5-coder:3b model")
+          if "qwen2.5-coder:1.5b" not in models:
+              raise SystemExit("::error::Ollama model pull did not register a local qwen2.5-coder:1.5b model")
           try:
-              data=_provider(base+"/v1","qwen2.5-coder:3b",None,[
+              data=_provider(base+"/v1","qwen2.5-coder:1.5b",None,[
                   {"role":"user","content":"Reply with JSON object containing key ok set to true."}
               ])
           except Exception as exc:
@@ -73,24 +73,25 @@ jobs:
           assert data.get("choices"),"Local model returned no chat completion"
           print("PASS: Ollama returned real model JSON via supported endpoint")
           PY
-      - name: Attempt one pinned real SWE-bench Lite issue (bounded discovery and native fallback / source-first recovery v14)
+      - name: Attempt one pinned real SWE-bench Lite issue (bounded discovery and native fallback / native low-latency retry v15)
         continue-on-error: true
         env:
           REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
-          REPOPILOT_MODEL: qwen2.5-coder:3b
-          REPOPILOT_MAX_TOKENS: '1200'
+          REPOPILOT_MODEL: qwen2.5-coder:1.5b
+          REPOPILOT_MAX_TOKENS: '512'
+          REPOPILOT_OLLAMA_NATIVE: '1'
         run: |
           curl -fsS "${REPOPILOT_BASE_URL}/models" >/dev/null
           python -m repopilot.benchmark_attempt pytest-dev__pytest-11148 --agentic --max-steps 12 \
             --manifest benchmarks/swebench-lite-12.json \
-            --output .runs/official-attempt-pytest-11148-v14-agentic
+            --output .runs/official-attempt-pytest-11148-v15-agentic
       - name: Report actual outcome without claiming resolution
         if: always()
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          path=Path(".runs/official-attempt-pytest-11148-v14-agentic/attempt.json")
+          path=Path(".runs/official-attempt-pytest-11148-v15-agentic/attempt.json")
           if not path.is_file():
               # Setup failure is explicitly unscored, never a model failure.
               result={"instance_id":"pytest-dev__pytest-11148",
@@ -119,8 +120,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-real-swebench-pytest-11148-v14-unscored
-          path: repopilot/.runs/official-attempt-pytest-11148-v14-agentic/
+          name: repopilot-real-swebench-pytest-11148-v15-unscored
+          path: repopilot/.runs/official-attempt-pytest-11148-v15-agentic/
           if-no-files-found: warn
           retention-days: 30
       - name: Stop local model
