@@ -8,6 +8,7 @@ from .planner import propose,save_proposal
 from .engine import execute
 from .spec import IssueSpec
 from .pipeline import run_issue
+from .repair_loop import run_with_repair
 from .dashboard import render_dashboard
 from .benchmark import read_and_aggregate
 from .pr import publish_approved_draft
@@ -28,6 +29,10 @@ def main(argv=None):
     d=sub.add_parser("run",help="Fetch a GitHub issue, request a model patch and verify in Docker")
     d.add_argument("repo",type=Path);d.add_argument("issue_url")
     d.add_argument("--output",type=Path,default=Path(".runs/agent-run"))
+    repair=sub.add_parser("run-repair",help="Bounded multi-attempt issue-to-verified-patch workflow")
+    repair.add_argument("repo",type=Path);repair.add_argument("issue_url")
+    repair.add_argument("--max-attempts",type=int,default=3)
+    repair.add_argument("--output",type=Path,default=Path(".runs/repair-run"))
     pinned=sub.add_parser("run-pinned",help="Checkout exact public GitHub commit and attempt issue locally; no PR published")
     pinned.add_argument("issue_url");pinned.add_argument("commit_sha")
     pinned.add_argument("--output",type=Path,default=Path(".runs/pinned-issue"))
@@ -60,6 +65,11 @@ def main(argv=None):
     elif args.cmd=="run":
         result=run_issue(args.repo,args.issue_url,args.output)
         print(json.dumps({"outcome":result["outcome"],"output":str(args.output),"dashboard":str(args.output/"dashboard.html")},indent=2))
+        if result["outcome"]!="verified_in_sandbox":
+            raise SystemExit(1)
+    elif args.cmd=="run-repair":
+        result=run_with_repair(args.repo,args.issue_url,args.output,max_attempts=args.max_attempts)
+        print(json.dumps({"outcome":result["outcome"],"attempts":len(result["attempts"]),"output":str(args.output)},indent=2))
         if result["outcome"]!="verified_in_sandbox":
             raise SystemExit(1)
     elif args.cmd=="run-pinned":
