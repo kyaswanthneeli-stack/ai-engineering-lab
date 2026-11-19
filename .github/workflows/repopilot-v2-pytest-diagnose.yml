@@ -1,4 +1,4 @@
-name: RepoPilot v2 diagnose Pytest retry evidence
+name: RepoPilot v2 diagnose latest Pytest patch recovery
 
 on:
   push:
@@ -18,7 +18,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}
-          run-id: 44578518713
+          run-id: 44593908576
           name: repopilot-v2-pytest-retry-evidence
           path: evidence
       - name: Print bounded and sanitized failure classification
