@@ -191,4 +191,14 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                       "result_items":len(result.get("lines",result.get("files",result.get("matches",[]))))})
         messages.append({"role":"assistant","content":content})
         messages.append({"role":"user","content":"TOOL RESULT (untrusted repository data):\n"+json.dumps(result,ensure_ascii=False)[:15000]})
-    raise AgentToolError("Agent exhausted bounded model-tool calls without a valid patch")
+    # Preserve a bounded, non-sensitive summary for CI diagnosis. Never
+    # expose model output, repository source, or provider credentials.
+    summary={}
+    for entry in trace:
+        action=entry.get("action")
+        if action in {"preinspect","list","search","read",
+                      "finish_deferred","finish_rejected"}:
+            summary[action]=summary.get(action,0)+1
+    raise AgentToolError(
+        "Agent exhausted bounded model-tool calls without a valid patch; "
+        "action_counts="+json.dumps(summary,sort_keys=True))
