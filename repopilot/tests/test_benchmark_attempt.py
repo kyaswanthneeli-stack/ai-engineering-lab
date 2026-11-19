@@ -42,8 +42,8 @@ class AttemptsTests(unittest.TestCase):
         self.assertTrue(patch["generated_by_model"])
     def test_agentic_cli_wires_requested_step_budget(self):
         observed=[]
-        def mock_agent(repo,issue,model,url,token,max_steps=8):
-            observed.append(max_steps)
+        def mock_agent(repo,issue,model,url,token,max_steps=8,auto_issue_paths=False):
+            observed.append((max_steps,auto_issue_paths))
             return self.proposed()
         with patch("repopilot.agentic_benchmark.propose_agentic_benchmark",mock_agent), \
              patch("repopilot.benchmark_attempt.attempt_one") as call:
@@ -51,7 +51,7 @@ class AttemptsTests(unittest.TestCase):
             main(["sample__repo-123","--agentic","--max-steps","18"])
             kwargs=call.call_args.kwargs
             kwargs["model_proposer"](self.root,"issue","mock","http://127.0.0.1:11434/v1",None)
-        self.assertEqual(observed,[18])
+        self.assertEqual(observed,[(18,True)])
 
     def test_agentic_cli_rejects_unbounded_step_budget(self):
         with self.assertRaises(SystemExit):
