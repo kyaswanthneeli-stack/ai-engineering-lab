@@ -38,6 +38,10 @@ class AgentTests(unittest.TestCase):
             max_steps=4,auto_issue_paths=True)
         self.assertIn("round(price * 0.1, 2)",result.patch)
         self.assertIn("large.py",meta["inspected_files"])
+        self.assertTrue(any(t.get("start_line",1)>200 and
+                            t["target"]=="large.py"
+                            for t in meta["tool_trace"]
+                            if t["action"]=="ranked_initial_preinspect"))
         self.assertTrue(any(
             '"line": 261' in m["content"] and "calculate_invoice_tax" in m["content"]
             for m in seen[0]))
@@ -58,6 +62,8 @@ class AgentTests(unittest.TestCase):
             "mock","http://127.0.0.1:11434/v1",client=client,
             max_steps=3,required_targets={"large.py"})
         self.assertIn("round(price * 0.1, 2)",patch.patch)
+        self.assertTrue(any(t.get("start_line",1)>200
+                            for t in meta["tool_trace"] if t["action"]=="preinspect"))
         self.assertTrue(any(
             '"line": 271' in m["content"] for m in seen[0]))
 
