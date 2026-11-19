@@ -11,6 +11,7 @@ from .pipeline import run_issue
 from .dashboard import render_dashboard
 from .benchmark import read_and_aggregate
 from .pr import publish_approved_draft
+from .swebench import write_manifest
 
 def main(argv=None):
     parser=argparse.ArgumentParser(prog="repopilot")
@@ -33,6 +34,10 @@ def main(argv=None):
     g.add_argument("repo",type=Path);g.add_argument("proposal",type=Path);g.add_argument("report",type=Path)
     g.add_argument("--remote",required=True)
     g.add_argument("--approve",default="",help="Must be exactly I_APPROVE_DRAFT_PR")
+    h=sub.add_parser("select-swebench",help="Create 12-task public SWE-bench Lite manifest; no score computed")
+    h.add_argument("--limit",type=int,default=12)
+    h.add_argument("--seed",type=int,default=73)
+    h.add_argument("--output",type=Path,default=Path(".runs/swebench-lite-manifest.json"))
     args=parser.parse_args(argv)
     if args.cmd=="index":
         print(json.dumps([vars(s) for s in index_python(args.repo)],indent=2))
@@ -52,6 +57,8 @@ def main(argv=None):
         print(render_dashboard(report,args.output))
     elif args.cmd=="benchmark":
         print(json.dumps(read_and_aggregate(args.reports,args.dataset),indent=2))
+    elif args.cmd=="select-swebench":
+        print(json.dumps(write_manifest(args.output,args.limit,args.seed),indent=2))
     elif args.cmd=="draft-pr":
         report=json.loads(args.report.read_text(encoding="utf-8"))
         result=publish_approved_draft(args.repo,IssueSpec.from_json(args.proposal),report,args.remote,args.approve)
