@@ -17,13 +17,13 @@ import re
 import tempfile
 import time
 from .checkout import pinned_checkout
-from .planner import propose
+from .benchmark_planner import propose_benchmark
 from .swebench_export import load_manifest
 
 REPO=re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
-                checkout=pinned_checkout,model_proposer=propose,model=None,url=None,token=None)->dict:
+                checkout=pinned_checkout,model_proposer=propose_benchmark,model=None,url=None,token=None)->dict:
     tasks={t["instance_id"]:t for t in load_manifest(manifest)}
     if instance_id not in tasks:
         raise ValueError("Instance ID is not in the pinned manifest")
