@@ -7,6 +7,7 @@ unified diff text. No host shell, mutation, model-authorized PR, or test run.
 from __future__ import annotations
 
 import json
+import ast
 import subprocess
 import urllib.parse
 import urllib.request
@@ -90,7 +91,11 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                           "result_items":len(result["lines"])})
             source_message=("REQUIRED SOURCE FILE (untrusted; inspect before editing):\n"+
                             json.dumps(result,ensure_ascii=False)[:15000])
-            final_context.append(source_message)
+            if (root/name).stat().st_size<=6000:
+                raw=(root/name).read_text(encoding="utf-8")
+                final_context.append("EXACT COMPLETE SOURCE "+name+":\n"+raw)
+            else:
+                final_context.append(source_message)
             messages.append({"role":"user","content":source_message})
         messages.append({"role":"user","content":
             "The required source files have been read. Your final edits MUST modify "+
@@ -103,9 +108,10 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             # endless read/search loops; all required source remains visible.
             # This is still model-generated code, not a reference patch.
             messages=[{"role":"system","content":
-                "You are in FINAL PATCH MODE. Return ONLY a JSON object "
-                "with action=finish and edits (path, old, new). "
-                "Do not call list, search or read. The provided files were "
+                ("You are in FINAL PATCH MODE. Return ONLY a JSON object "
+                "with action=finish and files: [{path, content}], where content "
+                "is the COMPLETE corrected Python source for each required file. ")
+                Do not call list, search or read. The provided files were 
                 "already inspected. Every old snippet must match verbatim "
                 "in the corresponding file exactly once. Change every "
                 "required file. Never invent files or claim tests passed."},
@@ -113,7 +119,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 "ISSUE (untrusted):\n"+issue_text[:12000]+"\n\n"+
                 "\n\n".join(final_context)+
                 "\n\nRequired changed files: "+", ".join(sorted(required))+
-                ". Provide exact minimal edits for ALL of them, in one finish JSON."}]
+                ". Output action=finish with files containing the COMPLETE corrected source for each required file, preserving imports and functions."}]
             trace.append({"step":index+1,"action":"final_phase_started"})
         response=(client(url,model,token,messages) if client is not None
                   else _provider(url,model,token,messages))
@@ -132,8 +138,8 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             trace.append({"step":index+1,"action":"exploration_rejected_in_final_phase"})
             messages.append({"role":"user","content":
                 "Discovery is finished. The required files are already present "
-                "above. Your next response MUST use action=finish and include "
-                "exact old/new edits for every required file. No tool actions."})
+                "above. Your next response MUST use action=finish with files "+
+                "containing complete corrected source for every required file. No tool actions."})
             continue
         if name=="finish":
             missing=sorted(required-read_files)
@@ -145,7 +151,30 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             if not read_files:
                 raise AgentToolError("Cannot change source before inspecting files")
             try:
-                if set(action)=={"action","edits"}:
+                if set(action)=={"action","files"}:
+                    files=action["files"]
+                    if not isinstance(files,list) or not 1<=len(files)<=8:
+                        raise ValueError("Expected 1–8 complete existing Python files")
+                    edits=[]
+                    seen=set()
+                    for item in files:
+                        if not isinstance(item,dict) or set(item)!={"path","content"}:
+                            raise ValueError("Each file requires path and content")
+                        path, content=item["path"],item["content"]
+                        if not isinstance(path,str) or path not in read_files:
+                            raise AgentToolError("Model modified a file it did not inspect")
+                        if path in seen:
+                            raise ValueError("Duplicate complete-file replacement")
+                        seen.add(path)
+                        if not isinstance(content,str) or not content.endswith("\n") or len(content)>6000:
+                            raise ValueError("Complete source must be newline-terminated and under 6 KB")
+                        ast.parse(content)
+                        original=(root/path).read_text(encoding="utf-8")
+                        if original==content:
+                            continue
+                        edits.append({"path":path,"old":original,"new":content})
+                    patch=canonical_patch(root,edits,allowed_files=read_files)
+                elif set(action)=={"action","edits"}:
                     edits=action["edits"]
                     if isinstance(edits,list) and any(
                         isinstance(edit,dict) and
@@ -172,10 +201,11 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                               "error_type":type(exc).__name__})
                 messages.append({"role":"assistant","content":content})
                 messages.append({"role":"user","content":
-                    "Your final candidate failed patch validation ("+
-                    type(exc).__name__+"). Use exact unchanged source snippets "+
-                    "from the inspected files, retain all required targets, "+
-                    "and submit a corrected finish JSON object."})
+                    "Your final candidate failed validation ("+
+                    type(exc).__name__+"). Return action=finish with files: "+
+                    "[{path, content}] containing COMPLETE corrected Python "+
+                    "source for every required file. Preserve imports, "+
+                    "functions, and indentation. No partial snippets."})
                 continue
             missing_targets=sorted(required-set(targets))
             if missing_targets:
