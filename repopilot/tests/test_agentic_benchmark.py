@@ -222,7 +222,7 @@ class AgentTests(unittest.TestCase):
 
     def test_complete_file_mode_refuses_uninspected_file(self):
         steps=[{"action":"finish","files":[
-            {"path":"checkout.py","content":"x=2\n"}]}]
+            {"path":"../checkout.py","content":"x=2\n"}]}]
         with self.assertRaises(AgentToolError):
             propose_agentic_benchmark(self.repo,"fix","mock",
                 "http://127.0.0.1:11434/v1",client=self.sequence(steps),
