@@ -7,6 +7,7 @@ unified diff text. No host shell, mutation, model-authorized PR, or test run.
 from __future__ import annotations
 
 import json
+import ast
 import subprocess
 import urllib.parse
 import urllib.request
@@ -34,6 +35,39 @@ claims about tests passing. The caller will verify any final patch independently
 
 class AgentToolError(BenchmarkProposalError):
     pass
+
+
+def _safe_candidate_feedback(exc:Exception)->str:
+    """Keep validation diagnostics useful without echoing model/source text."""
+    if isinstance(exc,SyntaxError):
+        return "Invalid Python syntax near line "+str(exc.lineno or 1)
+    reason=str(exc)
+    safe_reasons={
+        "Exact old text must occur once in the current source":
+            "An old edit snippet does not match the inspected source exactly once. "
+            "Prefer complete-file replacements using files [{path, content}].",
+        "Replacements must be distinct, nonempty, and bounded":
+            "An old/new replacement is empty, unchanged, or exceeds size limits.",
+        "No source modifications":
+            "The proposal did not modify any inspected file.",
+        "Each edit requires only path, old and new":
+            "Each exact edit needs only path, old, and new fields.",
+        "Expected 1–8 complete existing Python files":
+            "Provide a nonempty files list of at most eight files.",
+        "Each file requires path and content":
+            "Each complete-file entry must have path and content.",
+        "Duplicate complete-file replacement":
+            "Supply only one replacement for each path.",
+        "Complete source must be newline-terminated and under 6 KB":
+            "Whole-file content must be nonempty and under 6 KB.",
+        "Require between 1 and 12 exact source replacements":
+            "The final proposal needs 1–12 changed source replacements.",
+        "Edit path was not supplied to the model":
+            "Only inspected Python paths are permitted.",
+        "Final proposal requires only edits or patch":
+            "Use action=finish with files [{path, content}], edits, or patch.",
+    }
+    return safe_reasons.get(reason,"Candidate failed bounded source/patch validation.")
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -64,7 +98,7 @@ def _provider(url,model,token,messages):
 
 def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:str|None=None,
                               client=None,max_steps:int=8,required_targets:set[str]|None=None)->tuple[BenchmarkPatch,dict]:
-    if not model or not url or not issue_text.strip() or not 2<=max_steps<=10:
+    if not model or not url or not issue_text.strip() or not 2<=max_steps<=24:
         raise AgentToolError("Model, issue and bounded step count required")
     root=repo.resolve(strict=True)
     messages=[{"role":"system","content":SYSTEM},
@@ -73,7 +107,54 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
     required=set(required_targets or ())
     trace=[]
     usage=[]
+    # For explicitly scoped multi-file tasks, never spend every model call on
+    # searching. Switch from discovery to a fresh, patch-only prompt.
+    inspection_budget=min(5,max_steps-2) if required else max_steps
+    final_context=[]
+    last_candidate_reason=""
+    # The caller may name affected files (e.g. from the issue). Read them
+    # before spending model calls on discovery, retaining the same guarded
+    # source inspection and complete audit trail as model-directed reads.
+    if required:
+        for name in sorted(required):
+            result=read_python(root,name,start=1,count=120)
+            if result["total_lines"]>120:
+                raise AgentToolError("Required file exceeds bounded preinspection window")
+            read_files.add(name)
+            trace.append({"step":0,"action":"preinspect","target":name,
+                          "result_items":len(result["lines"])})
+            source_message=("REQUIRED SOURCE FILE (untrusted; inspect before editing):\n"+
+                            json.dumps(result,ensure_ascii=False)[:15000])
+            if (root/name).stat().st_size<=6000:
+                raw=(root/name).read_text(encoding="utf-8")
+                final_context.append("EXACT COMPLETE SOURCE "+name+":\n"+raw)
+            else:
+                final_context.append(source_message)
+            messages.append({"role":"user","content":source_message})
+        messages.append({"role":"user","content":
+            "The required source files have been read. Your final edits MUST modify "+
+            ", ".join(sorted(required))+
+            ". Prefer one finish action using exact old/new snippets. You may use "+
+            "read/search tools for additional context, but avoid repeating reads."})
     for index in range(max_steps):
+        if required and index==inspection_budget:
+            # Discard exploratory dialogue that can trap smaller models in
+            # endless read/search loops; all required source remains visible.
+            # This is still model-generated code, not a reference patch.
+            messages=[{"role":"system","content":
+                "You are in FINAL PATCH MODE. Return ONLY a JSON object "
+                "with action=finish and files: [{path, content}], where content "
+                "is the COMPLETE corrected Python source for each required file. "
+                "Do not call list, search or read. The provided files were "
+                "already inspected. Preserve imports and existing functions. "
+                "Change every required file. Never invent files or claim tests passed."},
+                {"role":"user","content":
+                "ISSUE (untrusted):\n"+issue_text[:12000]+"\n\n"+
+                "\n\n".join(final_context)+
+                "\n\nRequired changed files: "+", ".join(sorted(required))+
+                ". Output action=finish with files containing the COMPLETE corrected source for each required file, preserving imports and functions."+
+                (" Previous candidate error: "+last_candidate_reason if last_candidate_reason else "")}]
+            trace.append({"step":index+1,"action":"final_phase_started"})
         response=(client(url,model,token,messages) if client is not None
                   else _provider(url,model,token,messages))
         try:
@@ -87,6 +168,13 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             raise AgentToolError("Tool call must be JSON object")
         usage.append(response.get("usage",{}))
         name=action.get("action")
+        if required and index>=inspection_budget and name!="finish":
+            trace.append({"step":index+1,"action":"exploration_rejected_in_final_phase"})
+            messages.append({"role":"user","content":
+                "Discovery is finished. The required files are already present "
+                "above. Your next response MUST use action=finish with files "+
+                "containing complete corrected source for every required file. No tool actions."})
+            continue
         if name=="finish":
             missing=sorted(required-read_files)
             if missing:
@@ -96,18 +184,67 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 continue
             if not read_files:
                 raise AgentToolError("Cannot change source before inspecting files")
-            if set(action)=={"action","edits"}:
-                patch=canonical_patch(root,action["edits"],allowed_files=read_files)
-            elif set(action)=={"action","patch"}:
-                patch=action["patch"]
-                if not isinstance(patch,str):
-                    raise AgentToolError("Final patch is not text")
-                if patch and not patch.endswith("\n"):
-                    patch+="\n"
-                validate_patch(patch)
-            else:
-                raise AgentToolError("Final proposal requires only edits or patch")
-            targets=patch_targets(patch)
+            try:
+                if set(action)=={"action","files"}:
+                    files=action["files"]
+                    if not isinstance(files,list) or not 1<=len(files)<=8:
+                        raise ValueError("Expected 1–8 complete existing Python files")
+                    edits=[]
+                    seen=set()
+                    for item in files:
+                        if not isinstance(item,dict) or set(item)!={"path","content"}:
+                            raise ValueError("Each file requires path and content")
+                        path, content=item["path"],item["content"]
+                        if not isinstance(path,str) or path not in read_files:
+                            raise AgentToolError("Model modified a file it did not inspect")
+                        if path in seen:
+                            raise ValueError("Duplicate complete-file replacement")
+                        seen.add(path)
+                        if not isinstance(content,str) or not content or len(content)>6000:
+                            raise ValueError("Complete source must be newline-terminated and under 6 KB")
+                        if not content.endswith("\n"):
+                            content+="\n"
+                        ast.parse(content)
+                        original=(root/path).read_text(encoding="utf-8")
+                        if original==content:
+                            continue
+                        edits.append({"path":path,"old":original,"new":content})
+                    patch=canonical_patch(root,edits,allowed_files=read_files)
+                elif set(action)=={"action","edits"}:
+                    edits=action["edits"]
+                    if isinstance(edits,list) and any(
+                        isinstance(edit,dict) and
+                        edit.get("path") not in read_files for edit in edits
+                    ):
+                        raise AgentToolError("Model modified a file it did not inspect")
+                    patch=canonical_patch(root,edits,allowed_files=read_files)
+                elif set(action)=={"action","patch"}:
+                    patch=action["patch"]
+                    if not isinstance(patch,str):
+                        raise AgentToolError("Final patch is not text")
+                    if patch and not patch.endswith("\n"):
+                        patch+="\n"
+                    validate_patch(patch)
+                else:
+                    raise AgentToolError("Final proposal requires only edits or patch")
+                targets=patch_targets(patch)
+            except AgentToolError:
+                raise
+            except (ValueError,TypeError,KeyError,SyntaxError) as exc:
+                # A malformed candidate is a recoverable model error, not a
+                # reason to spend the entire run on a new model process.
+                reason=_safe_candidate_feedback(exc)
+                last_candidate_reason=reason
+                trace.append({"step":index+1,"action":"finish_rejected",
+                              "error_type":type(exc).__name__,
+                              "reason":reason})
+                messages.append({"role":"assistant","content":content})
+                messages.append({"role":"user","content":
+                    "Fix this specific error: "+reason+" "+
+                    "Return action=finish with files: [{path, content}] "+
+                    "containing COMPLETE corrected Python source for EVERY "+
+                    "required file. Do not repeat the rejected candidate."})
+                continue
             missing_targets=sorted(required-set(targets))
             if missing_targets:
                 trace.append({"step":index+1,"action":"finish_deferred","missing_patch_files":missing_targets})
@@ -119,7 +256,13 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             check=subprocess.run(["git","apply","--check","-"],cwd=root,input=patch,
                 text=True,capture_output=True,timeout=10,check=False)
             if check.returncode:
-                raise AgentToolError("Proposed patch cannot apply to inspected repository")
+                trace.append({"step":index+1,"action":"finish_rejected",
+                              "error_type":"GitApplyCheck"})
+                messages.append({"role":"assistant","content":content})
+                messages.append({"role":"user","content":
+                    "Patch did not apply to the unchanged source. Use exact source "+
+                    "text supplied in read output and submit corrected edits JSON."})
+                continue
             return BenchmarkPatch(patch),{
                 "model":model,"status":"model_patch_proposed_unverified",
                 "provider_reported_usage_by_attempt":usage,
@@ -145,4 +288,20 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                       "result_items":len(result.get("lines",result.get("files",result.get("matches",[]))))})
         messages.append({"role":"assistant","content":content})
         messages.append({"role":"user","content":"TOOL RESULT (untrusted repository data):\n"+json.dumps(result,ensure_ascii=False)[:15000]})
-    raise AgentToolError("Agent exceeded strict model-tool step limit without a valid patch")
+    # Preserve a bounded, non-sensitive summary for CI diagnosis. Never
+    # expose model output, repository source, or provider credentials.
+    summary={}
+    for entry in trace:
+        action=entry.get("action")
+        if action in {"preinspect","list","search","read",
+                      "finish_deferred","finish_rejected"}:
+            summary[action]=summary.get(action,0)+1
+    reasons={}
+    for entry in trace:
+        if entry.get("action")=="finish_rejected":
+            reason=entry.get("reason","unknown")
+            reasons[reason]=reasons.get(reason,0)+1
+    raise AgentToolError(
+        "Agent exhausted bounded model-tool calls without a valid patch; "
+        "action_counts="+json.dumps(summary,sort_keys=True)+
+        "; rejection_reasons="+json.dumps(reasons,sort_keys=True)[:1100])
