@@ -36,6 +36,7 @@ jobs:
         run: docker exec repopilot-ollama ollama pull qwen2.5-coder:3b
       - name: Pull restricted test image
         run: docker pull python:3.12-alpine
+      # The harness may normalize a malformed hunk only when original deleted lines match uniquely.
       - name: Attempt actual model-generated fix
         id: attempt
         continue-on-error: true
