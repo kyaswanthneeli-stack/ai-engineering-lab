@@ -54,7 +54,7 @@ jobs:
           from repopilot.pr import patch_targets
           from repopilot.review import review_proposal
           repo=Path('fixtures/invoice-multifile')
-          run=Path('.runs/agentic-invoice-issue3-v12-7b')
+          run=Path('.runs/agentic-invoice-issue3-v13-7b')
           run.mkdir(parents=True,exist_ok=False)
           report={'model':'qwen2.5-coder:7b','model_generated':False,
                   'verified':False,'issue':'https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/3',
@@ -62,7 +62,7 @@ jobs:
           try:
               issue=fetch_public_issue(report['issue'])
               proposal,meta=propose_agentic_benchmark(
-                  repo, issue['text'], os.environ['REPOPILOT_MODEL'],
+                  repo, issue['text']+"\n\nCritical acceptance criteria: pricing.py's taxable_subtotal() MUST itself raise ValueError when given negative prices, even when called directly without invoice_total(). Implement the check inside taxable_subtotal(), not only checkout.py. Also round taxable subtotal and final invoice total to two decimal places.", os.environ['REPOPILOT_MODEL'],
                   os.environ['REPOPILOT_BASE_URL'],max_steps=18,
                   required_targets={'pricing.py','checkout.py'})
               report['model_generated']=True
@@ -102,7 +102,7 @@ jobs:
           python - <<'PY'
           import json
           from pathlib import Path
-          run=Path('.runs/agentic-invoice-issue3-v12-7b')
+          run=Path('.runs/agentic-invoice-issue3-v13-7b')
           result=json.loads((run/'result.json').read_text())
           assert result['outcome']=='verified'
           assert result['model_generated'] is True
@@ -111,20 +111,25 @@ jobs:
           assert (run/'model-patch.diff').is_file()
           print('Verified AI patch contains EXACTLY pricing.py and checkout.py')
           PY
-          PATCH_FILE="$PWD/.runs/agentic-invoice-issue3-v12-7b/model-patch.diff"
+          PATCH_FILE="$PWD/.runs/agentic-invoice-issue3-v13-7b/model-patch.diff"
+          # Retain the EXACT test suite that Docker just verified, before
+          # switching to the main branch (where the challenge spec may differ).
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          spec=json.loads(Path('examples/invoice-multifile-issue.json').read_text())
+          assert 'test_direct_taxable_subtotal_negative_rejected' in spec['reproduction_test']
+          Path('.runs/agentic-invoice-issue3-v13-7b/reproduction_test.py').write_text(
+              spec['reproduction_test'],encoding='utf-8')
+          PY
           BRANCH="repopilot/issue-3-ai-verified-$GITHUB_RUN_ID"
           export BRANCH
           git -C .. fetch --no-tags origin main
           git -C .. switch -c "$BRANCH" FETCH_HEAD
           git -C .. apply --check --directory=repopilot/fixtures/invoice-multifile "$PATCH_FILE"
           git -C .. apply --directory=repopilot/fixtures/invoice-multifile "$PATCH_FILE"
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          spec=json.loads(Path('examples/invoice-multifile-issue.json').read_text())
-          test=Path('fixtures/invoice-multifile/tests/test_reproduction.py')
-          test.write_text(spec['reproduction_test'],encoding='utf-8')
-          PY
+          cp "$PWD/.runs/agentic-invoice-issue3-v13-7b/reproduction_test.py" \
+            fixtures/invoice-multifile/tests/test_reproduction.py
           git -C .. config user.name 'github-actions[bot]'
           git -C .. config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git -C .. add repopilot/fixtures/invoice-multifile/pricing.py repopilot/fixtures/invoice-multifile/checkout.py repopilot/fixtures/invoice-multifile/tests/test_reproduction.py
@@ -134,7 +139,7 @@ jobs:
           python - <<'PY'
           import json,os
           from pathlib import Path
-          path=Path('.runs/agentic-invoice-issue3-v12-7b/result.json')
+          path=Path('.runs/agentic-invoice-issue3-v13-7b/result.json')
           report=json.loads(path.read_text())
           report['candidate_branch']=os.environ['BRANCH']
           report['requires_human_review_before_pr']=True
@@ -146,8 +151,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-agentic-multifile-attempt-v12-7b
-          path: repopilot/.runs/agentic-invoice-issue3-v12-7b/
+          name: repopilot-agentic-multifile-attempt-v13-7b
+          path: repopilot/.runs/agentic-invoice-issue3-v13-7b/
           if-no-files-found: warn
           retention-days: 30
       - name: Stop model
