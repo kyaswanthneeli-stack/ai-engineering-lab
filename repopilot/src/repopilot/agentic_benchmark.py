@@ -566,7 +566,9 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                     "proposal, using the inspected source. Do not repeat it.")
                 messages.append({"role":"user","content":last_candidate_reason})
                 continue
-            attempted_finish_digests.add(digest)
+            # Record only verified-invalid candidates. A patch targeting a
+            # not-yet-inspected file may become valid after a read-only
+            # inspection, so that candidate must remain eligible on retry.
             try:
                 if set(action)=={"action","files"}:
                     files=action["files"]
@@ -666,6 +668,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             except (ValueError,TypeError,KeyError,SyntaxError) as exc:
                 # A malformed candidate is a recoverable model error, not a
                 # reason to spend the entire run on a new model process.
+                attempted_finish_digests.add(digest)
                 reason=_safe_candidate_feedback(exc)
                 last_candidate_reason=reason
                 trace.append({"step":index+1,"action":"finish_rejected",
@@ -689,6 +692,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             check=subprocess.run(["git","apply","--check","-"],cwd=root,input=patch,
                 text=True,capture_output=True,timeout=10,check=False)
             if check.returncode:
+                attempted_finish_digests.add(digest)
                 trace.append({"step":index+1,"action":"finish_rejected",
                               "error_type":"GitApplyCheck"})
                 messages.append({"role":"assistant","content":content})
