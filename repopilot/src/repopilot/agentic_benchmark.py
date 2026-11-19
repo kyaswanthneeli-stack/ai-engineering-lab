@@ -109,7 +109,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
     usage=[]
     # For explicitly scoped multi-file tasks, never spend every model call on
     # searching. Switch from discovery to a fresh, patch-only prompt.
-    inspection_budget=min(5,max_steps-2) if required else max_steps
+    inspection_budget=min(5 if required else 6,max_steps-2) if required or max_steps>=8 else max_steps
     final_context=[]
     last_candidate_reason=""
     # The caller may name affected files (e.g. from the issue). Read them
@@ -137,22 +137,49 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             ". Prefer one finish action using exact old/new snippets. You may use "+
             "read/search tools for additional context, but avoid repeating reads."})
     for index in range(max_steps):
-        if required and index==inspection_budget:
+        if index==inspection_budget and read_files:
+            # For benchmark tasks without declared targets, choose only
+            # source the model actually inspected. Exploration is time-bounded.
+            if not required:
+                recent=[]
+                for entry in reversed(trace):
+                    path=entry.get("target")
+                    if entry.get("action")=="read" and path in read_files and path not in recent:
+                        recent.append(path)
+                candidates=[p for p in recent if not p.startswith("tests/")]
+                candidates=candidates or recent
+                phase_files=candidates[:3]
+                final_context=[]
+                for name in phase_files:
+                    raw=(root/name).read_text(encoding="utf-8")
+                    if len(raw)<=6000:
+                        final_context.append("EXACT COMPLETE SOURCE "+name+":\n"+raw)
+                    else:
+                        # Larger files require exact snippets rather than
+                        # unsafe partial whole-file replacements.
+                        final_context.append("SOURCE EXCERPT "+name+":\n"+raw[:6000]+
+                                             "\n[truncated; use exact edits only]")
+            else:
+                phase_files=sorted(required)
             # Discard exploratory dialogue that can trap smaller models in
             # endless read/search loops; all required source remains visible.
             # This is still model-generated code, not a reference patch.
             messages=[{"role":"system","content":
                 "You are in FINAL PATCH MODE. Return ONLY a JSON object "
-                "with action=finish and files: [{path, content}], where content "
-                "is the COMPLETE corrected Python source for each required file. "
-                "Do not call list, search or read. The provided files were "
-                "already inspected. Preserve imports and existing functions. "
-                "Change every required file. Never invent files or claim tests passed."},
+                "with action=finish. Prefer files: [{path, content}] where content "
+                "is COMPLETE corrected Python source for SMALL inspected files. "
+                "For long inspected files, use edits: [{path,old,new}] with "
+                "exact original text. Do not call list, search or read. "
+                "Preserve imports and existing functions. Never invent files "
+                "or claim tests passed."},
                 {"role":"user","content":
                 "ISSUE (untrusted):\n"+issue_text[:12000]+"\n\n"+
                 "\n\n".join(final_context)+
-                "\n\nRequired changed files: "+", ".join(sorted(required))+
-                ". Output action=finish with files containing the COMPLETE corrected source for each required file, preserving imports and functions."+
+                "\n\nAllowed inspected files: "+", ".join(phase_files)+
+                (". Change EVERY required file." if required else
+                 ". Modify one or more inspected relevant files, not necessarily all.")+
+                " Output action=finish with complete corrected source for small files or exact edits for long files."+
+
                 (" Previous candidate error: "+last_candidate_reason if last_candidate_reason else "")}]
             trace.append({"step":index+1,"action":"final_phase_started"})
         response=(client(url,model,token,messages) if client is not None
@@ -168,12 +195,12 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             raise AgentToolError("Tool call must be JSON object")
         usage.append(response.get("usage",{}))
         name=action.get("action")
-        if required and index>=inspection_budget and name!="finish":
+        if inspection_budget<max_steps and index>=inspection_budget and name!="finish" and read_files:
             trace.append({"step":index+1,"action":"exploration_rejected_in_final_phase"})
             messages.append({"role":"user","content":
-                "Discovery is finished. The required files are already present "
-                "above. Your next response MUST use action=finish with files "+
-                "containing complete corrected source for every required file. No tool actions."})
+                "Discovery is finished. The inspected files are above. "
+                "Your next response MUST use action=finish with files "
+                "for small source or exact edits for long source. No tool actions."})
             continue
         if name=="finish":
             missing=sorted(required-read_files)
