@@ -251,6 +251,12 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 "is COMPLETE corrected Python source for SMALL inspected files. "
                 "For long inspected files, use edits: [{path,old,new}] with "
                 "exact original text. Do not call list, search or read. "
+                "Use ONLY exact paths from Allowed inspected files. "
+                "When editing a large module, use a minimal edits entry: "
+                "{path: permitted_path, old: verbatim_existing_lines, "
+                "new: corrected_lines}. Copy old text byte-for-byte from "
+                "the provided excerpt; do not rewrite unrelated functions. "
+                "For a small module under 6KB, files mode is permitted. "
                 "Preserve imports and existing functions. Never invent files "
                 "or claim tests passed."},
                 {"role":"user","content":
