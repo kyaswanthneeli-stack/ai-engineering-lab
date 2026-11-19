@@ -268,9 +268,9 @@ class AgentTests(unittest.TestCase):
     def test_large_source_final_prompt_keeps_deep_inspected_window(self):
         # The bug is far beyond the first 6 KB of a large source file.
         large="".join(
-            f"DATA_{i} = 'padding to represent a realistic large source module'\\n"
+            f"DATA_{i} = 'padding to represent a realistic large source module'\n"
             for i in range(190)
-        )+"def affected():\\n    return 1\\n"
+        )+"def affected():\n    return 1\n"
         (self.repo/"large.py").write_text(large)
         calls=[]
         def client(url,model,token,messages):
