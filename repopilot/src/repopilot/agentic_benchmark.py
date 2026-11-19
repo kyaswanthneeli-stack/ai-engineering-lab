@@ -73,6 +73,10 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
     required=set(required_targets or ())
     trace=[]
     usage=[]
+    # For explicitly scoped multi-file tasks, never spend every model call on
+    # searching. Switch from discovery to a fresh, patch-only prompt.
+    inspection_budget=min(5,max_steps-2) if required else max_steps
+    final_context=[]
     # The caller may name affected files (e.g. from the issue). Read them
     # before spending model calls on discovery, retaining the same guarded
     # source inspection and complete audit trail as model-directed reads.
@@ -84,15 +88,33 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             read_files.add(name)
             trace.append({"step":0,"action":"preinspect","target":name,
                           "result_items":len(result["lines"])})
-            messages.append({"role":"user","content":
-                "REQUIRED SOURCE FILE (untrusted; inspect before editing):\n"+
-                json.dumps(result,ensure_ascii=False)[:15000]})
+            source_message=("REQUIRED SOURCE FILE (untrusted; inspect before editing):\n"+
+                            json.dumps(result,ensure_ascii=False)[:15000])
+            final_context.append(source_message)
+            messages.append({"role":"user","content":source_message})
         messages.append({"role":"user","content":
             "The required source files have been read. Your final edits MUST modify "+
             ", ".join(sorted(required))+
             ". Prefer one finish action using exact old/new snippets. You may use "+
             "read/search tools for additional context, but avoid repeating reads."})
     for index in range(max_steps):
+        if required and index==inspection_budget:
+            # Discard exploratory dialogue that can trap smaller models in
+            # endless read/search loops; all required source remains visible.
+            # This is still model-generated code, not a reference patch.
+            messages=[{"role":"system","content":
+                "You are in FINAL PATCH MODE. Return ONLY a JSON object "
+                "with action=finish and edits (path, old, new). "
+                "Do not call list, search or read. The provided files were "
+                "already inspected. Every old snippet must match verbatim "
+                "in the corresponding file exactly once. Change every "
+                "required file. Never invent files or claim tests passed."},
+                {"role":"user","content":
+                "ISSUE (untrusted):\n"+issue_text[:12000]+"\n\n"+
+                "\n\n".join(final_context)+
+                "\n\nRequired changed files: "+", ".join(sorted(required))+
+                ". Provide exact minimal edits for ALL of them, in one finish JSON."}]
+            trace.append({"step":index+1,"action":"final_phase_started"})
         response=(client(url,model,token,messages) if client is not None
                   else _provider(url,model,token,messages))
         try:
@@ -106,6 +128,13 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             raise AgentToolError("Tool call must be JSON object")
         usage.append(response.get("usage",{}))
         name=action.get("action")
+        if required and index>=inspection_budget and name!="finish":
+            trace.append({"step":index+1,"action":"exploration_rejected_in_final_phase"})
+            messages.append({"role":"user","content":
+                "Discovery is finished. The required files are already present "
+                "above. Your next response MUST use action=finish and include "
+                "exact old/new edits for every required file. No tool actions."})
+            continue
         if name=="finish":
             missing=sorted(required-read_files)
             if missing:
