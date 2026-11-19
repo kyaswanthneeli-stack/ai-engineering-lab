@@ -81,6 +81,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         raise AgentToolError("Provider redirects not permitted")
 
 
+
 def _local_ollama_chat(url,model,messages,token_budget):
     """Fallback only for a local Ollama /v1 endpoint returning HTTP 404.
 
@@ -137,6 +138,14 @@ def _provider(url,model,token,messages):
     except ValueError:
         token_budget=2600
     token_budget=max(256,min(token_budget,2600))
+    # CPU-only GitHub runners can stall on OpenAI-compatible JSON mode before
+    # the first token. Explicit opt-in uses the native endpoint directly,
+    # avoiding two 120-second compatible-API waits. Never send credentials or
+    # source content to a different host: native mode is loopback-only.
+    if os.getenv("REPOPILOT_OLLAMA_NATIVE","").strip()=="1":
+        if token:
+            raise AgentToolError("Native local Ollama mode does not use API tokens")
+        return _local_ollama_chat(url,model,messages,token_budget)
     data=json.dumps({"model":model,"temperature":0,"max_tokens":token_budget,
         "stream":False,"messages":messages,
         "response_format":{"type":"json_object"}}).encode("utf-8")
@@ -186,6 +195,28 @@ def _provider(url,model,token,messages):
                                  " after "+str(attempt+1)+" attempt(s)")
         time.sleep(2)
     raise AgentToolError("Model provider exhausted retry budget")
+
+
+def _parse_model_action(content):
+    """Accept a JSON object or a single fenced JSON object, never source code.
+
+    Invalid text is not persisted in the audit trace or echoed in errors.
+    The agent still validates every requested tool and source-edit path.
+    """
+    if not isinstance(content,str) or len(content)>100000:
+        raise AgentToolError("Invalid model response")
+    raw=content.strip()
+    lines=raw.splitlines()
+    if (len(lines)>=3 and lines[0].strip().lower() in {"```","```json"} and
+            lines[-1].strip()=="```"):
+        raw="\n".join(lines[1:-1]).strip()
+    try:
+        value=json.loads(raw)
+    except (TypeError,ValueError) as exc:
+        raise AgentToolError("Invalid model tool-call JSON") from exc
+    if not isinstance(value,dict):
+        raise AgentToolError("Tool call must be JSON object")
+    return value
 
 
 def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:str|None=None,
@@ -259,7 +290,12 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             ranked=ranked_source_context(root,issue_text,max_files=2,
                                          max_chars=9000,scan_limit=1800)
             for item in ranked:
-                if item.score<8:
+                # Positive lexical/symbol evidence is sufficient to safely
+                # inspect source. An arbitrary score cutoff previously caused
+                # nearly all real tasks to start with zero inspected files.
+                # Inspection is read-only; proposed edits remain separately
+                # checked against the inspected-path allowlist.
+                if item.score<=0:
                     continue
                 try:
                     result=read_python(root,item.path,start=1,count=120)
@@ -355,16 +391,26 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             trace.append({"step":index+1,"action":"final_phase_started"})
         response=(client(url,model,token,messages) if client is not None
                   else _provider(url,model,token,messages))
+        usage.append(response.get("usage",{}))
         try:
             content=response["choices"][0]["message"]["content"]
-            if not isinstance(content,str) or len(content)>100000:
-                raise AgentToolError("Invalid model response")
-            action=json.loads(content)
-        except (KeyError,IndexError,TypeError,ValueError) as exc:
-            raise AgentToolError("Invalid model tool-call JSON") from exc
-        if not isinstance(action,dict):
-            raise AgentToolError("Tool call must be JSON object")
-        usage.append(response.get("usage",{}))
+            action=_parse_model_action(content)
+        except (AgentToolError,KeyError,IndexError,TypeError,ValueError):
+            # A small local model can produce a truncated or fenced response.
+            # Reject that response, ask for a NEW valid action, and charge
+            # the correction against the existing bounded model-step budget.
+            # Do not log, trust, execute, or reuse any malformed response.
+            trace.append({"step":index+1,"action":"invalid_json_rejected"})
+            if index==max_steps-1:
+                raise AgentToolError("Invalid model tool-call JSON after step budget")
+            suffix=("Use action=finish with validated inspected paths." if
+                    index>=inspection_budget and read_files else
+                    "Use action=list, search, read, or finish as appropriate.")
+            messages.append({"role":"user","content":
+                "Your previous response was rejected because it was not one "
+                "valid JSON object. Return exactly one JSON object without "
+                "Markdown, backticks, commentary, or extra tokens. "+suffix})
+            continue
         name=action.get("action")
         if index>=inspection_budget and name!="finish" and read_files:
             trace.append({"step":index+1,"action":"exploration_rejected_in_final_phase"})
@@ -395,10 +441,27 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                         candidates=list(patch_targets(action["patch"]))
                     except (TypeError,ValueError):
                         pass
-                if not candidates:
-                    ranked=ranked_source_context(root,issue_text,max_files=2,
-                                                 max_chars=9000,scan_limit=1800)
-                    candidates=[item.path for item in ranked]
+                # Explicit traversal or absolute paths are not recoverable
+                # model mistakes: reject them without attempting any read.
+                if any(isinstance(candidate,str) and
+                       (Path(candidate).is_absolute() or
+                        ".." in Path(candidate).parts)
+                       for candidate in candidates):
+                    raise AgentToolError("Cannot change source before inspecting files")
+                # Inspect an existing model-suggested file first. Only when
+                # none exists should we fall back to issue-ranked sources;
+                # never broaden the file-edit allowlist unnecessarily.
+                existing=[candidate for candidate in candidates
+                          if isinstance(candidate,str) and
+                          (root/candidate).is_file() and
+                          not (root/candidate).is_symlink()]
+                if existing:
+                    candidates=existing
+                else:
+                    ranked=ranked_source_context(
+                        root,issue_text,max_files=3,
+                        max_chars=12000,scan_limit=1800)
+                    candidates=[item.path for item in ranked if item.score>0]
                 recovered=[]
                 for candidate in candidates:
                     if len(recovered)>=2:
@@ -416,7 +479,23 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                     trace.append({"step":index+1,"action":"initial_finish_preinspect",
                                   "target":candidate,"result_items":len(inspected["lines"])})
                 if not recovered:
-                    raise AgentToolError("Cannot change source before inspecting files")
+                    # The model may have hallucinated an entirely unknown
+                    # path. This is not an authorization to edit or an
+                    # irrecoverable failure: request a real read-only tool
+                    # action on its next bounded turn instead.
+                    trace.append({"step":index+1,
+                                  "action":"finish_rejected_no_source"})
+                    if index==max_steps-1:
+                        raise AgentToolError(
+                            "No existing Python source inspected within step budget")
+                    messages.append({"role":"user","content":
+                        "Your finish candidate was REJECTED, NOT applied. "
+                        "No requested file exists in the repository, and no "
+                        "source has been inspected. Your next reply MUST "
+                        "use action=list, search, or read on EXISTING Python "
+                        "source. Do not propose another patch until reading "
+                        "a real file."})
+                    continue
                 messages.append({"role":"user","content":
                     "The previous finish action was REJECTED and NOT applied. "
                     "The following exact existing Python source was safely "
@@ -427,6 +506,35 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                     ", ".join(sorted(read_files))+
                     ". You may inspect more source using approved read tools."})
                 trace.append({"step":index+1,"action":"finish_deferred_uninspected"})
+                continue
+            if set(action) not in ({"action","files"}, {"action","edits"},
+                                   {"action","patch"}):
+                # JSON validity alone is not enough: a small model may return
+                # action=finish with no patch, or include explanation keys.
+                # Never interpret such output as an authorized source edit.
+                trace.append({"step":index+1,"action":"finish_schema_rejected",
+                              "error_type":"InvalidFinishSchema"})
+                # The forced final-phase prompt resets conversation history.
+                # Persist the safe schema diagnostic so the next model call
+                # still receives feedback after that reset.
+                last_candidate_reason=("Your previous finish response had unsupported "
+                    "fields. Respond with exactly {action:finish,edits:[{path,old,new}]}, "
+                    "{action:finish,files:[{path,content}]}, or "
+                    "{action:finish,patch:unified_diff}; no other keys.")
+                if index==max_steps-1:
+                    raise AgentToolError("Invalid finish schema after step budget")
+                messages.append({"role":"user","content":
+                    "Finish action REJECTED. Do not reuse the previous JSON. "
+                    "Return a NEW single JSON object with EXACTLY one of: "
+                    "{\\\"action\\\":\\\"finish\\\",\\\"edits\\\":["
+                    "{\\\"path\\\":\\\"inspected.py\\\",\\\"old\\\":\\\"exact old source\\\","
+                    "\\\"new\\\":\\\"corrected source\\\"}]}, "
+                    "{\\\"action\\\":\\\"finish\\\",\\\"files\\\":["
+                    "{\\\"path\\\":\\\"inspected.py\\\",\\\"content\\\":\\\"entire source\\\"}]}, "
+                    "or {\\\"action\\\":\\\"finish\\\",\\\"patch\\\":"
+                    "\\\"complete unified diff\\\"}. No extra keys. "
+                    "Edit ONLY these inspected existing files: "+
+                    ", ".join(sorted(read_files)[:15])})
                 continue
             try:
                 if set(action)=={"action","files"}:
