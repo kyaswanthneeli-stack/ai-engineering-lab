@@ -20,6 +20,47 @@ class AgentTests(unittest.TestCase):
             return {"choices":[{"message":{"content":json.dumps(next(it))}}],"usage":{"total_tokens":5}}
         return client
 
+
+    def test_v2_auto_ranked_inspection_reaches_deep_function(self):
+        (self.repo/"large.py").write_text(
+            "".join(f"FILLER_{i} = {i}\n" for i in range(260))
+            + "def calculate_invoice_tax(price):\n    return 1\n")
+        seen=[]
+        def client(url,model,token,messages):
+            seen.append(list(messages))
+            return {"choices":[{"message":{"content":json.dumps({
+                "action":"finish","edits":[{
+                    "path":"large.py","old":"    return 1",
+                    "new":"    return round(price * 0.1, 2)"}]})}}]}
+        result,meta=propose_agentic_benchmark(
+            self.repo,"Fix calculate_invoice_tax, which returns the wrong tax",
+            "mock","http://127.0.0.1:11434/v1",client=client,
+            max_steps=4,auto_issue_paths=True)
+        self.assertIn("round(price * 0.1, 2)",result.patch)
+        self.assertIn("large.py",meta["inspected_files"])
+        self.assertTrue(any(
+            '"line": 261' in m["content"] and "calculate_invoice_tax" in m["content"]
+            for m in seen[0]))
+
+    def test_v2_required_large_file_uses_safe_issue_window(self):
+        (self.repo/"large.py").write_text(
+            "".join(f"FILLER_{i} = {i}\n" for i in range(270))
+            + "def calculate_invoice_tax(price):\n    return 1\n")
+        seen=[]
+        def client(url,model,token,messages):
+            seen.append(list(messages))
+            return {"choices":[{"message":{"content":json.dumps({
+                "action":"finish","edits":[{
+                    "path":"large.py","old":"    return 1",
+                    "new":"    return round(price * 0.1, 2)"}]})}}]}
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"Fix calculate_invoice_tax for invoice processing",
+            "mock","http://127.0.0.1:11434/v1",client=client,
+            max_steps=3,required_targets={"large.py"})
+        self.assertIn("round(price * 0.1, 2)",patch.patch)
+        self.assertTrue(any(
+            '"line": 271' in m["content"] for m in seen[0]))
+
     def test_opt_in_local_native_ollama_skips_compatible_api(self):
         with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1",
                                       "REPOPILOT_MAX_TOKENS":"512"}), patch(
