@@ -24,6 +24,29 @@ from .swebench_export import load_manifest
 
 REPO=re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
+# Safe, source-free progress checkpoints survive a timed-out worker process.
+# The final attempt.json remains authoritative; this file is diagnostic only.
+CHECKPOINT_STAGES=frozenset({
+    "initialized", "dataset_verified", "pinned_checkout_complete",
+    "model_response_received",
+})
+
+
+def _save_checkpoint(output:Path,instance_id:str,stage:str,started:float)->None:
+    if stage not in CHECKPOINT_STAGES:
+        raise ValueError("Unknown benchmark checkpoint")
+    row={
+        "instance_id":instance_id,
+        "last_completed_stage":stage,
+        "stage_elapsed_ms":round((time.monotonic()-started)*1000),
+        "officially_evaluated":False,
+        "officially_resolved":None,
+    }
+    # Atomic replacement avoids a truncated JSON read when a worker times out.
+    temp=output/"stage.json.tmp"
+    temp.write_text(json.dumps(row,sort_keys=True)+"\n",encoding="utf-8")
+    os.replace(temp,output/"stage.json")
+
 def bounded_issue_context(statement: str, max_chars: int = 6500) -> str:
     """Preserve the issue's title/description and final reproduction evidence.
 
@@ -72,6 +95,7 @@ def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
     report={"instance_id":instance_id,"repo":task["repo"],"base_commit":task["base_commit"],
             "status":"not_attempted","officially_evaluated":False,"officially_resolved":None,
             "is_reference_patch":False}
+    _save_checkpoint(output,instance_id,"initialized",started)
     try:
         if dataset_loader is None:
             try:
@@ -90,6 +114,7 @@ def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
         issue=row["problem_statement"]
         if not isinstance(issue,str) or not issue.strip():
             raise ValueError("Official issue statement missing")
+        _save_checkpoint(output,instance_id,"dataset_verified",started)
         report["status"]="attempted"
         issue_budget=configured_issue_context_limit()
         report["issue_context_chars"]=issue_budget
@@ -100,10 +125,12 @@ def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
             # the issue statement is read from the official pinned dataset.
             work=checkout(f"https://github.com/{owner}/{repo}/issues/1",
                           task["base_commit"],Path(tmp)/"repo")
+            _save_checkpoint(output,instance_id,"pinned_checkout_complete",started)
             spec,meta=model_proposer(work,bounded_issue_context(issue,issue_budget),
                                      model or os.getenv("REPOPILOT_MODEL",""),
                                      url or os.getenv("REPOPILOT_BASE_URL",""),
                                      token if token is not None else os.getenv("REPOPILOT_API_KEY"))
+            _save_checkpoint(output,instance_id,"model_response_received",started)
         report["model"]=meta.get("model","")
         report["agent_steps"]=meta.get("agent_steps")
         report["inspected_files"]=meta.get("inspected_files",[])
