@@ -138,6 +138,14 @@ def _provider(url,model,token,messages):
     except ValueError:
         token_budget=2600
     token_budget=max(256,min(token_budget,2600))
+    # CPU-only GitHub runners can stall on OpenAI-compatible JSON mode before
+    # the first token. Explicit opt-in uses the native endpoint directly,
+    # avoiding two 120-second compatible-API waits. Never send credentials or
+    # source content to a different host: native mode is loopback-only.
+    if os.getenv("REPOPILOT_OLLAMA_NATIVE","").strip()=="1":
+        if token:
+            raise AgentToolError("Native local Ollama mode does not use API tokens")
+        return _local_ollama_chat(url,model,messages,token_budget)
     data=json.dumps({"model":model,"temperature":0,"max_tokens":token_budget,
         "stream":False,"messages":messages,
         "response_format":{"type":"json_object"}}).encode("utf-8")
