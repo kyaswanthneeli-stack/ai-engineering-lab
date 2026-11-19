@@ -10,6 +10,7 @@ from .context import index_python
 from .patches import apply_patch
 from .sandbox import run_tests
 from .spec import IssueSpec
+from .test_evidence import check_three_stage_evidence
 
 class VerificationError(RuntimeError):
     pass
@@ -43,6 +44,10 @@ def execute(repo:Path,spec:IssueSpec,output:Path,timeout:int=30,runner=run_tests
         after=runner(work,spec.test_command,timeout=timeout)
         if after.timed_out or after.exit_code!=0:
             raise VerificationError("Patched tests must pass")
+        try:
+            check_three_stage_evidence(baseline,before,after)
+        except ValueError as exc:
+            raise VerificationError("Test evidence invalid: "+str(exc)) from exc
         report={"issue_id":spec.issue_id,"outcome":"verified_in_sandbox","model_called_during_verification":False,"draft_pr_created":False,"symbol_count":len(symbols),"baseline":asdict(baseline),"before":asdict(before),"after":asdict(after),"elapsed_ms":round((time.monotonic()-start)*1000)}
         output.parent.mkdir(parents=True,exist_ok=True)
         output.write_text(json.dumps(report,indent=2)+"\n",encoding="utf-8")
