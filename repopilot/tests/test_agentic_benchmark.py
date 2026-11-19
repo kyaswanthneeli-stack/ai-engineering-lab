@@ -50,7 +50,7 @@ class AgentTests(unittest.TestCase):
             required_targets={"pricing.py","checkout.py"})
         self.assertEqual(patch.patch.count("diff --git"),2)
         self.assertEqual(meta["agent_steps"],5)
-        self.assertEqual(sum(x["action"]=="finish_deferred" for x in meta["tool_trace"]),1)
+        self.assertEqual(sum(x["action"]=="finish_deferred" for x in meta["tool_trace"]),2)
 
     def test_required_files_are_preinspected_without_model_reads(self):
         steps=[{"action":"finish","edits":[
