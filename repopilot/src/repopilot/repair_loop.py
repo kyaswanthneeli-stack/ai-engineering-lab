@@ -30,6 +30,20 @@ def run_with_repair(repo:Path,issue_url:str,output:Path,*,max_attempts:int=3,
     issue=None
     last_proposal=None
     feedback=""
+    def test_feedback(path:Path)->str:
+        # Preserve useful failure signals, without copying an entire untrusted test log.
+        if not path.is_file():
+            return ""
+        try:
+            record=json.loads(path.read_text(encoding="utf-8"))
+            if record.get("outcome")!="failed":
+                return ""
+            stage=record.get("failed_stage","unknown")
+            after=record.get("after",{}) or {}
+            text=str(after.get("output",""))[-1200:]
+            return f"Failed verification stage: {stage}. Test exit={after.get('exit_code')}. Test output excerpt:\\n{text}"
+        except (ValueError,TypeError,OSError):
+            return ""
     try:
         issue=issue_reader(issue_url)
         report["issue_id"]=issue["issue_id"]
@@ -75,8 +89,10 @@ def run_with_repair(repo:Path,issue_url:str,output:Path,*,max_attempts:int=3,
                 record["status"]="failed"
                 record["error_type"]=type(exc).__name__
                 # Avoid echoing secret-bearing model outputs or raw source in traces.
-                feedback=type(exc).__name__+": candidate rejected or failed verification"
-                record["error_summary"]=feedback
+                evidence=test_feedback(output/f"attempt-{number:02d}-verification.json")
+                feedback=(evidence or (type(exc).__name__+": candidate rejected or failed verification"))[:1500]
+                record["error_summary"]=type(exc).__name__+": candidate rejected or failed verification"
+                record["has_test_failure_evidence"]=bool(evidence)
     except Exception as exc:
         report["setup_error_type"]=type(exc).__name__
         report["setup_error"]="Could not retrieve or validate public issue"
