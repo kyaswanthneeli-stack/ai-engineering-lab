@@ -45,7 +45,7 @@ jobs:
           REPOPILOT_MODEL: qwen2.5-coder:3b
           REPOPILOT_DEBUG_CANDIDATE: '1' # Public synthetic fixture only; do not use for private repos
         run: |
-          python -m repopilot.cli run examples/calculator https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/1 --output .runs/ollama-issue-1
+          python -m repopilot.cli run fixtures/calculator-buggy https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/1 --output .runs/ollama-issue-1
       - name: Print verifiable attempt status
         if: always()
         run: |
@@ -64,6 +64,26 @@ jobs:
           else
             echo 'SETUP FAILED: No model attempt report produced. This is NOT a resolved issue.'
           fi
+      - name: Assert genuine model proposal and Docker verification
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('.runs/ollama-issue-1')
+          if not (root/'run.json').is_file():
+              raise SystemExit('NO LIVE RUN: Missing run.json')
+          d=json.loads((root/'run.json').read_text())
+          if d.get('outcome')!='verified_in_sandbox':
+              raise SystemExit('LIVE RUN FAILED: '+str(d.get('error_type','unknown')))
+          if not d.get('model_generated_proposal'):
+              raise SystemExit('LIVE RUN FAILED: No genuine model proposal')
+          if d.get('static_review',{}).get('status')=='blocked':
+              raise SystemExit('LIVE RUN FAILED: Static review blocked proposal')
+          if d.get('baseline',{}).get('exit_code')!=0 or d.get('before',{}).get('exit_code') in (None,0) or d.get('after',{}).get('exit_code')!=0:
+              raise SystemExit('LIVE RUN FAILED: Required Docker evidence missing')
+          print('PASS: model-generated patch passed review and real Docker baseline/reproduction/regression')
+          PY
       - name: Upload issue attempt and dashboard
         if: always()
         uses: actions/upload-artifact@v4
