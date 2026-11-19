@@ -62,11 +62,11 @@ def _safe_candidate_feedback(exc:Exception)->str:
         "No source modifications":
             "The proposal did not modify any inspected file.",
         "Each edit requires only path, old and new":
-            "Each exact edit needs only path, old, and new fields.",
+            "Each exact edit must contain EXACTLY path, old, and new string fields, with no commentary, line numbers, or additional keys.",
         "Expected 1–8 complete existing Python files":
             "Provide a nonempty files list of at most eight files.",
         "Each file requires path and content":
-            "Each complete-file entry must have path and content.",
+            "Each complete-file entry needs EXACTLY path and content string keys. For large files use short edits instead.",
         "Duplicate complete-file replacement":
             "Supply only one replacement for each path.",
         "Complete source must be newline-terminated and under 6 KB":
@@ -76,7 +76,9 @@ def _safe_candidate_feedback(exc:Exception)->str:
         "Edit path was not supplied to the model":
             "Only inspected Python paths are permitted.",
         "Final proposal requires only edits or patch":
-            "Use action=finish with files [{path, content}], edits, or patch.",
+            "Use a single action=finish containing only edits or patch, with no explanation fields.",
+        "Candidate changed a file outside inspected source":
+            "Your proposal touches uninspected or unmatched source. Modify ONLY the exact approved source path in the inspected-files list.",
     }
     return safe_reasons.get(reason,"Candidate failed bounded source/patch validation.")
 
@@ -96,8 +98,13 @@ def _safe_repair_instruction(root:Path,read_files:set[str])->str:
             'Return a NEW action=finish with edits: '
             '[{path, old, new}] ONLY, where old is a SHORT exact text span '
             'from the inspected source and new is a syntax-valid replacement. '
-            'Do not return entire file contents, extra fields or uninspected '
-            'paths. Keep original surrounding source unchanged.')
+            'Use valid JSON with EXACT keys: action, edits; each edit must '
+            'contain EXACTLY path, old, new as strings. Change only the '
+            'inspected Python paths listed here: '+
+            ', '.join(sorted(read_files)[:8])+
+            '. Do not return entire file contents, commentary, extra fields '
+            'or uninspected paths. Preserve indentation, imports, and '
+            'surrounding source unchanged.')
     return (
         'Return a NEW action=finish with files: [{path, content}] for complete '
         'corrected SMALL Python files, preserving imports and all other '
