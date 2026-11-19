@@ -75,7 +75,7 @@ jobs:
           assert data.get("choices"),"Local model returned no chat completion"
           print("PASS: Ollama returned real model JSON via supported endpoint")
           PY
-      - name: Attempt one pinned real SWE-bench Lite issue (bounded discovery and native fallback / JSON repair retry v16)
+      - name: Attempt one pinned real SWE-bench Lite issue (bounded discovery and native fallback / schema repair retry v17)
         continue-on-error: true
         env:
           REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
@@ -86,14 +86,14 @@ jobs:
           curl -fsS "${REPOPILOT_BASE_URL}/models" >/dev/null
           python -m repopilot.benchmark_attempt pytest-dev__pytest-11148 --agentic --max-steps 12 \
             --manifest benchmarks/swebench-lite-12.json \
-            --output .runs/official-attempt-pytest-11148-v16-agentic
+            --output .runs/official-attempt-pytest-11148-v17-agentic
       - name: Report actual outcome without claiming resolution
         if: always()
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          path=Path(".runs/official-attempt-pytest-11148-v16-agentic/attempt.json")
+          path=Path(".runs/official-attempt-pytest-11148-v17-agentic/attempt.json")
           if not path.is_file():
               # Setup failure is explicitly unscored, never a model failure.
               result={"instance_id":"pytest-dev__pytest-11148",
@@ -125,7 +125,7 @@ jobs:
           python - <<'PY'
           import json, os
           from pathlib import Path
-          folder=Path('.runs/official-attempt-pytest-11148-v16-agentic')
+          folder=Path('.runs/official-attempt-pytest-11148-v17-agentic')
           attempt=folder/'attempt.json'
           submission=folder/'unreviewed-prediction.json'
           ready=False
@@ -150,8 +150,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-real-swebench-pytest-11148-v16-unscored
-          path: repopilot/.runs/official-attempt-pytest-11148-v16-agentic/
+          name: repopilot-real-swebench-pytest-11148-v17-unscored
+          path: repopilot/.runs/official-attempt-pytest-11148-v17-agentic/
           if-no-files-found: warn
           retention-days: 30
       - name: Stop local model
@@ -173,14 +173,14 @@ jobs:
           python-version: '3.11'
       - uses: actions/download-artifact@v4
         with:
-          name: repopilot-real-swebench-pytest-11148-v16-unscored
-          path: repopilot/.runs/official-attempt-pytest-11148-v16-agentic/
+          name: repopilot-real-swebench-pytest-11148-v17-unscored
+          path: repopilot/.runs/official-attempt-pytest-11148-v17-agentic/
       - name: Convert the model-generated prediction to official JSONL
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          p=Path('.runs/official-attempt-pytest-11148-v16-agentic')
+          p=Path('.runs/official-attempt-pytest-11148-v17-agentic')
           proposal=json.loads((p/'unreviewed-prediction.json').read_text())
           assert proposal['generated_by_model'] is True
           assert proposal['instance_id']=='pytest-dev__pytest-11148'
@@ -196,18 +196,18 @@ jobs:
           python -m swebench.harness.run_evaluation \
             --dataset_name princeton-nlp/SWE-bench_Lite \
             --split test \
-            --predictions_path .runs/official-attempt-pytest-11148-v16-agentic/predictions.jsonl \
+            --predictions_path .runs/official-attempt-pytest-11148-v17-agentic/predictions.jsonl \
             --instance_ids pytest-dev__pytest-11148 \
             --max_workers 1 \
-            --run_id "repopilot-v16-${GITHUB_RUN_ID}"
+            --run_id "repopilot-v17-${GITHUB_RUN_ID}"
       - name: Upload official harness reports and logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-pytest-11148-v16-official-evaluation
+          name: repopilot-pytest-11148-v17-official-evaluation
           path: |
             repopilot/logs/evaluation/
             repopilot/logs/build_images/
-            repopilot/.runs/official-attempt-pytest-11148-v16-agentic/predictions.jsonl
+            repopilot/.runs/official-attempt-pytest-11148-v17-agentic/predictions.jsonl
           if-no-files-found: warn
           retention-days: 30
