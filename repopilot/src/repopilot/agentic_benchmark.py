@@ -507,6 +507,28 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                     ". You may inspect more source using approved read tools."})
                 trace.append({"step":index+1,"action":"finish_deferred_uninspected"})
                 continue
+            if set(action) not in ({"action","files"}, {"action","edits"},
+                                   {"action","patch"}):
+                # JSON validity alone is not enough: a small model may return
+                # action=finish with no patch, or include explanation keys.
+                # Never interpret such output as an authorized source edit.
+                trace.append({"step":index+1,"action":"finish_schema_rejected",
+                              "error_type":"InvalidFinishSchema"})
+                if index==max_steps-1:
+                    raise AgentToolError("Invalid finish schema after step budget")
+                messages.append({"role":"user","content":
+                    "Finish action REJECTED. Do not reuse the previous JSON. "
+                    "Return a NEW single JSON object with EXACTLY one of: "
+                    "{\\\"action\\\":\\\"finish\\\",\\\"edits\\\":["
+                    "{\\\"path\\\":\\\"inspected.py\\\",\\\"old\\\":\\\"exact old source\\\","
+                    "\\\"new\\\":\\\"corrected source\\\"}]}, "
+                    "{\\\"action\\\":\\\"finish\\\",\\\"files\\\":["
+                    "{\\\"path\\\":\\\"inspected.py\\\",\\\"content\\\":\\\"entire source\\\"}]}, "
+                    "or {\\\"action\\\":\\\"finish\\\",\\\"patch\\\":"
+                    "\\\"complete unified diff\\\"}. No extra keys. "
+                    "Edit ONLY these inspected existing files: "+
+                    ", ".join(sorted(read_files)[:15])})
+                continue
             try:
                 if set(action)=={"action","files"}:
                     files=action["files"]
