@@ -71,6 +71,38 @@ class AgentTests(unittest.TestCase):
             with self.assertRaisesRegex(AgentToolError,"missing choices"):
                 _provider("http://127.0.0.1:11434/v1","mock",None,[])
 
+
+    def test_initial_finish_inspects_target_and_requires_fresh_patch(self):
+        first={"action":"finish","edits":[
+            {"path":"pricing.py","old":"return sum(values)","new":"return 999"}]}
+        second={"action":"finish","edits":[
+            {"path":"pricing.py","old":"return sum(values)",
+             "new":"return round(sum(values), 2)"}]}
+        seen=[]
+        it=iter([first,second])
+        def client(url,model,token,messages):
+            seen.append(list(messages))
+            return {"choices":[{"message":{"content":json.dumps(next(it))}}]}
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"round subtotal","mock","http://127.0.0.1:11434/v1",
+            client=client,max_steps=2)
+        self.assertIn("round(sum(values), 2)",patch.patch)
+        self.assertNotIn("999",patch.patch)
+        self.assertTrue(any(x["action"]=="initial_finish_preinspect"
+                            for x in meta["tool_trace"]))
+        self.assertEqual(meta["inspected_files"],["pricing.py"])
+        self.assertTrue(any("return sum(values)" in item["content"]
+                            for item in seen[1] if item["role"]=="user"))
+
+    def test_initial_finish_does_not_inspect_unsafe_path(self):
+        response={"action":"finish","edits":[
+            {"path":"../outside.py","old":"x","new":"y"}]}
+        with self.assertRaisesRegex(AgentToolError,
+                                    "Cannot change source before inspecting files"):
+            propose_agentic_benchmark(
+                self.repo,"fix","mock","http://127.0.0.1:11434/v1",
+                client=self.sequence([response]),max_steps=2)
+
     def test_read_two_modules_then_emit_valid_multi_file_patch(self):
         steps=[
             {"action":"list","prefix":""},
