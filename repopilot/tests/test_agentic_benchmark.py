@@ -4,7 +4,7 @@ import unittest
 import urllib.error
 from unittest.mock import patch
 from pathlib import Path
-from repopilot.agentic_benchmark import propose_agentic_benchmark,AgentToolError,_provider,_safe_repair_instruction
+from repopilot.agentic_benchmark import propose_agentic_benchmark,AgentToolError,_provider,_safe_repair_instruction,_safe_candidate_feedback
 
 
 class AgentTests(unittest.TestCase):
@@ -158,6 +158,24 @@ class AgentTests(unittest.TestCase):
             for item in history[1] if item["role"]=="user"))
         self.assertEqual(sum(t["action"]=="finish_rejected"
                              for t in meta["tool_trace"]),1)
+
+    def test_large_module_recovery_names_only_valid_inspected_paths_and_schema(self):
+        module=self.repo/"large.py"
+        module.write_text("".join(f"ITEM_{i} = {i}\n" for i in range(550)))
+        message=_safe_repair_instruction(self.repo,{"large.py"})
+        self.assertIn("large.py",message)
+        self.assertIn("EXACTLY path, old, new",message)
+        self.assertIn("Preserve indentation",message)
+        self.assertNotIn("untrusted.py",message)
+
+    def test_invalid_edit_schema_gets_specific_safe_repair_feedback(self):
+        message=_safe_candidate_feedback(
+            ValueError("Each edit requires only path, old and new"))
+        self.assertIn("no commentary",message)
+        mismatch=_safe_candidate_feedback(
+            ValueError("Candidate changed a file outside inspected source"))
+        self.assertIn("uninspected",mismatch)
+        self.assertNotIn("Candidate failed bounded",mismatch)
 
     def test_small_module_repair_prefers_complete_source(self):
         recommendation=_safe_repair_instruction(
