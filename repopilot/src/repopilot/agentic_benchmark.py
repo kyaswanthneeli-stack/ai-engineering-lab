@@ -248,6 +248,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             inspected_windows.setdefault(name,[]).append(
                 (start,min(start+119,result["total_lines"])))
             trace.append({"step":0,"action":"preinspect","target":name,
+                          "start_line":start,"total_lines":result["total_lines"],
                           "result_items":len(result["lines"])})
             source_message=("REQUIRED SOURCE FILE (untrusted; inspect before editing):\n"+
                             json.dumps(result,ensure_ascii=False)[:15000])
@@ -307,6 +308,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                     (start,min(start+119,result["total_lines"])))
                 trace.append({"step":0,"action":"ranked_initial_preinspect",
                               "target":item.path,"rank_score":item.score,
+                              "start_line":start,"total_lines":result["total_lines"],
                               "result_items":len(result["lines"])})
                 messages.append({"role":"user","content":
                     "ISSUE-RANKED SOURCE CANDIDATE (read-only; not guaranteed "
@@ -333,7 +335,9 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                     inspected_windows.setdefault(item.path,[]).append(
                         (start,min(start+119,result["total_lines"])))
                     trace.append({"step":index+1,"action":"ranked_preinspect",
-                                  "target":item.path,"result_items":len(result["lines"])})
+                                  "target":item.path,"start_line":start,
+                                  "total_lines":result["total_lines"],
+                                  "result_items":len(result["lines"])})
             if not read_files:
                 raise AgentToolError("No inspectable Python source for patch proposal")
             # For benchmark tasks without declared targets, choose only
@@ -484,7 +488,9 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                         (start,min(start+119,inspected["total_lines"])))
                     recovered.append(inspected)
                     trace.append({"step":index+1,"action":"initial_finish_preinspect",
-                                  "target":candidate,"result_items":len(inspected["lines"])})
+                                  "target":candidate,"start_line":start,
+                                  "total_lines":inspected["total_lines"],
+                                  "result_items":len(inspected["lines"])})
                 if not recovered:
                     # The model may have hallucinated an entirely unknown
                     # path. This is not an authorization to edit or an
