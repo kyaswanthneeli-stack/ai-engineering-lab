@@ -134,6 +134,8 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 else:
                     raise AgentToolError("Final proposal requires only edits or patch")
                 targets=patch_targets(patch)
+            except AgentToolError:
+                raise
             except (ValueError,TypeError,KeyError) as exc:
                 # A malformed candidate is a recoverable model error, not a
                 # reason to spend the entire run on a new model process.
