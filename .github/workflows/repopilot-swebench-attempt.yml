@@ -12,6 +12,8 @@ permissions:
 jobs:
   real-swebench-attempt:
     runs-on: ubuntu-latest
+    outputs:
+      patch_ready: ${{ steps.prediction_gate.outputs.patch_ready }}
     timeout-minutes: 50
     defaults:
       run:
@@ -73,25 +75,25 @@ jobs:
           assert data.get("choices"),"Local model returned no chat completion"
           print("PASS: Ollama returned real model JSON via supported endpoint")
           PY
-      - name: Attempt one pinned real SWE-bench Lite issue (bounded discovery and native fallback / native low-latency retry v15)
+      - name: Attempt one pinned real SWE-bench Lite issue (bounded discovery and native fallback / JSON repair retry v16)
         continue-on-error: true
         env:
           REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
           REPOPILOT_MODEL: qwen2.5-coder:1.5b
-          REPOPILOT_MAX_TOKENS: '512'
+          REPOPILOT_MAX_TOKENS: '768'
           REPOPILOT_OLLAMA_NATIVE: '1'
         run: |
           curl -fsS "${REPOPILOT_BASE_URL}/models" >/dev/null
           python -m repopilot.benchmark_attempt pytest-dev__pytest-11148 --agentic --max-steps 12 \
             --manifest benchmarks/swebench-lite-12.json \
-            --output .runs/official-attempt-pytest-11148-v15-agentic
+            --output .runs/official-attempt-pytest-11148-v16-agentic
       - name: Report actual outcome without claiming resolution
         if: always()
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          path=Path(".runs/official-attempt-pytest-11148-v15-agentic/attempt.json")
+          path=Path(".runs/official-attempt-pytest-11148-v16-agentic/attempt.json")
           if not path.is_file():
               # Setup failure is explicitly unscored, never a model failure.
               result={"instance_id":"pytest-dev__pytest-11148",
@@ -116,14 +118,96 @@ jobs:
           if result["status"]!="model_patch_proposed":
               raise SystemExit("Model failed to propose a valid patch; see attempt evidence")
           PY
+      - name: Gate official scoring on authentic model prediction
+        id: prediction_gate
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          folder=Path('.runs/official-attempt-pytest-11148-v16-agentic')
+          attempt=folder/'attempt.json'
+          submission=folder/'unreviewed-prediction.json'
+          ready=False
+          if attempt.is_file() and submission.is_file():
+              report=json.loads(attempt.read_text())
+              proposal=json.loads(submission.read_text())
+              ready=(report.get('status')=='model_patch_proposed' and
+                     report.get('officially_evaluated') is False and
+                     report.get('officially_resolved') is None and
+                     proposal.get('generated_by_model') is True and
+                     proposal.get('human_reviewed') is False and
+                     proposal.get('instance_id')=='pytest-dev__pytest-11148' and
+                     isinstance(proposal.get('model_name_or_path'),str) and
+                     isinstance(proposal.get('model_patch'),str) and
+                     proposal['model_patch'].startswith('diff --git a/') and
+                     proposal['model_patch'].endswith('\\n'))
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+              out.write('patch_ready='+str(ready).lower()+'\\n')
+          print('Model-generated prediction eligible for official scoring:',ready)
+          PY
       - name: Upload honest attempt evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-real-swebench-pytest-11148-v15-unscored
-          path: repopilot/.runs/official-attempt-pytest-11148-v15-agentic/
+          name: repopilot-real-swebench-pytest-11148-v16-unscored
+          path: repopilot/.runs/official-attempt-pytest-11148-v16-agentic/
           if-no-files-found: warn
           retention-days: 30
       - name: Stop local model
         if: always()
         run: docker rm -f repopilot-benchmark-ollama || true
+
+  official-score-single:
+    needs: real-swebench-attempt
+    if: needs.real-swebench-attempt.outputs.patch_ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 320
+    defaults:
+      run:
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: repopilot-real-swebench-pytest-11148-v16-unscored
+          path: repopilot/.runs/official-attempt-pytest-11148-v16-agentic/
+      - name: Convert the model-generated prediction to official JSONL
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('.runs/official-attempt-pytest-11148-v16-agentic')
+          proposal=json.loads((p/'unreviewed-prediction.json').read_text())
+          assert proposal['generated_by_model'] is True
+          assert proposal['instance_id']=='pytest-dev__pytest-11148'
+          assert proposal['human_reviewed'] is False
+          assert proposal['model_patch'].startswith('diff --git a/')
+          data={k:proposal[k] for k in ('instance_id','model_name_or_path','model_patch')}
+          (p/'predictions.jsonl').write_text(json.dumps(data)+'\\n')
+          PY
+      - name: Install official SWE-bench harness
+        run: python -m pip install 'swebench>=3.0,<5.0'
+      - name: Officially evaluate one actual predicted patch
+        run: |
+          python -m swebench.harness.run_evaluation \\
+            --dataset_name princeton-nlp/SWE-bench_Lite \\
+            --split test \\
+            --predictions_path .runs/official-attempt-pytest-11148-v16-agentic/predictions.jsonl \\
+            --instance_ids pytest-dev__pytest-11148 \\
+            --max_workers 1 \\
+            --run_id "repopilot-v16-${GITHUB_RUN_ID}"
+      - name: Upload official harness reports and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-pytest-11148-v16-official-evaluation
+          path: |
+            repopilot/logs/evaluation/
+            repopilot/logs/build_images/
+            repopilot/.runs/official-attempt-pytest-11148-v16-agentic/predictions.jsonl
+          if-no-files-found: warn
+          retention-days: 30
