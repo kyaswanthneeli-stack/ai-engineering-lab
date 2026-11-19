@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import ast
+import hashlib
 import os
 import re
 import socket
@@ -237,6 +238,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
     inspection_budget=min(5 if required else 6,max_steps-2) if required or max_steps>=8 else max_steps
     final_context=[]
     last_candidate_reason=""
+    attempted_finish_digests=set()  # No source or model output in audit traces.
     # The caller may name affected files (e.g. from the issue). Read them
     # before spending model calls on discovery, retaining the same guarded
     # source inspection and complete audit trail as model-directed reads.
@@ -549,6 +551,22 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                     "Edit ONLY these inspected existing files: "+
                     ", ".join(sorted(read_files)[:15])})
                 continue
+            # An invalid finish candidate should never trigger repeated patch
+            # construction or git apply checks when the model returns the exact
+            # same output. Hash only the validated JSON action, not its contents
+            # in diagnostics or the audit trace.
+            digest=hashlib.sha256(json.dumps(action,sort_keys=True,
+                ensure_ascii=False).encode("utf-8")).digest()
+            if digest in attempted_finish_digests:
+                trace.append({"step":index+1,
+                              "action":"duplicate_finish_rejected"})
+                last_candidate_reason=(
+                    "Your previous source proposal was identical to an earlier "
+                    "rejected patch. Generate a different corrected action=finish "
+                    "proposal, using the inspected source. Do not repeat it.")
+                messages.append({"role":"user","content":last_candidate_reason})
+                continue
+            attempted_finish_digests.add(digest)
             try:
                 if set(action)=={"action","files"}:
                     files=action["files"]
