@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,7 +31,10 @@ class RepairTests(unittest.TestCase):
             prompts=[]
             def model(repo,prompt,*args):
                 prompts.append(prompt)
-                return spec(),{"model":"mock-model"}
+                candidate=spec()
+                if len(prompts)>1:
+                    candidate=replace(candidate,patch=PATCH.replace("+x = 2","+x = 3"))
+                return candidate,{"model":"mock-model"}
             report=run_with_repair(Path(td),"https://github.com/example/repo/issues/1",
                 Path(td)/"run",issue_reader=issue,model_proposer=model,verifier=verifier)
             self.assertEqual(report["outcome"],"verified_in_sandbox")
@@ -45,7 +49,10 @@ class RepairTests(unittest.TestCase):
             prompts=[]
             def model(repo,prompt,*args):
                 prompts.append(prompt)
-                return spec(),{"model":"mock"}
+                candidate=spec()
+                if len(prompts)>1:
+                    candidate=replace(candidate,patch=PATCH.replace("+x = 2","+x = 3"))
+                return candidate,{"model":"mock"}
             calls=[]
             def verifier(repo,proposal,path):
                 calls.append(1)
