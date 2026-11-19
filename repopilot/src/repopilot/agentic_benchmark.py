@@ -159,7 +159,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                     if entry.get("action")=="read" and path in read_files and path not in recent:
                         recent.append(path)
                 candidates=[p for p in recent if not p.startswith("tests/")]
-                candidates=candidates or recent
+                candidates=candidates or recent or sorted(read_files)
                 phase_files=candidates[:3]
                 final_context=[]
                 for name in phase_files:
@@ -332,7 +332,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
     summary={}
     for entry in trace:
         action=entry.get("action")
-        if action in {"preinspect","list","search","read",
+        if action in {"preinspect","ranked_preinspect","list","search","read",
                       "finish_deferred","finish_rejected"}:
             summary[action]=summary.get(action,0)+1
     reasons={}
