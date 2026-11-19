@@ -216,6 +216,30 @@ class AgentTests(unittest.TestCase):
         self.assertIn("timeout after 2 attempt",str(caught.exception))
         self.assertNotIn("secret-key",str(caught.exception))
 
+    def test_native_ollama_reuses_loaded_local_model_without_remote_access(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def read(self,n): return b'{"message":{"content":"{}"}}'
+        class Opener:
+            requests=[]
+            def open(self,request,**kwargs):
+                self.requests.append(request)
+                return Response()
+        opener=Opener()
+        with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1"}), patch(
+             "repopilot.agentic_benchmark.urllib.request.build_opener",
+             return_value=opener):
+            result=_provider("http://127.0.0.1:11434/v1",
+                             "mock-model",None,[{"role":"user","content":"test"}])
+        self.assertEqual(result["choices"][0]["message"]["content"],"{}")
+        self.assertEqual(len(opener.requests),1)
+        request=opener.requests[0]
+        self.assertEqual(request.full_url,"http://127.0.0.1:11434/api/chat")
+        payload=json.loads(request.data)
+        self.assertEqual(payload["keep_alive"],"20m")
+        self.assertEqual(payload["model"],"mock-model")
+
     def test_native_ollama_urlwrapped_socket_timeout_is_classified(self):
         class Opener:
             def open(self,request,**kwargs):
