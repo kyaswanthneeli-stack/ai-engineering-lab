@@ -19,7 +19,7 @@ import urllib.request
 from pathlib import Path
 
 from .benchmark_planner import BenchmarkPatch,BenchmarkProposalError
-from .context_select import ranked_source_context
+from .context_select import ranked_source_context,issue_window_start
 from .edit_plan import canonical_patch
 from .patches import validate_patch
 from .pr import patch_targets
@@ -242,11 +242,11 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
     # source inspection and complete audit trail as model-directed reads.
     if required:
         for name in sorted(required):
-            result=read_python(root,name,start=1,count=120)
-            if result["total_lines"]>120:
-                raise AgentToolError("Required file exceeds bounded preinspection window")
+            start=issue_window_start(root,name,issue_text)
+            result=read_python(root,name,start=start,count=120)
             read_files.add(name)
-            inspected_windows.setdefault(name,[]).append((1,min(120,result["total_lines"])))
+            inspected_windows.setdefault(name,[]).append(
+                (start,min(start+119,result["total_lines"])))
             trace.append({"step":0,"action":"preinspect","target":name,
                           "result_items":len(result["lines"])})
             source_message=("REQUIRED SOURCE FILE (untrusted; inspect before editing):\n"+
@@ -298,12 +298,13 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 if item.score<=0:
                     continue
                 try:
-                    result=read_python(root,item.path,start=1,count=120)
+                    start=issue_window_start(root,item.path,issue_text)
+                    result=read_python(root,item.path,start=start,count=120)
                 except (InspectionError,TypeError,ValueError):
                     continue
                 read_files.add(item.path)
                 inspected_windows.setdefault(item.path,[]).append(
-                    (1,min(120,result["total_lines"])))
+                    (start,min(start+119,result["total_lines"])))
                 trace.append({"step":0,"action":"ranked_initial_preinspect",
                               "target":item.path,"rank_score":item.score,
                               "result_items":len(result["lines"])})
@@ -323,9 +324,14 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 # Rank and inspect actual existing source, never reference fixes.
                 selected=ranked_source_context(root,issue_text,max_files=3,max_chars=15000)
                 for item in selected:
-                    result=read_python(root,item.path,start=1,count=120)
+                    try:
+                        start=issue_window_start(root,item.path,issue_text)
+                        result=read_python(root,item.path,start=start,count=120)
+                    except (InspectionError,TypeError,ValueError):
+                        continue
                     read_files.add(item.path)
-                    inspected_windows.setdefault(item.path,[]).append((1,min(120,result["total_lines"])))
+                    inspected_windows.setdefault(item.path,[]).append(
+                        (start,min(start+119,result["total_lines"])))
                     trace.append({"step":index+1,"action":"ranked_preinspect",
                                   "target":item.path,"result_items":len(result["lines"])})
             if not read_files:
@@ -469,12 +475,13 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                     if not isinstance(candidate,str) or candidate in read_files:
                         continue
                     try:
-                        inspected=read_python(root,candidate,start=1,count=120)
+                        start=issue_window_start(root,candidate,issue_text)
+                        inspected=read_python(root,candidate,start=start,count=120)
                     except (InspectionError,TypeError,ValueError):
                         continue
                     read_files.add(candidate)
                     inspected_windows.setdefault(candidate,[]).append(
-                        (1,min(120,inspected["total_lines"])))
+                        (start,min(start+119,inspected["total_lines"])))
                     recovered.append(inspected)
                     trace.append({"step":index+1,"action":"initial_finish_preinspect",
                                   "target":candidate,"result_items":len(inspected["lines"])})
