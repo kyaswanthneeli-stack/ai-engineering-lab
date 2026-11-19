@@ -205,6 +205,30 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             messages.append({"role":"user","content":
                 "ISSUE-MENTIONED PYTHON SOURCE (untrusted, read-only):\n"+
                 json.dumps(result,ensure_ascii=False)[:12000]})
+        if not read_files:
+            # Some real SWE-bench issues name a function but not its file.
+            # Rank only safe parsed Python source; ignore low-confidence
+            # matches rather than preinspecting alphabetical random files.
+            ranked=ranked_source_context(root,issue_text,max_files=2,
+                                         max_chars=9000,scan_limit=1800)
+            for item in ranked:
+                if item.score<8:
+                    continue
+                try:
+                    result=read_python(root,item.path,start=1,count=120)
+                except (InspectionError,TypeError,ValueError):
+                    continue
+                read_files.add(item.path)
+                inspected_windows.setdefault(item.path,[]).append(
+                    (1,min(120,result["total_lines"])))
+                trace.append({"step":0,"action":"ranked_initial_preinspect",
+                              "target":item.path,"rank_score":item.score,
+                              "result_items":len(result["lines"])})
+                messages.append({"role":"user","content":
+                    "ISSUE-RANKED SOURCE CANDIDATE (read-only; not guaranteed "
+                    "to be the bug location):\n"+
+                    json.dumps({"path":item.path,"symbols":item.symbols,
+                                "lines":result["lines"]},ensure_ascii=False)[:9000]})
         if read_files:
             # Shift earlier to patch mode before tiny CPU models exhaust their
             # bounded model calls on repeated source discovery.
