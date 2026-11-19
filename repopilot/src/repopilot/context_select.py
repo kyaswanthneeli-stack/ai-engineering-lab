@@ -95,24 +95,19 @@ def ranked_source_context(repo:Path,issue:str,*,max_files:int=8,max_chars:int=32
     # repository stores it under a package. Search only that exact basename,
     # with a finite candidate cap, independently of the regular scan limit.
     # Never allow issue text to escape the workspace or read symlink targets.
+    bare_names={PurePosixPath(name).name for name in mentions
+                if PurePosixPath(name).name == name and name.endswith(".py")}
     nested=[]
-    for name in sorted(mentions):
-        base=PurePosixPath(name).name
-        if not base or base!=name or not base.endswith(".py"):
-            continue
-        for target in root.rglob(base):
-            rel=target.relative_to(root)
-            if any(part in _SKIP for part in rel.parts):
-                continue
-            if (target.is_symlink() or not target.is_file() or
-                    not target.resolve().is_relative_to(root) or
-                    target.stat().st_size>100000):
-                continue
-            nested.append((target,rel.as_posix()))
-            if len(nested)>=24:
-                break
-        if len(nested)>=24:
-            break
+    if bare_names:
+        # Avoid unbounded root.rglob(basename) traversals for malicious issue
+        # text. The same capped filename-only scan used by source ranking
+        # handles basename lookups, without following linked directories.
+        budget=min(20000,max(5000,scan_limit*5))
+        for target,rel in _safe_python_paths(root,budget):
+            if PurePosixPath(rel).name in bare_names:
+                nested.append((target,rel))
+                if len(nested)>=24:
+                    break
     named=_issue_named_candidates(root,terms,scan_limit)
     visited=set()
     for path,rel in [*explicit,*nested,*named,*_safe_python_paths(root,scan_limit)]:
