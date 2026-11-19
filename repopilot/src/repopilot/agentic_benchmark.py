@@ -346,7 +346,7 @@ def _parse_model_action(content):
 
 def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:str|None=None,
                               client=None,max_steps:int=8,required_targets:set[str]|None=None,
-                              auto_issue_paths:bool=False)->tuple[BenchmarkPatch,dict]:
+                              auto_issue_paths:bool=False,progress=None)->tuple[BenchmarkPatch,dict]:
     if not model or not url or not issue_text.strip() or not 2<=max_steps<=24:
         raise AgentToolError("Model, issue and bounded step count required")
     root=repo.resolve(strict=True)
@@ -534,8 +534,15 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
 
                 (" Previous candidate error: "+last_candidate_reason if last_candidate_reason else "")}]
             trace.append({"step":index+1,"action":"final_phase_started"})
+        # The progress signal contains no source, prompt, model output or
+        # credentials. The worker persists it atomically so a forced timeout
+        # reveals which model invocation was still pending.
+        if progress is not None:
+            progress("model_call_started",index+1)
         response=(client(url,model,token,messages) if client is not None
                   else _provider(url,model,token,messages))
+        if progress is not None:
+            progress("model_call_completed",index+1)
         usage.append(response.get("usage",{}))
         try:
             content=response["choices"][0]["message"]["content"]
