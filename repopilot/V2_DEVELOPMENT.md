@@ -57,6 +57,14 @@ The v2 agent now retries only transient native Ollama HTTP 408/429/5xx, timeout 
 
 A [Pytest-only pinned-task retry](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44578518713) uses a locally prewarmed Qwen2.5-Coder 3B model, bounded 180-second native-request timeouts, at most two attempts per model call, and a 900-second task cap. The workflow preserves full evidence and conditionally executes the independent official evaluator only if the model produces a valid prediction. **Its outcome must be read from the completed run and cannot be assumed successful.**
 
+## Pytest follow-up — invalid model edits, not a passing benchmark
+
+The [prewarmed Pytest-only retry](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44578518713) finished with **zero model predictions and no official Pytest evaluation**. The archived attempt showed `failed_model_attempt`: five rejected edits (two invalid Python syntax, one invalid edit schema, one replacement outside inspected source, and one empty/oversized/unchanged edit). GitHub workflow completion must not be mistaken for issue resolution.
+
+The agent's validation-recovery prompt previously requested whole-file `files` replacements even for long Python modules. The v2 fix now recommends short `edits` with verbatim old spans for large inspected source; complete-file corrections remain available only for small modules. This is **model prompting and validation**, not a fabricated reference patch. Regression tests verify the large-file decision and a successful mock recovery.
+
+The [targeted Pytest recovery workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44581523248) reruns the actual pinned task and explicitly fails its final gate unless an independently evaluated prediction **resolves** `pytest-dev__pytest-11148`. Evidence is uploaded even when no patch is generated or the official evaluator rejects it. At the time of this note, the result was **not yet known**. No claim of improved official SWE-bench performance is justified until it finishes.
+
 ## Engineering practice
 
 Keep v1.0.0 at [its immutable release](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v1.0.0). Use a separate v2 feature branch and an open review PR. Every milestone must have tests and evidence before being merged. Do not overwrite or reinterpret the original benchmark artifacts.
