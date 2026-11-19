@@ -25,20 +25,16 @@ jobs:
         run: |
           python -m pip install -e .
           python -m pip install 'datasets>=3,<5'
-      - name: Create immutable two-task pilot selection from v1 pinned manifest
+      - name: Check two selected issues are from the unchanged 12-task manifest
         run: |
-          mkdir -p .runs
           python - <<'PY'
           import json
           from pathlib import Path
-          source=json.loads(Path('benchmarks/swebench-lite-12.json').read_text())
+          manifest=json.loads(Path('benchmarks/swebench-lite-12.json').read_text())
+          allowed={x['instance_id'] for x in manifest['tasks']}
           selected={'sympy__sympy-14774','pytest-dev__pytest-11148'}
-          tasks=[task for task in source['tasks'] if task['instance_id'] in selected]
-          assert len(tasks)==2 and {x['instance_id'] for x in tasks}==selected
-          source['tasks']=tasks
-          source['selection_count']=2
-          source['notice']='Pilot subset of the v1 pinned 12-task cohort; not a new independent selection.'
-          Path('.runs/v2-pilot-manifest.json').write_text(json.dumps(source,indent=2)+'\n')
+          assert len(manifest['tasks'])==12 and selected<=allowed
+          print('Validated pilot task selection against original pinned cohort')
           PY
       - name: Launch local model on isolated GitHub Actions runner
         run: |
@@ -63,7 +59,8 @@ jobs:
           REPOPILOT_MAX_TOKENS: '1200'
         run: |
           python -m repopilot.benchmark_batch \
-            --manifest .runs/v2-pilot-manifest.json \
+            --manifest benchmarks/swebench-lite-12.json \
+            --instance-ids sympy__sympy-14774 pytest-dev__pytest-11148 \
             --output .runs/v2-pilot-attempts \
             --per-task-timeout 420 \
             --max-steps 10
@@ -78,7 +75,7 @@ jobs:
           predictions=[json.loads(x) for x in (root/'predictions.jsonl').read_text().splitlines() if x.strip()]
           allowed={'sympy__sympy-14774','pytest-dev__pytest-11148'}
           ids=[x['instance_id'] for x in predictions]
-          assert summaries['selected_tasks']==2
+          assert summaries['selected_tasks']==2 and summaries['pinned_manifest_tasks']==12
           assert len(set(ids))==len(ids) and set(ids)<=allowed
           assert len(predictions)==summaries['model_predictions']
           assert all(x['model_patch'].startswith('diff --git a/') and
