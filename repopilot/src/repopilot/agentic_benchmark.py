@@ -56,7 +56,7 @@ def _safe_candidate_feedback(exc:Exception)->str:
     reason=str(exc)
     safe_reasons={
         "Exact old text must occur once in the current source":
-            "The old edit text is not an exact unique match. For long files, "
+            "The old edit text does not match the source exactly once. For long files, "
             "prefer line_edits using existing numbered INSPECTED line ranges; "
             "otherwise use a shorter verbatim old snippet. Never guess or "
             "invent target source.",
