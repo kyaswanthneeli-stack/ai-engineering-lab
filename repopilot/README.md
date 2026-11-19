@@ -11,10 +11,10 @@ RepoPilot is an independent Python engineering project exploring issue-to-patch 
 | Public GitHub issue retrieval and opt-in pinned clone | Built | [Actual end-to-end live model + pinned clone + Docker CI](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44497087568) passed |
 | Issue → proposal → restricted Docker verification | Built | Real model-generated fix passed baseline/reproduction/patched Docker sequence for one seeded integration-test issue; separate reference-patch verification also passes |
 | Static pre-execution review and Docker verification | Built | Static review unit tested; still requires human judgment on real patches |
-| Offline dashboard and execution-event report | Built | [Actual Ollama model run](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/model-run.html) and separate [reference patch dashboard](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/review-dashboard.html) |
-| Approval-gated draft PR via GitHub API | Built | CLI external API publisher has mock tests; actual [open, unmerged draft PR #2](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/2) was created via connected GitHub for the model-generated seeded fix; CI passed |
-| 12 SWE-bench Lite task preparation and result import | Built | Manifest, prediction export and official-result parser added; **0 official issues evaluated** |
-| Real SWE-bench model issue attempts | Attempt runner and GitHub Actions job available | Pinned pytest task failed proposal validation in [attempt 1](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44495694284) and [attempt 2](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44496682030); no official evaluation or valid benchmark patch |
+| Offline dashboard and execution-event report | Built | [Interactive recruiter walkthrough](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/recruiter-demo.html), [real Ollama sample](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/model-run.html), and reference-patch dashboard |
+| Approval-gated draft PR via GitHub API | Built | [Draft PR #10](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/10) contains a real Docker-verified two-file Qwen 7B repair; CI passed, human review still required. Earlier seeded [draft PR #2](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/2) remains unmerged |
+| 12 SWE-bench Lite task preparation and result import | Built | All 12 selected tasks attempted in one GitHub Actions batch; **0 valid predictions**, so **0 officially evaluated** |
+| Real SWE-bench model issue attempts | Bounded single and 12-task model runners available | [Actual 12-task batch](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44528360120): 11 failed proposal attempts and one timeout; no accepted patch or official scoring |
 | SWE-bench model issue resolution rate | Not measured | **None** |
 
 [Open the recruiter-facing explanation](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/) · [View CI and downloadable run artifacts](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/workflows/repopilot.yml)
@@ -48,7 +48,7 @@ This is an intentionally small public issue. It demonstrates **end-to-end operab
 ## Additional engineering evidence
 
 - **Real model + new review stage:** [GitHub Actions execution](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44495035936) confirms that Ollama generated a fix, static review accepted it for verification, and a restricted Docker test ran baseline green → new reproduction red → patched suite green.
-- **Two-file change validation:** [Multi-file Docker CI](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44494911761) verifies one *reference patch* modifying `pricing.py` and `checkout.py`. This is not a claim that a model independently solved a multi-file issue.
+- **Two-file model-generated repair:** [Qwen 7B live GitHub Actions evidence](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44540507015) confirms a model-generated patch to `pricing.py` and `checkout.py` passed network-restricted Docker regression and was published to [draft PR #10](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/10). This remains a controlled issue, not a SWE-bench task.
 - **Real SWE-bench task attempts:** `python -m repopilot.benchmark_attempt INSTANCE_ID --manifest benchmarks/swebench-lite-12.json --output .runs/task-001` loads the official issue text and pinned base revision. It creates an unreviewed candidate or a failure report. See [the GitHub Actions attempt workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/workflows/repopilot-swebench-attempt.yml). A candidate is **not** an official success.
 - **Public evaluator integration:** Prediction exporter and result parser check provenance declarations and prevent missing or conflicting outcomes from becoming success claims.
 
@@ -133,7 +133,7 @@ Opt-in pinned public GitHub repository checkout is implemented. There is **no ar
 
 The official [SWE-bench Lite](https://github.com/SWE-bench/SWE-bench) dataset has 300 issue/patch pairs. Its official evaluation harness requires task-specific environments and regression tests; passing RepoPilot's tiny calculator fixture does not mean a SWE-bench instance is resolved.
 
-Select 12 tasks with `select-swebench`, run actual model-generated patches against their pinned base revisions, evaluate with [official SWE-bench tooling](https://github.com/SWE-bench/SWE-bench/blob/main/docs/guides/evaluation.md), and publish every attempted task, including failures. The reporting module distinguishes reference fixtures and model-generated attempts. The [prediction export](src/repopilot/swebench_export.py) and [official-results import](src/repopilot/swebench_results.py) fail on missing or inconsistent evidence. The [evaluation protocol](benchmarks/README.md) lists task-specific setup requirements. The first actual pinned SWE-bench task attempt for `pytest-dev__pytest-11148` produced **no valid patch** because the small model returned an unsupported patch structure after three tries; GitHub CI preserved the unsuccessful attempt and runtime. **No official SWE-bench score is available yet.**
+Select 12 tasks with `select-swebench`, run actual model-generated patches against their pinned base revisions, evaluate with [official SWE-bench tooling](https://github.com/SWE-bench/SWE-bench/blob/main/docs/guides/evaluation.md), and publish every attempted task, including failures. The reporting module distinguishes reference fixtures and model-generated attempts. The [prediction export](src/repopilot/swebench_export.py) and [official-results import](src/repopilot/swebench_results.py) fail on missing or inconsistent evidence. The [evaluation protocol](benchmarks/README.md) lists task-specific setup requirements. The [first complete 12-task batch](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44528360120) produced **zero accepted model predictions** (eleven failed attempts, one timeout). The scoring job was correctly skipped. Subsequent agent improvements and retries must be checked independently. **No official SWE-bench score is available yet.**
 
 ## Human reviewer checklist
 
@@ -141,8 +141,8 @@ Before publishing a draft PR, verify the GitHub issue, compare the exact local s
 
 ## Recruiter demo
 
-For an accurate 90-second recording and LinkedIn Featured description, see [the recruiter demonstration kit](RECRUITER_DEMO.md).
+For an accurate 90-second recording and LinkedIn Featured description, open the [interactive recruiter walkthrough](recruiter-demo.html) and the [recruiter demonstration kit](RECRUITER_DEMO.md).
 
 GitHub Actions produces an artifact named `repopilot-verification-fixture` containing an offline HTML dashboard, verification JSON and an explicitly labeled reference-fixture benchmark report. A real model response or PR appears only after an independently verifiable run.
 
-This project is deliberately distinct from the existing portfolio's browser simulations. Real provider inference and Docker verification have now been demonstrated for **one seeded integration issue only**. Independent SWE-bench issue resolution and success rates are not measured.
+This project is deliberately distinct from browser simulations. Real provider inference and Docker verification have been demonstrated for a seeded issue and a **controlled two-file invoice issue** with an unmerged draft PR. Independent SWE-bench issue resolution and success rates remain **unmeasured**.
