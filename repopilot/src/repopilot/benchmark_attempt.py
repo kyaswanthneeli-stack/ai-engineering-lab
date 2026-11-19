@@ -28,13 +28,19 @@ REPO=re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 # The final attempt.json remains authoritative; this file is diagnostic only.
 CHECKPOINT_STAGES=frozenset({
     "initialized", "dataset_verified", "pinned_checkout_complete",
-    "model_response_received",
+    "model_call_started", "model_call_completed", "model_response_received",
 })
 
 
-def _save_checkpoint(output:Path,instance_id:str,stage:str,started:float)->None:
+def _save_checkpoint(output:Path,instance_id:str,stage:str,started:float,
+                     *,step:int|None=None)->None:
     if stage not in CHECKPOINT_STAGES:
         raise ValueError("Unknown benchmark checkpoint")
+    if stage.startswith("model_call_"):
+        if type(step) is not int or not 1<=step<=24:
+            raise ValueError("Invalid bounded model step checkpoint")
+    elif step is not None:
+        raise ValueError("Only per-call checkpoints accept model step")
     row={
         "instance_id":instance_id,
         "last_completed_stage":stage,
@@ -42,6 +48,8 @@ def _save_checkpoint(output:Path,instance_id:str,stage:str,started:float)->None:
         "officially_evaluated":False,
         "officially_resolved":None,
     }
+    if step is not None:
+        row["model_step"]=step
     # Atomic replacement avoids a truncated JSON read when a worker times out.
     temp=output/"stage.json.tmp"
     temp.write_text(json.dumps(row,sort_keys=True)+"\n",encoding="utf-8")
@@ -126,10 +134,19 @@ def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
             work=checkout(f"https://github.com/{owner}/{repo}/issues/1",
                           task["base_commit"],Path(tmp)/"repo")
             _save_checkpoint(output,instance_id,"pinned_checkout_complete",started)
+            # Only the known bounded agent accepts an optional progress
+            # callback. Generic planners and user-provided testing stubs keep
+            # their existing positional calling convention unchanged.
+            from .agentic_benchmark import propose_agentic_benchmark
+            actual=model_proposer.func if isinstance(model_proposer,partial) else model_proposer
+            extra=({"progress":lambda stage,step: _save_checkpoint(
+                output,instance_id,stage,started,step=step)}
+                if actual is propose_agentic_benchmark else {})
             spec,meta=model_proposer(work,bounded_issue_context(issue,issue_budget),
                                      model or os.getenv("REPOPILOT_MODEL",""),
                                      url or os.getenv("REPOPILOT_BASE_URL",""),
-                                     token if token is not None else os.getenv("REPOPILOT_API_KEY"))
+                                     token if token is not None else os.getenv("REPOPILOT_API_KEY"),
+                                     **extra)
             _save_checkpoint(output,instance_id,"model_response_received",started)
         report["model"]=meta.get("model","")
         report["agent_steps"]=meta.get("agent_steps")
