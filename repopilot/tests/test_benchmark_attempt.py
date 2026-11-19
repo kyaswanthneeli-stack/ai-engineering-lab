@@ -84,6 +84,10 @@ class AttemptsTests(unittest.TestCase):
         patch=json.loads((output/"unreviewed-prediction.json").read_text())
         self.assertFalse(patch["human_reviewed"])
         self.assertTrue(patch["generated_by_model"])
+        stage=json.loads((output/"stage.json").read_text())
+        self.assertEqual(stage["instance_id"],INSTANCE)
+        self.assertEqual(stage["last_completed_stage"],"model_response_received")
+        self.assertFalse(stage["officially_evaluated"])
     def test_agentic_cli_wires_requested_step_budget(self):
         observed=[]
         def mock_agent(repo,issue,model,url,token,max_steps=8,auto_issue_paths=False):
@@ -146,6 +150,29 @@ class AttemptsTests(unittest.TestCase):
             checkout=self.checkout,model_proposer=bad_output)
         self.assertEqual(result["status"],"failed_model_attempt")
         self.assertEqual(result["failure_category"],"model_or_validation")
+
+    def test_source_checkpoint_survives_invalid_model_output_without_score(self):
+        output=self.root/"invalid-response-with-stage"
+        def invalid(*args):
+            raise ValueError("rejected model response")
+        result=attempt_one(
+            self.manifest,INSTANCE,output,dataset_loader=self.dataset,
+            checkout=self.checkout,model_proposer=invalid)
+        stage=json.loads((output/"stage.json").read_text())
+        self.assertEqual(stage["last_completed_stage"],"pinned_checkout_complete")
+        self.assertEqual(stage["instance_id"],INSTANCE)
+        self.assertFalse(stage["officially_evaluated"])
+        self.assertEqual(result["status"],"failed_model_attempt")
+        self.assertFalse((output/"unreviewed-prediction.json").exists())
+
+    def test_initial_checkpoint_precedes_setup_failure(self):
+        output=self.root/"missing-dataset-with-stage"
+        result=attempt_one(
+            self.manifest,INSTANCE,output,dataset_loader=lambda:[],
+            checkout=self.checkout,model_proposer=self.proposed)
+        stage=json.loads((output/"stage.json").read_text())
+        self.assertEqual(stage["last_completed_stage"],"initialized")
+        self.assertEqual(result["status"],"setup_failed")
 
     def test_reject_unknown_instance(self):
         with self.assertRaises(ValueError):
