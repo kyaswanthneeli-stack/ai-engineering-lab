@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 from repopilot.benchmark_attempt import attempt_one,main,bounded_issue_context
+from repopilot.agentic_benchmark import ProviderTransportError
 
 SHA="a"*40
 INSTANCE="sample__repo-123"
@@ -92,6 +93,32 @@ class AttemptsTests(unittest.TestCase):
                            checkout=self.checkout,model_proposer=lambda *a:(_ for _ in ()).throw(ValueError("bad output")))
         self.assertEqual(result["status"],"failed_model_attempt")
         self.assertFalse((output/"unreviewed-prediction.json").exists())
+    def test_ollama_timeout_is_provider_unavailable_not_failed_patch(self):
+        output=self.root/"provider-timeout"
+        def unresponsive(*args):
+            raise ProviderTransportError("Local Ollama native API timeout after 2 attempt(s)")
+        result=attempt_one(
+            self.manifest,INSTANCE,output,dataset_loader=self.dataset,
+            checkout=self.checkout,model_proposer=unresponsive)
+        self.assertEqual(result["status"],"provider_unavailable")
+        self.assertEqual(result["failure_category"],"model_transport")
+        self.assertEqual(result["error_type"],"ProviderTransportError")
+        self.assertFalse(result["officially_evaluated"])
+        self.assertIsNone(result["officially_resolved"])
+        self.assertFalse((output/"unreviewed-prediction.json").exists())
+        recorded=json.loads((output/"attempt.json").read_text())
+        self.assertEqual(recorded["status"],"provider_unavailable")
+
+    def test_actual_invalid_patch_is_not_reclassified_as_provider_timeout(self):
+        output=self.root/"invalid-patch"
+        def bad_output(*args):
+            raise ValueError("Invalid generated code")
+        result=attempt_one(
+            self.manifest,INSTANCE,output,dataset_loader=self.dataset,
+            checkout=self.checkout,model_proposer=bad_output)
+        self.assertEqual(result["status"],"failed_model_attempt")
+        self.assertEqual(result["failure_category"],"model_or_validation")
+
     def test_reject_unknown_instance(self):
         with self.assertRaises(ValueError):
             attempt_one(self.manifest,"unknown__repo-1",self.root/"missing",dataset_loader=self.dataset)
