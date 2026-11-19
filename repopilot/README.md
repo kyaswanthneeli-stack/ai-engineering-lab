@@ -10,6 +10,9 @@ RepoPilot is an independent Python engineering project exploring issue-to-patch 
 - Requires a failing reproduction test **before** applying the patch, then a passing test suite **after** applying it.
 - Uses an isolated temporary copy and a restricted Docker container with network disabled.
 - Produces a local report. **No GitHub PR is created; no model call is performed without configuration.**
+- A GitHub Actions workflow runs unit tests and proves a real sample reproduction fails before the patch and succeeds afterward inside restricted Docker.
+
+[View RepoPilot CI and Docker verification](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/workflows/repopilot.yml)
 
 ## Local usage
 
@@ -24,7 +27,8 @@ export REPOPILOT_MODEL=your-local-model
 python -m repopilot.cli propose examples/calculator examples/issue.txt --output .runs/proposal.json
 # Review generated proposal and patch first.
 docker pull python:3.12-alpine
-python -m repopilot.cli verify examples/calculator .runs/proposal.json --output .runs/verification.json
+python -m repopilot.cli verify examples/calculator examples/issue.json --output .runs/verification.json
+# To test a model-generated proposal, substitute .runs/proposal.json after reviewing it.
 ```
 
 For remote providers, set `REPOPILOT_BASE_URL`, `REPOPILOT_MODEL`, and `REPOPILOT_API_KEY` via environment variables. Never commit keys. **Only connect to trusted model endpoints**.
