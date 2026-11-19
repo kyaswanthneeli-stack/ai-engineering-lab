@@ -142,6 +142,13 @@ RepoPilot now additionally supports `action=finish` with `line_edits: [{path, st
 
 Unit/integration tests cover source-window enforcement, repeated identical source lines, direct edits, unsafe targets, optional safe inspection recovery, and invalid-to-valid correction. [GitHub CI](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44623332129) passed **222 unit tests**, **82% code coverage**, and restricted Docker checks. A [new official Pytest trial](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44623446114) using the pinned original issue has been triggered; it requires an actual generated patch and independent official resolution before any success is claimed. The result is **not known at writing**, and this new feature does not yet demonstrate a better official score.
 
+
+## Model-step checkpointing and timed-out SymPy probe
+
+The generic stage diagnostics now distinguish **model call started** and **model call completed**, including the bounded 1–24 call index, through a progress callback available only to the trusted bounded agent. Each checkpoint is written atomically without issue text, model output, secrets or generated code. During a timed-out child process, the batch runner can report `model_step` and `last_completed_stage`, avoiding the earlier ambiguity between an unfinished checkout and a stuck second or third model call. Invalid checkpoint entries and indices are discarded, never counted as a model prediction or official resolution.
+
+[Regression CI](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44623391700) passed **224 Python tests**, **82% measured coverage**, and restricted Docker verification. The new [checkpointed SymPy model trial](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44623793791) runs one originally timed-out pinned issue (`sympy__sympy-13773`) through the actual streaming Qwen2.5-Coder 1.5B agent, preserving its per-call checkpoints. It submits a model-generated patch to the independent official SWE-bench harness **only when one exists**. This is a new experimental trial, not evidence of any additional resolved issue until scoring completes. The previously released v1.0.0 and earlier benchmark evidence are unchanged.
+
 ## Engineering practice
 
 Keep v1.0.0 at [its immutable release](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v1.0.0). Use a separate v2 feature branch and an open review PR. Every milestone must have tests and evidence before being merged. Do not overwrite or reinterpret the original benchmark artifacts.
