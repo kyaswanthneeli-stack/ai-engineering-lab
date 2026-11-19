@@ -27,6 +27,19 @@ jobs:
         run: python -m pip install -e .
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
+      - name: SWE-bench export preflight (0 official predictions)
+        run: |
+          mkdir -p .runs/empty-submissions
+          python -m repopilot.swebench_export benchmarks/swebench-lite-12.json .runs/empty-submissions --output .runs/swebench-predictions.jsonl > .runs/swebench-preflight.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          x=json.loads(Path('.runs/swebench-preflight.json').read_text())
+          assert x['selected_tasks']==12
+          assert x['submitted_predictions']==0
+          assert x['official_resolution_rate'] is None
+          print('PASS: 12 pinned tasks, 0 falsely claimed predictions or scores')
+          PY
       - name: Index sample
         run: python -m repopilot.cli index examples/calculator
       - name: Test current sample application
