@@ -430,6 +430,64 @@ class AgentTests(unittest.TestCase):
         self.assertIn("ranked_preinspect",
                       [x["action"] for x in meta["tool_trace"]])
 
+    def test_auto_preinspection_accepts_positive_body_evidence(self):
+        observed=[]
+        def client(url,model,token,messages):
+            observed.append(list(messages))
+            return {"choices":[{"message":{"content":json.dumps({
+                "action":"finish","edits":[{
+                    "path":"pricing.py","old":"return sum(values)",
+                    "new":"return round(sum(values), 2)"}]})}}]}
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"values","mock","http://127.0.0.1:11434/v1",
+            client=client,max_steps=4,auto_issue_paths=True)
+        self.assertIn("round(sum(values), 2)",patch.patch)
+        self.assertTrue(any(x["action"]=="ranked_initial_preinspect"
+                            for x in meta["tool_trace"]))
+        self.assertTrue(any("SOURCE CANDIDATE" in m["content"]
+                            for m in observed[0]))
+
+    def test_early_invented_file_recovers_via_ranked_existing_source(self):
+        steps=[
+            {"action":"finish","edits":[{
+                "path":"invented.py","old":"x = 1","new":"x = 2"}]},
+            {"action":"finish","edits":[{
+                "path":"pricing.py","old":"return sum(values)",
+                "new":"return round(sum(values), 2)"}]}
+        ]
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"fix pricing.py subtotal","mock",
+            "http://127.0.0.1:11434/v1",client=self.sequence(steps),
+            max_steps=4)
+        self.assertIn("round(sum(values), 2)",patch.patch)
+        self.assertIn("pricing.py",meta["inspected_files"])
+        self.assertNotIn("invented.py",meta["inspected_files"])
+        self.assertTrue(any(x["action"]=="initial_finish_preinspect"
+                            for x in meta["tool_trace"]))
+        self.assertFalse((self.repo/"invented.py").exists())
+
+    def test_early_invented_file_without_ranked_match_requests_real_read(self):
+        steps=[
+            {"action":"finish","edits":[{
+                "path":"not_there.py","old":"x=1","new":"x=2"}]},
+            {"action":"read","path":"pricing.py"},
+            {"action":"finish","edits":[{
+                "path":"pricing.py","old":"return sum(values)",
+                "new":"return round(sum(values), 2)"}]}
+        ]
+        observed=[]
+        it=iter(steps)
+        def client(url,model,token,messages):
+            observed.append(list(messages))
+            return {"choices":[{"message":{"content":json.dumps(next(it))}}]}
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"zzunlikelydomaintermzz","mock",
+            "http://127.0.0.1:11434/v1",client=client,max_steps=5)
+        self.assertIn("round(sum(values), 2)",patch.patch)
+        self.assertIn("finish_rejected_no_source",
+            [x["action"] for x in meta["tool_trace"]])
+        self.assertTrue(any("next reply MUST" in m["content"] for m in observed[1]))
+
     def test_opt_in_issue_paths_preinspected_before_model_call(self):
         seen=[]
         def client(url,model,token,messages):
