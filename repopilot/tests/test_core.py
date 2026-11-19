@@ -34,11 +34,11 @@ class Tests(unittest.TestCase):
         with self.assertRaises(ProposalError):propose(Path("."),"bug","", "http://127.0.0.1:11434/v1")
     def test_propose_mock(self):
         with tempfile.TemporaryDirectory() as t:
-            Path(t,"x.py").write_text("def x():return 1\n")
+            Path(t,"calculator.py").write_text("def divide(a, b):\n    if b == 0:\n        return 0  # BUG: should raise ZeroDivisionError\n    return a / b\n")
             obj={"choices":[{"message":{"content":json.dumps(RAW)}}],"usage":{"total_tokens":5}}
             spec,meta=propose(Path(t),"fix bug","local","http://127.0.0.1:11434/v1",client=lambda *_:obj)
             self.assertEqual(spec.summary,"divide by zero")
-            self.assertEqual(meta["provider_reported_usage"]["total_tokens"],5)
+            self.assertEqual(meta["provider_reported_usage_by_attempt"][0]["total_tokens"],5)
     def test_verify_mock(self):
         with tempfile.TemporaryDirectory() as t:
             root=Path(t,"repo");root.mkdir()
