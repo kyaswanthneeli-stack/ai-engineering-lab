@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RepoPilot — Evidence-First AI Repair Demo</title>
+<meta name="description" content="Inspectable GitHub issue to model-generated patch to Docker regression evidence. Real runs, no invented benchmark scores.">
+<style>
+:root {color-scheme:dark; --bg:#070d18; --panel:#111c2d; --panel2:#182438; --border:#2b3b55; --ink:#f2f6ff; --muted:#9eacc5; --accent:#96caff; --ok:#8de4b4; --warn:#ffd49b}
+* {box-sizing:border-box}
+body {margin:0; color:var(--ink); background:radial-gradient(ellipse at top right,#162844 0%,var(--bg) 53%); font:15px/1.6 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+a {color:var(--accent)} a:hover {color:#fff}
+main {max-width:1180px; margin:auto; padding:30px 24px 90px}
+nav {display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;padding:8px 0 28px;border-bottom:1px solid var(--border)}
+.brand {font-size:21px;font-weight:850;text-decoration:none;color:var(--ink);letter-spacing:-.045em}
+.navlinks {display:flex;gap:18px;flex-wrap:wrap}
+.navlinks a {text-decoration:none;font-size:13px;color:#c0d2ed}
+.kicker {font:700 12px ui-monospace,SFMono-Regular,monospace;letter-spacing:.13em;color:var(--ok);text-transform:uppercase}
+.hero {padding:70px 0 42px;max-width:850px}
+h1 {font-size:clamp(39px,6vw,76px);letter-spacing:-.065em;line-height:1.05;margin:12px 0 24px}
+.lead {font-size:19px;color:#bfcde1;max-width:760px}
+h2 {font-size:28px;letter-spacing:-.035em;margin:52px 0 14px}
+h3 {font-size:17px;margin:0 0 9px}
+p {margin:0 0 13px;color:var(--muted)}
+.row {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:15px}
+.card {padding:24px;background:var(--panel);border:1px solid var(--border);border-radius:16px}
+.metric {font-size:40px;line-height:1.1;font-weight:800;letter-spacing:-.045em;margin:12px 0}
+.ok {color:var(--ok)} .warn {color:var(--warn)}
+.tiny {font-size:12px;color:#a3b4cf}
+strong {color:var(--ink)}
+.cta {display:flex;gap:10px;flex-wrap:wrap;margin:25px 0}
+.cta a {background:#c6e2ff;color:#15253e;padding:11px 16px;border-radius:10px;text-decoration:none;font-weight:750}
+.cta a.secondary {background:transparent;color:#cce4ff;border:1px solid #405d81}
+.walk {display:grid;grid-template-columns:300px 1fr;gap:16px;margin-top:20px}
+.steps {display:grid;gap:9px;align-content:start}
+.steps button {border:1px solid var(--border);background:#101c2e;color:#d2e4fc;padding:17px;text-align:left;border-radius:12px;font:inherit;cursor:pointer}
+.steps button[aria-selected="true"] {background:#1b3757;border-color:#83bbfa;color:#fff;box-shadow:inset 3px 0 #83bbfa}
+.steps button small {display:block;color:#a9bad2;margin-top:4px;font-size:12px}
+.detail {background:var(--panel2);border:1px solid var(--border);padding:26px;border-radius:16px;min-height:260px}
+.detail p {font-size:16px;line-height:1.75}
+.detail ul {color:#c4d3e8;padding-left:22px}
+.detail li {margin:8px 0}
+.detail a {font-weight:700}
+.flow {display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:30px 0}
+.flow span {border:1px solid var(--border);border-radius:9px;padding:10px 12px;background:#17273e;font-size:13px}
+.result {display:grid;grid-template-columns:1.2fr 1fr;gap:15px}
+table {width:100%;border-collapse:collapse;text-align:left}
+th,td {padding:11px 9px;border-bottom:1px solid var(--border)}
+th {font-size:12px;color:#a7b7d1}
+td {font-size:14px}
+code {font:13px ui-monospace,monospace;color:#bfdcff}
+.notice {padding:20px 23px;border:1px solid #625039;border-radius:12px;background:#241f1c;color:#e5cfab}
+.notice p {color:#dfcaaa;margin:0}
+footer {margin-top:65px;border-top:1px solid var(--border);padding-top:22px;font-size:13px;color:#98aec9}
+@media(max-width:850px) {.row,.result,.walk {grid-template-columns:1fr} .steps{grid-template-columns:repeat(2,1fr)} .hero{padding-top:44px}}
+@media(max-width:560px) {.steps{grid-template-columns:1fr}main{padding:20px 16px 65px}}
+</style>
+</head>
+<body>
+<main>
+<nav><a class="brand" href="./">RepoPilot<span style="color:#9dcbff">.</span></a><div class="navlinks"><a href="#walkthrough">Guided walkthrough</a><a href="#evidence">Run evidence</a><a href="#benchmark">Benchmark</a><a href="https://github.com/kyaswanthneeli-stack/ai-engineering-lab">GitHub source</a></div></nav>
+<section class="hero"><div class="kicker">REAL MODEL OUTPUT / AUDITABLE TESTS / HUMAN REVIEW</div>
+<h1>Can an AI fix a bug?<br><span style="color:#9ccfff">Show the evidence.</span></h1>
+<p class="lead">RepoPilot is a Python coding-agent engineering project. It reads an issue, inspects guarded source files, generates proposed edits with an actual language model, checks the patch, and validates the result in a restricted Docker workflow.</p>
+<div class="cta"><a href="#walkthrough">Explore verified run</a><a class="secondary" href="https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44526622929">Inspect raw GitHub Actions evidence</a></div>
+<p class="tiny">This page is an interactive explanation of completed evidence, not a live model inference or simulated test result.</p>
+</section>
+<section class="row" aria-label="Verified evidence metrics">
+<article class="card"><div class="kicker">Live model run</div><div class="metric ok">2 files</div><p><strong>Qwen2.5-Coder 7B</strong> generated changes for <code>pricing.py</code> and <code>checkout.py</code> in a controlled issue.</p></article>
+<article class="card"><div class="kicker">Docker regression</div><div class="metric ok">0 / 1 / 0</div><p>Exit codes for baseline tests, bug reproduction before the fix, and patched regression tests, respectively.</p></article>
+<article class="card"><div class="kicker">Official SWE-bench</div><div class="metric warn">N/A</div><p>A 12-task batch ran but produced no accepted predictions. The official harness was therefore skipped; no resolution score is claimed.</p></article>
+</section>
+<section id="walkthrough">
+<h2>Follow one genuine issue-to-verification run</h2>
+<p>Select a stage to understand what RepoPilot actually did. Every claim links to source, CI or a public issue.</p>
+<div class="flow" aria-hidden="true"><span>Public issue</span> → <span>Bounded inspection</span> → <span>Model patch</span> → <span>Static review</span> → <span>Docker regression</span> → <span>Human approval</span></div>
+<div class="walk">
+<div class="steps" role="tablist" aria-label="Evidence workflow stages">
+<button role="tab" id="step0" aria-controls="detail" aria-selected="true" tabindex="0" data-step="0"><strong>01 · Issue</strong><small>Real public GitHub issue #3</small></button>
+<button role="tab" id="step1" aria-controls="detail" aria-selected="false" tabindex="-1" data-step="1"><strong>02 · Inspection</strong><small>Read-only Python source access</small></button>
+<button role="tab" id="step2" aria-controls="detail" aria-selected="false" tabindex="-1" data-step="2"><strong>03 · AI edits</strong><small>Two-file generated proposal</small></button>
+<button role="tab" id="step3" aria-controls="detail" aria-selected="false" tabindex="-1" data-step="3"><strong>04 · Verification</strong><small>Reproduce and fix, inside Docker</small></button>
+<button role="tab" id="step4" aria-controls="detail" aria-selected="false" tabindex="-1" data-step="4"><strong>05 · Review</strong><small>Approval before merging</small></button>
+</div>
+<div id="detail" class="detail" role="tabpanel" aria-labelledby="step0" aria-live="polite">
+<h3 id="detail-title">The bug report is public</h3>
+<p id="detail-copy">RepoPilot fetched invoice issue #3 from GitHub. Unlike a prepared reference diff, the source changes in this run were proposed by an Ollama-hosted model.</p>
+<ul id="detail-points"><li>Issue data is treated as untrusted input</li><li>The user or reviewer controls publication of changes</li></ul>
+<a id="detail-link" href="https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/3">Open the original issue</a>
+</div>
+</div>
+</section>
+<section id="evidence"><h2>Evidence you can verify independently</h2>
+<div class="result">
+<div class="card"><h3>Observed Docker results</h3><table><thead><tr><th>Stage</th><th>Exit code</th><th>Meaning</th></tr></thead><tbody>
+<tr><td>Existing baseline tests</td><td class="ok">0</td><td>Pass</td></tr>
+<tr><td>Bug reproduction before patch</td><td class="warn">1</td><td>Expected fail</td></tr>
+<tr><td>Regression after AI patch</td><td class="ok">0</td><td>Pass</td></tr>
+</tbody></table><p class="tiny" style="margin-top:16px">Source: GitHub Actions run #44526622929, Qwen2.5-Coder 7B, model_generated=true, verified=true, agent_steps=6. Regression tests are curated, not generated by the model.</p></div>
+<div class="card"><h3>Audit trail</h3><p>Inspect the underlying log, artifacts, source code and review gate instead of trusting a decorative demo.</p>
+<ul><li><a href="https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44526622929">Successful two-file model run</a></li>
+<li><a href="https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/9">Agent implementation — draft PR #9</a></li>
+<li><a href="https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/2">Separate verified seeded fix — draft PR #2</a></li>
+<li><a href="https://github.com/kyaswanthneeli-stack/ai-engineering-lab/tree/main/repopilot">Public source and tests</a></li></ul>
+</div></div></section>
+<section id="benchmark"><h2>Benchmark status without inflated claims</h2>
+<div class="notice"><p><strong>Snapshot: November 19, 2026.</strong> The first pinned 12-task SWE-bench Lite run attempted all twelve tasks. It produced zero valid model predictions: eleven model attempts failed and one exceeded its timeout. Because the prediction file was empty, official harness evaluation was skipped. That is <em>not</em> a 0% officially measured resolution score. Later runs must be independently inspected before updating this snapshot.</p></div>
+<div class="cta"><a class="secondary" href="https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44528360120">View all 12 actual attempts</a><a class="secondary" href="benchmark-status.html">Open benchmark table</a></div>
+</section>
+<footer>RepoPilot is an engineering demonstration with real audit evidence. It does not provide unreviewed merges, arbitrary execution privileges, or a claimed official SWE-bench score. The interactive steps are explanatory, not a live AI simulator.</footer>
+</main>
+<script>
+(function () {
+"use strict";
+const stages = [
+ {title:"The bug report is public",copy:"RepoPilot fetched invoice issue #3 from GitHub. The issue text and repository content are untrusted data, not commands.",points:["Public issue and exact target files","No production code is silently changed"],label:"Open the original issue",href:"https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/3"},
+ {title:"Guarded source inspection",copy:"The agent inspected pricing.py and checkout.py through read-only, bounded Python-file operations. Paths and file sizes were validated before reading.",points:["No model-authorized shell execution","Tool decisions and inspected files appear in the run trace"],label:"View the recorded inspection trace",href:"https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44526622929"},
+ {title:"The actual model generated a patch",copy:"Qwen2.5-Coder 7B generated a two-file proposal. RepoPilot validated the patch structure and target paths rather than accepting the text blindly.",points:["Both pricing.py and checkout.py were changed","This verified sample is not an official SWE-bench task"],label:"Inspect generated patch artifact",href:"https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44526622929"},
+ {title:"The original bug was reproduced and fixed",copy:"Docker ran the existing baseline tests, then a curated regression against the unpatched files, and finally retested with the model-generated patch.",points:["Baseline exit code: 0","Before-fix reproduction exit code: 1","After-fix regression exit code: 0"],label:"Inspect Docker verification evidence",href:"https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44526622929"},
+ {title:"A human remains in control",copy:"A passing model proposal is not automatically merged. Reviewers inspect the diff, reproduction tests and evidence before accepting changes.",points:["Draft pull requests remain unmerged until reviewed","Static review may require additional manual judgment"],label:"View the development review PR",href:"https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/9"}
+];
+const buttons=Array.from(document.querySelectorAll("[data-step]"));
+function render(index,focus) {
+ const d=stages[index];
+ buttons.forEach(function(b,i){b.setAttribute("aria-selected",String(i===index));b.tabIndex=i===index?0:-1;});
+ document.getElementById("detail").setAttribute("aria-labelledby","step"+index);
+ document.getElementById("detail-title").textContent=d.title;
+ document.getElementById("detail-copy").textContent=d.copy;
+ const ul=document.getElementById("detail-points");ul.replaceChildren();
+ d.points.forEach(function(p){const li=document.createElement("li");li.textContent=p;ul.appendChild(li);});
+ const link=document.getElementById("detail-link");link.textContent=d.label;link.href=d.href;
+ if(focus)buttons[index].focus();
+}
+buttons.forEach(function(button,i){button.addEventListener("click",function(){render(i,false);});button.addEventListener("keydown",function(event){if(event.key!=="ArrowDown" && event.key!=="ArrowUp" && event.key!=="ArrowRight" && event.key!=="ArrowLeft")return;event.preventDefault();const next=(i+(event.key==="ArrowDown" || event.key==="ArrowRight"?1:stages.length-1))%stages.length;render(next,true);});});
+})();
+</script>
+</body>
+</html>
