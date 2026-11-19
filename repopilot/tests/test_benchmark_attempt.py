@@ -1,8 +1,9 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
-from repopilot.benchmark_attempt import attempt_one
+from repopilot.benchmark_attempt import attempt_one,main
 
 SHA="a"*40
 INSTANCE="sample__repo-123"
@@ -39,6 +40,37 @@ class AttemptsTests(unittest.TestCase):
         patch=json.loads((output/"unreviewed-prediction.json").read_text())
         self.assertFalse(patch["human_reviewed"])
         self.assertTrue(patch["generated_by_model"])
+    def test_agentic_cli_wires_requested_step_budget(self):
+        observed=[]
+        def mock_agent(repo,issue,model,url,token,max_steps=8,auto_issue_paths=False):
+            observed.append((max_steps,auto_issue_paths))
+            return self.proposed()
+        with patch("repopilot.agentic_benchmark.propose_agentic_benchmark",mock_agent), \
+             patch("repopilot.benchmark_attempt.attempt_one") as call:
+            call.return_value={"status":"model_patch_proposed"}
+            main(["sample__repo-123","--agentic","--max-steps","18"])
+            kwargs=call.call_args.kwargs
+            kwargs["model_proposer"](self.root,"issue","mock","http://127.0.0.1:11434/v1",None)
+        self.assertEqual(observed,[(18,True)])
+
+    def test_agentic_cli_rejects_unbounded_step_budget(self):
+        with self.assertRaises(SystemExit):
+            main(["sample__repo-123","--agentic","--max-steps","25"])
+
+    def test_agentic_provenance_recorded_when_provided(self):
+        def traced(*args):
+            result,meta=self.proposed()
+            return result,{**meta,"agent_steps":4,
+                           "inspected_files":["main.py"],
+                           "tool_trace":[{"step":1,"action":"read"}]}
+        output=self.root/"traced"
+        result=attempt_one(self.manifest,INSTANCE,output,
+            dataset_loader=self.dataset,checkout=self.checkout,
+            model_proposer=traced)
+        self.assertEqual(result["agent_steps"],4)
+        self.assertEqual(result["inspected_files"],["main.py"])
+        self.assertEqual(result["tool_trace"][0]["action"],"read")
+
     def test_failed_model_attempt_is_not_a_success(self):
         output=self.root/"fail"
         result=attempt_one(self.manifest,INSTANCE,output,dataset_loader=self.dataset,

@@ -16,6 +16,24 @@ class ContextSelectionTests(unittest.TestCase):
         self.assertEqual(items[0].path,"billing.py")
         self.assertIn("calculate_invoice_tax",items[0].symbols)
         self.assertIn("FILE billing.py",describe_context(items))
+    def test_explicit_mentioned_file_is_ranked_even_after_scan_limit(self):
+        # Issue files must be considered even when outside the capped scan.
+        (self.root/"zz_target.py").write_text("def target():\n    return 5\n")
+        items=ranked_source_context(
+            self.root,"Fix `zz_target.py` with the incorrect target logic.",
+            max_files=1,scan_limit=1)
+        self.assertEqual(items[0].path,"zz_target.py")
+
+    def test_basename_mentioned_in_issue_locates_nested_source(self):
+        nested=self.root/"package"/"deep"
+        nested.mkdir(parents=True)
+        (nested/"target_module.py").write_text(
+            "def repair_target_module():\n    return 3\n")
+        items=ranked_source_context(
+            self.root,"Bug in target_module.py when calling repair_target_module",
+            max_files=1,scan_limit=1)
+        self.assertEqual(items[0].path,"package/deep/target_module.py")
+
     def test_limits(self):
         items=ranked_source_context(self.root,"tax",max_files=1,max_chars=900)
         self.assertEqual(len(items),1)
