@@ -40,6 +40,25 @@ jobs:
           assert x['official_resolution_rate'] is None
           print('PASS: 12 pinned tasks, 0 falsely claimed predictions or scores')
           PY
+      - name: Pinned public GitHub checkout smoke test
+        env:
+          REPOPILOT_COMMIT: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import os
+          import tempfile
+          from pathlib import Path
+          from repopilot.checkout import pinned_checkout
+          from repopilot.graph import import_graph
+          with tempfile.TemporaryDirectory(prefix="pinned-github-") as d:
+              repo=pinned_checkout(
+                "https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/1",
+                os.environ["REPOPILOT_COMMIT"],Path(d)/"repo")
+              assert (repo/"repopilot"/"src"/"repopilot"/"cli.py").is_file()
+              g=import_graph(repo/"repopilot"/"src"/"repopilot")
+              assert "planner" in g["modules"]
+              print("PASS: pinned public repository checkout and static graph")
+          PY
       - name: Index sample
         run: python -m repopilot.cli index examples/calculator
       - name: Test current sample application
