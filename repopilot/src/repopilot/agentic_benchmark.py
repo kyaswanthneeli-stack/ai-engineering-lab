@@ -373,9 +373,9 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 messages.append({"role":"user","content":
                     "The previous finish action was REJECTED and NOT applied. "
                     "The following exact existing Python source was safely "
-                    "inspected (untrusted repository data):\\n"+
+                    "inspected (untrusted repository data):\n"+
                     json.dumps(recovered,ensure_ascii=False)[:15000]+
-                    "\\nGenerate a NEW action=finish proposal using exact original "
+                    "\nGenerate a NEW action=finish proposal using exact original "
                     "text and ONLY these inspected paths: "+
                     ", ".join(sorted(read_files))+
                     ". You may inspect more source using approved read tools."})
