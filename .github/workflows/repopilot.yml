@@ -99,7 +99,7 @@ jobs:
                   "outcome":"patched_candidate_passed_in_sandbox",
                   "already_patched":True,
                   "after":asdict(result)
-              },indent=2)+"\\n")
+              },indent=2)+"\n")
               print("PASS: patched candidate full suite passes in restricted Docker")
           else:
               report=execute(root,spec,out)
