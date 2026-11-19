@@ -295,6 +295,26 @@ class AgentTests(unittest.TestCase):
         self.assertIn("+    return 2",patch.patch)
         self.assertEqual(meta["agent_steps"],7)
 
+
+    def test_symbol_ranked_source_is_inspected_before_first_model_call(self):
+        (self.repo/"billing.py").write_text(
+            "def calculate_invoice_tax(amount):\\n    return amount * 0.2\\n")
+        seen=[]
+        def client(url,model,token,messages):
+            seen.append(list(messages))
+            answer={"action":"finish","edits":[{
+                "path":"billing.py","old":"return amount * 0.2",
+                "new":"return amount * 0.1"}]}
+            return {"choices":[{"message":{"content":json.dumps(answer)}}]}
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"Fix calculate_invoice_tax rounding","mock",
+            "http://127.0.0.1:11434/v1",client=client,max_steps=2,
+            auto_issue_paths=True)
+        self.assertIn("amount * 0.1",patch.patch)
+        self.assertIn("ranked_initial_preinspect",
+                      [x["action"] for x in meta["tool_trace"]])
+        self.assertTrue(any("billing.py" in m["content"] for m in seen[0]))
+
     def test_unscoped_benchmark_forces_patch_after_bounded_search(self):
         calls=[]
         def client(url,model,token,messages):
