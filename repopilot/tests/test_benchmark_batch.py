@@ -48,6 +48,10 @@ class BenchmarkBatchTests(unittest.TestCase):
             result = collect(self.manifest, self.root / "output")
         self.assertEqual(result["selected_tasks"], 12)
         self.assertEqual(result["model_predictions"], 1)
+        self.assertEqual(result["attempt_status_counts"], {
+            "failed_model_attempt": 11, "model_patch_proposed": 1})
+        self.assertEqual(result["failed_model_attempt_without_patch"], 11)
+        self.assertEqual(result["timeout_without_patch"], 0)
         self.assertFalse(result["officially_evaluated"])
         predictions = (self.root / "output/predictions.jsonl").read_text().splitlines()
         self.assertEqual(len(predictions), 1)
@@ -89,6 +93,27 @@ class BenchmarkBatchTests(unittest.TestCase):
                                 instance_ids=selection)
             self.assertFalse((self.root/"never-created").exists())
 
+    def test_model_provider_failure_counted_but_never_called_solved(self):
+        def fake_run(command,**kwargs):
+            output=Path(command[command.index("--output")+1])
+            output.mkdir(parents=True)
+            (output/"attempt.json").write_text(json.dumps({
+                "status":"provider_unavailable",
+                "error_type":"ProviderTransportError",
+                "failure_category":"model_transport"}))
+        with patch("repopilot.benchmark_batch.load_manifest",
+                   return_value=self.tasks),patch(
+                       "repopilot.benchmark_batch.subprocess.run",
+                       side_effect=fake_run):
+            result=collect(self.manifest,self.root/"provider")
+        self.assertEqual(result["attempt_status_counts"],{"provider_unavailable":12})
+        self.assertEqual(result["provider_unavailable_without_patch"],12)
+        self.assertEqual(result["missing_predictions"],12)
+        self.assertIsNone(result["officially_resolved"])
+        self.assertFalse(result["officially_evaluated"])
+        self.assertTrue(all(t["failure_category"]=="model_transport"
+                            for t in result["tasks"]))
+
     def test_timeout_is_unscored_and_does_not_create_prediction(self):
         with patch("repopilot.benchmark_batch.load_manifest",
                    return_value=self.tasks), patch(
@@ -97,6 +122,9 @@ class BenchmarkBatchTests(unittest.TestCase):
             result = collect(self.manifest, self.root / "output")
         self.assertEqual(result["model_predictions"], 0)
         self.assertEqual(result["missing_predictions"], 12)
+        self.assertEqual(result["attempt_status_counts"], {"model_timeout":12})
+        self.assertEqual(result["timeout_without_patch"],12)
+        self.assertEqual(result["failed_model_attempt_without_patch"],0)
         self.assertTrue(all(x["status"] == "model_timeout" for x in result["tasks"]))
         self.assertIsNone(result["officially_resolved"])
         self.assertEqual((self.root / "output/predictions.jsonl").read_text(), "")
