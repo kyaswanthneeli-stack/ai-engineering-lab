@@ -1,4 +1,6 @@
 import json
+from functools import partial
+from repopilot.agentic_benchmark import propose_agentic_benchmark
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -173,6 +175,49 @@ class AttemptsTests(unittest.TestCase):
         stage=json.loads((output/"stage.json").read_text())
         self.assertEqual(stage["last_completed_stage"],"initialized")
         self.assertEqual(result["status"],"setup_failed")
+
+    def test_actual_agent_reports_model_call_step_before_provider_timeout(self):
+        output=self.root/"agent-model-step-timeout"
+        def client(url,model,token,messages):
+            stage=json.loads((output/"stage.json").read_text())
+            self.assertEqual(stage["last_completed_stage"],"model_call_started")
+            self.assertEqual(stage["model_step"],1)
+            self.assertFalse(stage["officially_evaluated"])
+            raise ProviderTransportError("Local Ollama native API timeout")
+        planner=partial(propose_agentic_benchmark,client=client,
+                        max_steps=3,required_targets={"main.py"})
+        result=attempt_one(
+            self.manifest,INSTANCE,output,dataset_loader=self.dataset,
+            checkout=self.checkout,model_proposer=planner,
+            model="mock",url="http://127.0.0.1:11434/v1")
+        self.assertEqual(result["status"],"provider_unavailable")
+        stage=json.loads((output/"stage.json").read_text())
+        self.assertEqual(stage["last_completed_stage"],"model_call_started")
+        self.assertEqual(stage["model_step"],1)
+        self.assertFalse((output/"unreviewed-prediction.json").exists())
+
+    def test_actual_agent_success_completes_stage_and_records_real_proposal(self):
+        output=self.root/"agent-step-success"
+        seen=[]
+        def client(url,model,token,messages):
+            stage=json.loads((output/"stage.json").read_text())
+            seen.append((stage["last_completed_stage"],stage.get("model_step")))
+            return {"choices":[{"message":{"content":json.dumps({
+                "action":"finish","edits":[{"path":"main.py",
+                    "old":"def bug():return 1",
+                    "new":"def bug():return 2"}]})}}]}
+        planner=partial(propose_agentic_benchmark,client=client,
+                        max_steps=3,required_targets={"main.py"})
+        result=attempt_one(
+            self.manifest,INSTANCE,output,dataset_loader=self.dataset,
+            checkout=self.checkout,model_proposer=planner,
+            model="mock",url="http://127.0.0.1:11434/v1")
+        self.assertEqual(result["status"],"model_patch_proposed")
+        self.assertEqual(seen,[("model_call_started",1)])
+        stage=json.loads((output/"stage.json").read_text())
+        self.assertEqual(stage["last_completed_stage"],"model_response_received")
+        self.assertNotIn("model_step",stage)
+        self.assertTrue((output/"unreviewed-prediction.json").is_file())
 
     def test_reject_unknown_instance(self):
         with self.assertRaises(ValueError):
