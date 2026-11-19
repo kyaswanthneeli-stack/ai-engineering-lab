@@ -25,8 +25,16 @@ jobs:
           python-version: '3.12'
       - name: Install RepoPilot
         run: python -m pip install -e .
-      - name: Run unit tests
-        run: python -m unittest discover -s tests -v
+      - name: Install coverage instrumentation
+        run: python -m pip install 'coverage>=7,<9'
+      - name: Compile all source and tests
+        run: python -m compileall -q src/repopilot tests
+      - name: Run unit tests with measured coverage
+        run: |
+          mkdir -p .runs
+          python -m coverage run --source=repopilot -m unittest discover -s tests -v
+          python -m coverage report --show-missing
+          python -m coverage xml -o .runs/coverage.xml
       - name: SWE-bench export preflight (0 official predictions)
         run: |
           mkdir -p .runs/empty-submissions
@@ -115,5 +123,6 @@ jobs:
             repopilot/.runs/benchmark-fixture.json
             repopilot/.runs/sample-verification.json
             repopilot/.runs/invoice-multifile-verification.json
+            repopilot/.runs/coverage.xml
           if-no-files-found: error
           retention-days: 30
