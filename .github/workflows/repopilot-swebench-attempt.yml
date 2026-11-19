@@ -83,6 +83,8 @@ jobs:
           REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
           REPOPILOT_MODEL: qwen2.5-coder:3b
           REPOPILOT_MAX_TOKENS: '1200'
+          REPOPILOT_OLLAMA_NATIVE: '1'
+          REPOPILOT_PROVIDER_TIMEOUT_SECONDS: '75'
         run: |
           curl -fsS "${REPOPILOT_BASE_URL}/models" >/dev/null
           curl -fsS --retry 2 --max-time 120 \
