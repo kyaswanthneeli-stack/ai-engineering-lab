@@ -56,8 +56,10 @@ def _safe_candidate_feedback(exc:Exception)->str:
     reason=str(exc)
     safe_reasons={
         "Exact old text must occur once in the current source":
-            "An old edit snippet does not match the inspected source exactly once. "
-            "Prefer complete-file replacements using files [{path, content}].",
+            "The old edit text is not an exact unique match. For long files, "
+            "prefer line_edits using existing numbered INSPECTED line ranges; "
+            "otherwise use a shorter verbatim old snippet. Never guess or "
+            "invent target source.",
         "Replacements must be distinct, nonempty, and bounded":
             "An old/new replacement is empty, unchanged, or exceeds size limits.",
         "No source modifications":
@@ -560,7 +562,8 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             messages.append({"role":"user","content":
                 "Discovery is finished. The inspected files are above. "
                 "Your next response MUST use action=finish with files "
-                "for small source or exact edits for long source. No tool actions."})
+                "for small inspected source or exact edits / inspected line_edits "
+                "for long source. No tool actions."})
             continue
         if name=="finish":
             missing=sorted(required-read_files)
