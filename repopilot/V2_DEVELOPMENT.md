@@ -90,6 +90,16 @@ python -m repopilot.benchmark_batch \
 
 The runner verifies that the previous summary belongs to the full pinned manifest, has unique selected task IDs, internally consistent prediction counts, and was **not** already presented as an official evaluation. Existing submitted model patches are never silently regenerated. If no retryable failure exists, it refuses to start a run. The new batch has separate immutable evidence and remains officially **unscored** until evaluated by the real harness. Never mix predictions from separate runs without explicit per-task provenance and official evaluator confirmation.
 
+## Targeted retry workflow (two real previously unsubmitted issues)
+
+The [retry-only GitHub Actions workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44599735460) downloads the previous **completed** 12-task model-attempt archive from [run #44580636292](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44580636292). It validates the original pinned manifest and verifies that both requested instances — `pytest-dev__pytest-11148` and `django__django-12589` — had no valid submission in that previous run. It **refuses to retry previously submitted model patches**.
+
+The workflow runs actual Qwen2.5-Coder 3B locally through native Ollama, saves immutable per-task model evidence, and conditionally launches the independent official SWE-bench harness **only for newly submitted patches**. A no-patch run is not assigned a success score. Results from the historical 12-task run and the retry run must remain separate unless recombined explicitly with pinned instance identity and model provenance.
+
+The targeted-selection option is available with `--retry-from` and `--instance-ids` together; every selected ID must be one of the previous run's unsubmitted failures. This behavior has regression tests for valid targeting and rejected resubmission of existing predictions. [The new branch CI run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44599745204) passed **202 unit tests** and the restricted Docker fixture checks (81% measured coverage).
+
+**Status when documented:** model generation/evaluation still underway; no official additional resolution claimed.
+
 ## Engineering practice
 
 Keep v1.0.0 at [its immutable release](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v1.0.0). Use a separate v2 feature branch and an open review PR. Every milestone must have tests and evidence before being merged. Do not overwrite or reinterpret the original benchmark artifacts.
