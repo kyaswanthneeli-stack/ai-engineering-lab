@@ -6,6 +6,7 @@ The score is heuristic and deliberately does not claim semantic understanding.
 """
 from __future__ import annotations
 import ast
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -24,25 +25,62 @@ def _tokens(s:str)->set[str]:
     return {w.lower() for w in _WORD.findall(s)}
 
 def _safe_python_paths(root:Path,max_files:int):
+    """Yield bounded Python paths without materializing the entire source tree.
+
+    os.walk prunes common generated directories and never follows directory
+    symlinks. Even a repository with millions of files cannot force rglob()
+    to build an unbounded sorted list before inspection begins.
+    """
+    if not isinstance(max_files,int) or not 1<=max_files<=20000:
+        raise ValueError("Python path scan limit must be in 1..20000")
+    root=root.resolve(strict=True)
     count=0
-    for path in sorted(root.rglob("*.py")):
-        rel=path.relative_to(root)
-        if any(part in _SKIP for part in rel.parts):
-            continue
-        if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(root):
-            continue
-        count+=1
-        if count>max_files:
-            break  # Partial index, not a complete search
-        if path.stat().st_size>100_000:
-            continue
-        yield path,rel.as_posix()
+    for parent,dirs,filenames in os.walk(root,topdown=True,followlinks=False):
+        dirs[:]=sorted(d for d in dirs if d not in _SKIP and
+                       not (Path(parent)/d).is_symlink())
+        for filename in sorted(filenames):
+            if not filename.endswith(".py"):
+                continue
+            path=Path(parent)/filename
+            if (path.is_symlink() or not path.is_file() or
+                    not path.resolve().is_relative_to(root)):
+                continue
+            count+=1
+            if count>max_files:
+                return  # Explicit partial index, not a complete search
+            if path.stat().st_size>100_000:
+                continue
+            yield path,path.relative_to(root).as_posix()
+
+
+def _issue_named_candidates(root:Path,terms:set[str],scan_limit:int):
+    """Cheap filename-only pass beyond the regular AST parsing budget.
+
+    This reads metadata for at most 20k files, then parses at most 32 strong
+    filename matches. No file content is loaded until the main validator.
+    """
+    expanded={t for t in terms if len(t)>=3 and t not in
+              {"fix","bug","the","and","error","wrong","file","python","test"}}
+    if not expanded:
+        return []
+    matches=[]
+    budget=min(20000,max(5000,scan_limit*5))
+    for path,rel in _safe_python_paths(root,budget):
+        words=_tokens(rel.replace("_"," ").replace("/"," ").replace("-"," "))
+        score=len(expanded & words)
+        if score:
+            matches.append((-score,rel,path))
+            if len(matches)>128:
+                matches=sorted(matches)[:32]
+    return [(p,rel) for _,rel,p in sorted(matches)[:32]]
 
 def ranked_source_context(repo:Path,issue:str,*,max_files:int=8,max_chars:int=32000,scan_limit:int=1800)->list[ContextItem]:
     root=repo.resolve(strict=True)
     if not root.is_dir() or not 1<=max_files<=20 or not 300<=max_chars<=100000:
         raise ValueError("Invalid context request")
-    terms=_tokens(issue[:12000])
+    if not isinstance(scan_limit,int) or not 1<=scan_limit<=20000:
+        raise ValueError("Invalid bounded source scan limit")
+    terms=_tokens(issue[:12000].replace("_"," "))
     candidates=[]
     # Issue-referenced files get priority in large repositories.
     mentions=set(re.findall(r"[A-Za-z0-9_./-]+\.py", issue[:12000]))
@@ -75,8 +113,9 @@ def ranked_source_context(repo:Path,issue:str,*,max_files:int=8,max_chars:int=32
                 break
         if len(nested)>=24:
             break
+    named=_issue_named_candidates(root,terms,scan_limit)
     visited=set()
-    for path,rel in [*explicit,*nested,*_safe_python_paths(root,scan_limit)]:
+    for path,rel in [*explicit,*nested,*named,*_safe_python_paths(root,scan_limit)]:
         if rel in visited:
             continue
         visited.add(rel)
@@ -87,7 +126,7 @@ def ranked_source_context(repo:Path,issue:str,*,max_files:int=8,max_chars:int=32
             continue
         symbols=tuple(node.name for node in ast.walk(tree)
             if isinstance(node,(ast.ClassDef,ast.FunctionDef,ast.AsyncFunctionDef)))
-        path_terms=_tokens(rel.replace("/"," "))
+        path_terms=_tokens(rel.replace("/"," ").replace("_"," ").replace("-"," "))
         symbol_terms=set()
         for symbol in symbols:
             symbol_terms |= _tokens(symbol.replace("_"," "))
