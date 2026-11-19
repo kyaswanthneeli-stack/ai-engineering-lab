@@ -12,7 +12,7 @@ Make RepoPilot more reliable for real Python projects and larger source trees wh
 |---|---|---|---|
 | 1. Deep source inspection | Use issue-named AST symbols and traceback line numbers to inspect the relevant region of long Python files, not the first 120 lines only | Unit tests for named symbols, tracebacks, required targets, unrelated source references, path traversal, and symlinks; full CI and Docker checks | Implemented in v2 development branch; merge pending |
 | 2. Large-repository selection | Filename-token candidate selection beyond the initial AST parse cap; safely prune generated and symlink directories | CI tests for nested sources after 100+ earlier files and strict 20,000-file metadata cap | Filename discovery implemented and CI passed; import-relationship context pending |
-| 3. Agent reliability | Reject repeat invalid patch proposals without redundant validation while permitting resubmission after legitimate new source inspection | CI tests for invalid-repeat rejection and proposals becoming valid after inspection; future real-model run | Duplicate-invalid suppression implemented and CI passed; real-model improvement not yet verified |
+| 3. Agent reliability | Reject repeat invalid patch proposals without redundant validation while permitting resubmission after legitimate new source inspection | CI tests for invalid-repeat rejection and proposals becoming valid after inspection, plus one live local-model smoke test | Duplicate-invalid suppression and real-model calculator smoke passed; impact on real SWE-bench success unmeasured |
 | 4. Verification and review | Generate additional reproduction tests with clear provenance and evaluate candidate patches in restricted disposable environments | Baseline/reproduction/patched evidence, source-only patch allowlist, reviewer approval | Planned |
 | 5. Official benchmark comparison | Rerun pinned real SWE-bench tasks against the exact same cohort and publish per-task results | Real model predictions, official SWE-bench evaluator reports, errors/timeouts, and both evaluated-patch and selected-cohort denominators | Planned |
 | 6. v2.0 release | Produce a new versioned package, public demo, release notes, security/limitations statement | Green CI, Docker checks, actual benchmark result, wheel and source distribution | Planned |
@@ -36,6 +36,12 @@ The filename-only discovery pass scans a capped number of regular Python paths u
 The model-agent retry loop now hashes a candidate's canonical JSON internally **only after patch validation definitively fails**. An identical rejected edit is not revalidated in a subsequent model step. Proposals that require safe source inspection remain eligible to be resubmitted, so this optimization does not block the existing uninspected-target recovery path. No model output or source is printed in the duplicate-rejection audit message.
 
 [GitHub Actions verification](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44571384204) passed **180 unit tests**, **81% measured code coverage**, and restricted Docker checks. A new real-model/SWE-bench evaluation is still required before asserting any improved AI success rate. The previous v1 official benchmark score remains **one resolved of six evaluated submissions** (one out of 12 selected) until a new independent official run is complete.
+
+## Real-model validation (November 19, 2026)
+
+The [v2 Qwen2.5-Coder 1.5B smoke workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44572068161) **completed successfully**. The agent inspected `calculator.py`, produced its own patch in one model action, and independently verified the patch with restricted Docker baseline/failing-reproduction/patched tests. The GitHub Actions report recorded `model_generated=true`, `verified_in_docker=true`, and `outcome=model_patch_verified`.
+
+This is a **synthetic calculator integration test**, not official SWE-bench evaluation. It does not establish success on large real-world repositories; an independent v2 benchmark comparison remains outstanding.
 
 ## Engineering practice
 
