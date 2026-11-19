@@ -44,6 +44,12 @@ def execute(repo:Path,spec:IssueSpec,output:Path,timeout:int=30,runner=run_tests
         apply_patch(work,spec.patch)
         after=runner(work,spec.test_command,timeout=timeout)
         if after.timed_out or after.exit_code!=0:
+            failure={"issue_id":spec.issue_id,"outcome":"failed","failed_stage":"patched_tests",
+                     "error":"Patched tests must pass","proposal_sha256":proposal_digest(spec),
+                     "baseline":asdict(baseline),"before":asdict(before),"after":asdict(after),
+                     "elapsed_ms":round((time.monotonic()-start)*1000)}
+            output.parent.mkdir(parents=True,exist_ok=True)
+            output.write_text(json.dumps(failure,indent=2)+"\n",encoding="utf-8")
             raise VerificationError("Patched tests must pass")
         try:
             check_three_stage_evidence(baseline,before,after)
