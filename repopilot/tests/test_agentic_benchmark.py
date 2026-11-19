@@ -183,7 +183,7 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(patch.patch.count("diff --git"),2)
         reasons=[item.get("reason","") for item in meta["tool_trace"]]
         self.assertTrue(any("does not match" in reason for reason in reasons))
-        self.assertTrue(any("Fix this specific error" in item["content"]
+        self.assertTrue(any("Previous candidate error" in item["content"]
                             for item in seen[1]))
 
     def test_complete_source_without_trailing_newline_normalized(self):
