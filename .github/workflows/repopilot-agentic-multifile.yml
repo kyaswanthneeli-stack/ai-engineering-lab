@@ -42,6 +42,7 @@ jobs:
         env:
           REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
           REPOPILOT_MODEL: qwen2.5-coder:7b
+          REPOPILOT_MAX_TOKENS: '2000'
         run: |
           python - <<'PY'
           import json, os
@@ -53,7 +54,7 @@ jobs:
           from repopilot.pr import patch_targets
           from repopilot.review import review_proposal
           repo=Path('fixtures/invoice-multifile')
-          run=Path('.runs/agentic-invoice-issue3-v10-7b')
+          run=Path('.runs/agentic-invoice-issue3-v11-7b')
           run.mkdir(parents=True,exist_ok=False)
           report={'model':'qwen2.5-coder:7b','model_generated':False,
                   'verified':False,'issue':'https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/3',
@@ -82,6 +83,8 @@ jobs:
               report['docker_after']=verification['after']['exit_code']
               if not {'pricing.py','checkout.py'} <= set(report['model_patch_targets']):
                   raise ValueError('Model did not produce required two-file patch')
+              if not report['verified']:
+                  raise ValueError('Docker regression did not verify proposed model patch')
               report['outcome']='verified'
           except Exception as exc:
               report['outcome']='failed'
@@ -96,8 +99,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-agentic-multifile-attempt-v10-7b
-          path: repopilot/.runs/agentic-invoice-issue3-v10-7b/
+          name: repopilot-agentic-multifile-attempt-v11-7b
+          path: repopilot/.runs/agentic-invoice-issue3-v11-7b/
           if-no-files-found: warn
           retention-days: 30
       - name: Stop model
