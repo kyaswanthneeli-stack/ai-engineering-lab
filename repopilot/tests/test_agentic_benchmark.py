@@ -37,6 +37,48 @@ class AgentTests(unittest.TestCase):
             with self.assertRaisesRegex(AgentToolError,"does not use API tokens"):
                 _provider("http://127.0.0.1:11434/v1","mock","test-secret",[])
 
+    def test_model_fenced_json_is_parsed_as_action(self):
+        messages=[]
+        def client(url,model,token,history):
+            messages.append(list(history))
+            return {"choices":[{"message":{"content":
+                "```json\\n"+json.dumps({"action":"finish","edits":[{
+                    "path":"pricing.py","old":"return sum(values)",
+                    "new":"return round(sum(values),2)"}]})+"\\n```"}}]}
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"fix rounding","mock","http://127.0.0.1:11434/v1",
+            client=client,max_steps=3,required_targets={"pricing.py"})
+        self.assertIn("round(sum(values),2)",patch.patch)
+
+    def test_invalid_model_json_retries_without_reusing_malformed_text(self):
+        contents=["not-json","{invalid","",json.dumps({"action":"finish",
+                  "edits":[{"path":"pricing.py","old":"return sum(values)",
+                            "new":"return round(sum(values),2)"}]})]
+        inputs=[]
+        def client(url,model,token,history):
+            inputs.append(list(history))
+            return {"choices":[{"message":{"content":contents.pop(0)}}]}
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"fix rounding","mock","http://127.0.0.1:11434/v1",
+            client=client,max_steps=5,required_targets={"pricing.py"})
+        self.assertIn("round(sum(values),2)",patch.patch)
+        self.assertEqual(sum(t["action"]=="invalid_json_rejected"
+                             for t in meta["tool_trace"]),3)
+        self.assertFalse(any("not-json" in m["content"] or
+                             "{invalid" in m["content"]
+                             for hist in inputs for m in hist))
+
+    def test_repeated_invalid_model_json_exhausts_bounded_budget(self):
+        calls=[]
+        def client(url,model,token,messages):
+            calls.append(1)
+            return {"choices":[{"message":{"content":"bad output"}}]}
+        with self.assertRaisesRegex(AgentToolError,"after step budget"):
+            propose_agentic_benchmark(
+                self.repo,"fix rounding","mock","http://127.0.0.1:11434/v1",
+                client=client,max_steps=3,required_targets={"pricing.py"})
+        self.assertEqual(len(calls),3)
+
     def test_provider_transient_503_retries_then_returns_response(self):
         class Response:
             def __enter__(self): return self
