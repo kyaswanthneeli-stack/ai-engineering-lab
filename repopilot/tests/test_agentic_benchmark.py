@@ -183,6 +183,77 @@ class AgentTests(unittest.TestCase):
         self.assertIn("SMALL Python files",recommendation)
         self.assertNotIn("SHORT exact text span",recommendation)
 
+
+    def test_line_edits_correct_large_inspected_source_after_bad_old_text(self):
+        (self.repo/"deep.py").write_text(
+            "".join(f"FILLER_{i:03d} = {i}\n" for i in range(300))
+            + "def calculate_invoice_tax(value):\n    return value + 0\n")
+        history=[]
+        sequence=iter([
+            {"action":"finish","edits":[{
+                "path":"deep.py","old":"invented old function body",
+                "new":"    return value + 1"}]},
+            {"action":"finish","line_edits":[{
+                "path":"deep.py","start_line":302,"end_line":302,
+                "new":"    return value + 1"}]}
+        ])
+        def model(url,model,token,messages):
+            history.append(list(messages))
+            return {"choices":[{"message":{"content":json.dumps(next(sequence))}}]}
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"Fix calculate_invoice_tax in deep.py",
+            "mock","http://127.0.0.1:11434/v1",
+            client=model,max_steps=5,required_targets={"deep.py"})
+        self.assertIn("return value + 1",patch.patch)
+        self.assertEqual(sum(t["action"]=="finish_rejected"
+                             for t in meta["tool_trace"]),1)
+        self.assertTrue(any("line_edits" in msg["content"]
+                            for msg in history[1] if msg["role"]=="user"))
+        self.assertEqual((self.repo/"deep.py").read_text().splitlines()[-1],
+                         "    return value + 0")
+
+    def test_line_edits_cannot_write_uninspected_range_even_for_known_file(self):
+        (self.repo/"deep.py").write_text(
+            "".join(f"FILLER_{i:03d} = {i}\n" for i in range(300))
+            + "def calculate_invoice_tax(value):\n    return value + 0\n")
+        steps=[
+            {"action":"finish","line_edits":[{
+                "path":"deep.py","start_line":1,"end_line":1,
+                "new":"FILLER_000 = 999"}]},
+            {"action":"finish","line_edits":[{
+                "path":"deep.py","start_line":302,"end_line":302,
+                "new":"    return value + 1"}]},
+        ]
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"Fix calculate_invoice_tax in deep.py",
+            "mock","http://127.0.0.1:11434/v1",client=self.sequence(steps),
+            max_steps=5,required_targets={"deep.py"})
+        self.assertIn("return value + 1",patch.patch)
+        self.assertNotIn("FILLER_000 = 999",patch.patch)
+        errors=[t.get("reason","") for t in meta["tool_trace"]
+                if t.get("action")=="finish_rejected"]
+        self.assertTrue(any("ENTIRELY within" in error for error in errors))
+
+    def test_line_edit_recovery_first_inspects_model_named_existing_file(self):
+        edit={"action":"finish","line_edits":[{
+            "path":"checkout.py","start_line":3,"end_line":3,
+            "new":"    return round(subtotal(values), 2)"}]}
+        steps=[
+            {"action":"read","path":"pricing.py","start":1,"count":2},
+            edit,edit
+        ]
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"Round checkout total in checkout.py",
+            "mock","http://127.0.0.1:11434/v1",client=self.sequence(steps),
+            max_steps=4)
+        self.assertIn("round(subtotal(values), 2)",patch.patch)
+        self.assertEqual(meta["inspected_files"],["checkout.py","pricing.py"])
+        self.assertTrue(any(t.get("action")=="candidate_preinspect"
+                            and t.get("target")=="checkout.py"
+                            for t in meta["tool_trace"]))
+        self.assertEqual((self.repo/"checkout.py").read_text().splitlines()[-1],
+                         "    return subtotal(values)")
+
     def test_opt_in_local_native_ollama_skips_compatible_api(self):
         with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1",
                                       "REPOPILOT_MAX_TOKENS":"512"}), patch(
