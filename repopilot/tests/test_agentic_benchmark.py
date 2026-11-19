@@ -86,7 +86,7 @@ class AgentTests(unittest.TestCase):
         self.assertIn("round(sum(values),2)",patch.patch)
         self.assertIn("finish_schema_rejected",
             [step["action"] for step in meta["tool_trace"]])
-        self.assertTrue(any("No extra keys" in x["content"] for x in observed[1]))
+        self.assertTrue(any("Finish action REJECTED" in x["content"] for x in observed[1]))
 
     def test_repeated_invalid_finish_schema_exhausts_step_budget(self):
         calls=[]
