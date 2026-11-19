@@ -39,19 +39,19 @@ class ContextSelectionTests(unittest.TestCase):
         module=self.root/"package"/"long_module.py"
         module.parent.mkdir()
         module.write_text(
-            "".join(f"FILLER_{i} = {i}\\n" for i in range(260))
-            + "def calculate_invoice_tax(price):\\n    return price*0.2\\n")
+            "".join(f"FILLER_{i} = {i}\n" for i in range(260))
+            + "def calculate_invoice_tax(price):\n    return price*0.2\n")
         start=issue_window_start(
             self.root,"package/long_module.py",
             "Bug in calculate_invoice_tax: incorrect invoice tax")
         self.assertGreater(start,200)
         lines=module.read_text().splitlines()
-        self.assertIn("def calculate_invoice_tax", "\\n".join(lines[start-1:start+119]))
+        self.assertIn("def calculate_invoice_tax", "\n".join(lines[start-1:start+119]))
 
     def test_v2_traceback_position_prioritized_over_first_lines(self):
         module=self.root/"pkg"/"deep.py"
         module.parent.mkdir()
-        module.write_text("".join(f"DATA_{i} = {i}\\n" for i in range(360)))
+        module.write_text("".join(f"DATA_{i} = {i}\n" for i in range(360)))
         start=issue_window_start(
             self.root,"pkg/deep.py",
             'Traceback: File "/tmp/source/pkg/deep.py", line 301, in run')
@@ -59,7 +59,7 @@ class ContextSelectionTests(unittest.TestCase):
 
     def test_v2_unrelated_traceback_cannot_redirect_selected_file(self):
         (self.root/"long.py").write_text("".join(
-            f"DATA_{i} = {i}\\n" for i in range(260)))
+            f"DATA_{i} = {i}\n" for i in range(260)))
         self.assertEqual(issue_window_start(
             self.root,"long.py",
             'Error File "/somewhere/unrelated.py", line 200'),1)
@@ -70,7 +70,7 @@ class ContextSelectionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             issue_window_start(self.root,"billing.py","tax",count=10000)
         target=self.root.parent/"context-window-outside.py"
-        target.write_text("def leak(): pass\\n")
+        target.write_text("def leak(): pass\n")
         try:
             (self.root/"outside.py").symlink_to(target)
             with self.assertRaises(ValueError):
