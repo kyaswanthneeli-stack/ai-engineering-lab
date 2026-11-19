@@ -1,4 +1,4 @@
-"""Human-approved draft PR publisher, using GitHub Contents API.
+"""Human-approved draft PR publisher using one atomic Git Data commit.
 
 Never publish without explicit approval. Requires local source equality with
 GitHub's default branch before changing the copied repository.
@@ -114,21 +114,31 @@ def publish_approved_draft(repo:Path,spec:IssueSpec,verification:dict,remote:str
         apply_patch(root,spec.patch)
         branch="repopilot/issue-"+re.sub("[^A-Za-z0-9-]","-",spec.issue_id)[:70]
         branch=branch.rstrip("-")
-        # A branch already present causes a GitHub conflict rather than overwrite.
-        api.call("POST","/git/refs",{"ref":"refs/heads/"+branch,"sha":base_sha})
-        for name in targets:
-            api.call("PUT","/contents/"+quote(remote_path(name),safe="/"),{
-                "message":"RepoPilot: proposed fix for "+spec.issue_id,
-                "content":base64.b64encode((root/name).read_bytes()).decode(),
-                "sha":originals[name],"branch":branch
-            })
-        api.call("PUT","/contents/"+quote(remote_path(spec.test_path),safe="/"),{
-            "message":"RepoPilot: regression test for "+spec.issue_id,
-            "content":base64.b64encode(spec.reproduction_test.encode()).decode(),"branch":branch
+        # Create one tree and one commit before exposing the branch. Partial
+        # per-file uploads cannot leave the review branch half-applied.
+        base_commit=api.call("GET","/git/commits/"+base_sha)
+        tree_sha=base_commit["tree"]["sha"]
+        updates=[
+            {"path":remote_path(name),"mode":"100644","type":"blob",
+             "content":(root/name).read_text(encoding="utf-8")}
+            for name in targets
+        ]
+        updates.append({"path":remote_path(spec.test_path),"mode":"100644",
+                        "type":"blob","content":spec.reproduction_test})
+        tree=api.call("POST","/git/trees",{"base_tree":tree_sha,"tree":updates})
+        if not isinstance(tree.get("sha"),str):
+            raise PublishError("GitHub did not return a tree SHA")
+        commit=api.call("POST","/git/commits",{
+            "message":"RepoPilot: proposed fix and regression for "+spec.issue_id,
+            "tree":tree["sha"],"parents":[base_sha]
         })
+        if not isinstance(commit.get("sha"),str):
+            raise PublishError("GitHub did not return a commit SHA")
+        # A branch collision fails rather than overwriting an existing review.
+        api.call("POST","/git/refs",{"ref":"refs/heads/"+branch,"sha":commit["sha"]})
         pr=api.call("POST","/pulls",{
             "title":"[RepoPilot] "+spec.summary[:120],
             "head":branch,"base":default,"draft":True,
             "body":"## Proposed fix\n"+spec.summary[:1000]+"\n\n## Verification\nRegression test failed before the change and passed after the patch in a restricted Docker runner.\n\n**Human review required.** Never merge without inspecting code, security and CI.\n\nIssue: "+spec.issue_id
         })
-        return {"draft_pr_created":True,"url":pr.get("html_url"),"number":pr.get("number"),"branch":branch}
+        return {"draft_pr_created":True,"url":pr.get("html_url"),"number":pr.get("number"),"branch":branch,"commit_sha":commit["sha"]}
