@@ -22,6 +22,10 @@ def patch_targets(patch:str)->list[str]:
     validate_patch(patch)
     return re.findall(r"(?m)^diff --git a/(.+?) b/\1$",patch)
 
+class _RejectRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self,req,fp,code,msg,headers,newurl):
+        raise PublishError("GitHub API redirects rejected")
+
 class GitHubApi:
     def __init__(self, token:str, repo:str):
         if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+",repo):
@@ -42,7 +46,8 @@ class GitHubApi:
             "User-Agent":"RepoPilot/0.3"
         })
         try:
-            with urllib.request.urlopen(request,timeout=20) as response:
+            opener=urllib.request.build_opener(_RejectRedirect())
+            with opener.open(request,timeout=20) as response:
                 raw=response.read(1_000_001)
                 return json.loads(raw)
         except Exception as exc:
@@ -51,7 +56,7 @@ class GitHubApi:
 def publish_approved_draft(repo:Path,spec:IssueSpec,verification:dict,remote:str,approval:str,api:GitHubApi=None,repo_subdir:str="")->dict:
     if approval!="I_APPROVE_DRAFT_PR":
         raise PublishError("Explicit human approval is required")
-    if verification.get("outcome")!="verified_in_sandbox" or verification.get("before",{}).get("exit_code") in (None,0) or verification.get("after",{}).get("exit_code")!=0:
+    if verification.get("outcome")!="verified_in_sandbox" or verification.get("baseline",{}).get("exit_code")!=0 or verification.get("before",{}).get("exit_code") in (None,0) or verification.get("after",{}).get("exit_code")!=0:
         raise PublishError("Verified fail-before/pass-after evidence required")
     if verification.get("issue_id")!=spec.issue_id:
         raise PublishError("Issue mismatch")
