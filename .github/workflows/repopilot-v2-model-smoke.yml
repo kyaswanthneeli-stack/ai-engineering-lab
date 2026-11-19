@@ -1,4 +1,4 @@
-name: RepoPilot v2 real local-model smoke test
+name: RepoPilot v2 real streaming Ollama model smoke test
 
 on:
   push:
@@ -42,6 +42,8 @@ jobs:
       - name: Model generates code and independent restricted Docker suite verifies it
         env:
           REPOPILOT_OLLAMA_NATIVE: '1'
+          REPOPILOT_OLLAMA_STREAM: '1'
+          REPOPILOT_NATIVE_WALL_TIMEOUT: '300'
           REPOPILOT_MAX_TOKENS: '768'
         run: |
           python - <<'PY'
@@ -55,7 +57,8 @@ jobs:
           source=Path("fixtures/calculator-buggy")
           folder=Path(".runs/v2-real-model-smoke")
           folder.mkdir(parents=True,exist_ok=True)
-          report={"kind":"synthetic_calculator_smoke","model":"qwen2.5-coder:1.5b",
+          report={"kind":"synthetic_calculator_stream_smoke",
+                  "model":"qwen2.5-coder:1.5b","ollama_stream":True,
                   "model_generated":False,"verified_in_docker":False,
                   "officially_evaluated":False,"officially_resolved":None}
           try:
