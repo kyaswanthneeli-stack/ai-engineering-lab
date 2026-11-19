@@ -73,10 +73,12 @@ def collect(manifest: Path, output: Path, *, per_task_timeout: int = 240,
     if not 30 <= per_task_timeout <= 900 or not 2 <= max_steps <= 24:
         raise ValueError("Timeout or agent steps outside safe bounds")
     manifest_tasks = load_manifest(manifest)  # Original 10-20 task safety gate stays intact.
-    if retry_from is not None and instance_ids is not None:
-        raise ValueError("Use either explicit instance IDs or previous failed attempts")
     if retry_from is not None:
-        instance_ids=retryable_task_ids(manifest_tasks,retry_from)
+        eligible=retryable_task_ids(manifest_tasks,retry_from)
+        if instance_ids is None:
+            instance_ids=eligible
+        elif not isinstance(instance_ids,list) or not set(instance_ids) <= set(eligible):
+            raise ValueError("Retry selection must contain only previously unsubmitted failures")
     tasks = manifest_tasks
     if instance_ids is not None:
         allowed = {task["instance_id"] for task in manifest_tasks}
@@ -183,7 +185,7 @@ def main(argv=None):
     parser.add_argument("--per-task-timeout", type=int, default=240)
     parser.add_argument("--max-steps", type=int, default=10)
     parser.add_argument("--instance-ids", nargs="+",
-                        help="Optional unique subset of the original pinned manifest")
+                        help="Optional pinned task IDs; with --retry-from, all IDs must be previously unsubmitted failures")
     parser.add_argument("--retry-from", type=Path,
                         help="A previous unscored summary.json: retry only missing/failed patches")
     args = parser.parse_args(argv)
