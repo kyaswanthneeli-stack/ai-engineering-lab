@@ -42,9 +42,9 @@ class AgentTests(unittest.TestCase):
         def client(url,model,token,history):
             messages.append(list(history))
             return {"choices":[{"message":{"content":
-                "```json\\n"+json.dumps({"action":"finish","edits":[{
+                "```json\n"+json.dumps({"action":"finish","edits":[{
                     "path":"pricing.py","old":"return sum(values)",
-                    "new":"return round(sum(values),2)"}]})+"\\n```"}}]}
+                    "new":"return round(sum(values),2)"}]})+"\n```"}}]}
         patch,meta=propose_agentic_benchmark(
             self.repo,"fix rounding","mock","http://127.0.0.1:11434/v1",
             client=client,max_steps=3,required_targets={"pricing.py"})
