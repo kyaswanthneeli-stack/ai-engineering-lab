@@ -21,7 +21,7 @@ from pathlib import Path
 
 from .benchmark_planner import BenchmarkPatch,BenchmarkProposalError
 from .context_select import ranked_source_context,issue_window_start
-from .edit_plan import canonical_patch
+from .edit_plan import canonical_patch,canonical_line_patch
 from .patches import validate_patch
 from .pr import patch_targets
 from .repo_tools import list_python_files,search_python,read_python,InspectionError
@@ -35,6 +35,7 @@ Choose exactly one:
 {"action":"read","path":"existing.py","start":1,"count":80}
 {"action":"finish","edits":[{"path":"existing.py","old":"EXACT ORIGINAL TEXT","new":"REPLACEMENT TEXT"}]}
 {"action":"finish","patch":"complete unified git diff text"}
+{"action":"finish","line_edits":[{"path":"existing.py","start_line":10,"end_line":10,"new":"replacement line"}]}
 Before finishing, read every file you intend to change. Prefer exact edits.
 No shell commands, external hosts, file creation, deleted source files, or
 claims about tests passing. The caller will verify any final patch independently."""
@@ -76,7 +77,7 @@ def _safe_candidate_feedback(exc:Exception)->str:
         "Edit path was not supplied to the model":
             "Only inspected Python paths are permitted.",
         "Final proposal requires only edits or patch":
-            "Use a single action=finish containing only edits or patch, with no explanation fields.",
+            "Use action=finish containing only edits, line_edits, files or patch, with no explanation fields.",
         "Candidate changed a file outside inspected source":
             "Your proposal touches uninspected or unmatched source. Modify ONLY the exact approved source path in the inspected-files list.",
     }
@@ -95,7 +96,12 @@ def _safe_repair_instruction(root:Path,read_files:set[str])->str:
         large=True
     if large:
         return (
-            'Return a NEW action=finish with edits: '
+            'If exact old source text is uncertain, return action=finish with ' 
+            'line_edits: [{path,start_line,end_line,new}] limited to ' 
+            'the actual numbered inspected source lines. Each line edit ' 
+            'must replace at most 12 consecutive INSPECTED lines; use only ' 
+            'the exact line numbers visible in your read result. Otherwise ' 
+            'return a NEW action=finish with edits: '
             '[{path, old, new}] ONLY, where old is a SHORT exact text span '
             'from the inspected source and new is a syntax-valid replacement. '
             'Use valid JSON with EXACT keys: action, edits; each edit must '
@@ -497,14 +503,18 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 "You are in FINAL PATCH MODE. Return ONLY a JSON object "
                 "with action=finish. Prefer files: [{path, content}] where content "
                 "is COMPLETE corrected Python source for SMALL inspected files. "
-                "For long inspected files, use edits: [{path,old,new}] with "
-                "exact original text. Do not call list, search or read. "
+                "For long inspected files, use edits: [{path,old,new}] or "
+                "line_edits: [{path,start_line,end_line,new}] with "
+                exact original text or exact inspected line numbers. "
+                "Do not call list, search or read. "
                 "Use ONLY exact paths from Allowed inspected files. "
                 "When editing a large module, use a minimal edits entry: "
                 "{path: permitted_path, old: verbatim_existing_lines, "
                 "new: corrected_lines}. Copy old text byte-for-byte from "
                 "the provided excerpt; do not rewrite unrelated functions. "
-                "For a small module under 6KB, files mode is permitted. "
+                For a small module under 6KB, files mode is permitted. "
+                "When exact old text cannot be copied, select a short line_edits "
+                "range wholly inside previously displayed numbered source. "
                 "Preserve imports and existing functions. Never invent files "
                 "or claim tests passed."},
                 {"role":"user","content":
@@ -513,7 +523,8 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 "\n\nAllowed inspected files: "+", ".join(phase_files)+
                 (". Change EVERY required file." if required else
                  ". Modify one or more inspected relevant files, not necessarily all.")+
-                " Output action=finish with complete corrected source for small files or exact edits for long files."+
+                " Output action=finish with complete corrected source for small files, "
+                "exact edits or inspected line_edits for long files."+
 
                 (" Previous candidate error: "+last_candidate_reason if last_candidate_reason else "")}]
             trace.append({"step":index+1,"action":"final_phase_started"})
@@ -639,7 +650,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 trace.append({"step":index+1,"action":"finish_deferred_uninspected"})
                 continue
             if set(action) not in ({"action","files"}, {"action","edits"},
-                                   {"action","patch"}):
+                                   {"action","line_edits"}, {"action","patch"}):
                 # JSON validity alone is not enough: a small model may return
                 # action=finish with no patch, or include explanation keys.
                 # Never interpret such output as an authorized source edit.
@@ -650,7 +661,8 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 # still receives feedback after that reset.
                 last_candidate_reason=("Your previous finish response had unsupported "
                     "fields. Respond with exactly {action:finish,edits:[{path,old,new}]}, "
-                    "{action:finish,files:[{path,content}]}, or "
+                    "{action:finish,files:[{path,content}]}, "
+                    "{action:finish,line_edits:[{path,start_line,end_line,new}]}, or "
                     "{action:finish,patch:unified_diff}; no other keys.")
                 if index==max_steps-1:
                     raise AgentToolError("Invalid finish schema after step budget")
@@ -719,6 +731,9 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                     ):
                         raise AgentToolError("Model modified a file it did not inspect")
                     patch=canonical_patch(root,edits,allowed_files=read_files)
+                elif set(action)=={"action","line_edits"}:
+                    patch=canonical_line_patch(root,action["line_edits"],
+                        allowed_files=read_files,inspected_windows=inspected_windows)
                 elif set(action)=={"action","patch"}:
                     patch=action["patch"]
                     if not isinstance(patch,str):
