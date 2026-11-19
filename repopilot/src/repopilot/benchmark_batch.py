@@ -17,10 +17,19 @@ from .swebench_export import load_manifest
 
 
 def collect(manifest: Path, output: Path, *, per_task_timeout: int = 240,
-            max_steps: int = 10) -> dict:
+            max_steps: int = 10, instance_ids: list[str] | None = None) -> dict:
     if not 30 <= per_task_timeout <= 900 or not 2 <= max_steps <= 24:
         raise ValueError("Timeout or agent steps outside safe bounds")
-    tasks = load_manifest(manifest)
+    manifest_tasks = load_manifest(manifest)  # Original 10-20 task safety gate stays intact.
+    tasks = manifest_tasks
+    if instance_ids is not None:
+        allowed = {task["instance_id"] for task in manifest_tasks}
+        if (not isinstance(instance_ids, list) or not 1 <= len(instance_ids) <= 20 or
+                len(set(instance_ids)) != len(instance_ids) or
+                not set(instance_ids) <= allowed):
+            raise ValueError("Pilot tasks must be unique nonempty IDs from pinned manifest")
+        selected = set(instance_ids)
+        tasks = [task for task in manifest_tasks if task["instance_id"] in selected]
     if output.exists():
         raise ValueError("Refuse to overwrite existing evaluation evidence")
     output.mkdir(parents=True)
@@ -82,6 +91,7 @@ def collect(manifest: Path, output: Path, *, per_task_timeout: int = 240,
     (output / "predictions.jsonl").write_text(
         "".join(json.dumps(x, ensure_ascii=False)+"\n" for x in predictions))
     summary = {"dataset": "princeton-nlp/SWE-bench_Lite",
+               "pinned_manifest_tasks": len(manifest_tasks),
                "selected_tasks": len(tasks),
                "model_predictions": len(predictions),
                "missing_predictions": len(tasks)-len(predictions),
@@ -102,10 +112,12 @@ def main(argv=None):
                         default=Path(".runs/swebench-batch"))
     parser.add_argument("--per-task-timeout", type=int, default=240)
     parser.add_argument("--max-steps", type=int, default=10)
+    parser.add_argument("--instance-ids", nargs="+",
+                        help="Optional unique subset of the original pinned manifest")
     args = parser.parse_args(argv)
     summary = collect(args.manifest, args.output,
                       per_task_timeout=args.per_task_timeout,
-                      max_steps=args.max_steps)
+                      max_steps=args.max_steps, instance_ids=args.instance_ids)
     print(json.dumps({k: v for k, v in summary.items() if k != "tasks"}, indent=2))
 
 
