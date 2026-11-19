@@ -72,6 +72,31 @@ class RepairTests(unittest.TestCase):
             self.assertEqual(report["outcome"],"failed")
             self.assertEqual(len(report["attempts"]),2)
             self.assertNotIn("successful_attempt",report)
+    def test_duplicate_proposal_is_not_reverified(self):
+        with tempfile.TemporaryDirectory() as td:
+            calls=[]
+            prompts=[]
+            def model(repo,prompt,*args):
+                prompts.append(prompt)
+                return spec(),{"model":"mock"}
+            def verifier(repo,proposal,path):
+                calls.append(1)
+                raise RuntimeError("simulated test failure")
+            out=Path(td)/"attempt"
+            report=run_with_repair(Path(td),
+                "https://github.com/example/repo/issues/1",out,
+                max_attempts=3,issue_reader=issue,
+                model_proposer=model,verifier=verifier)
+            self.assertEqual(report["outcome"],"failed")
+            self.assertEqual(len(prompts),3)
+            self.assertEqual(len(calls),1)
+            self.assertTrue(report["attempts"][1]["duplicate_proposal"])
+            self.assertTrue(report["attempts"][2]["duplicate_proposal"])
+            self.assertEqual(report["attempts"][0]["proposal_sha256"],
+                             report["attempts"][1]["proposal_sha256"])
+            self.assertTrue((out/"attempt-03-proposal.json").exists())
+            self.assertIn("materially different",prompts[2])
+
     def test_invalid_attempt_count(self):
         with self.assertRaises(ValueError):
             run_with_repair(Path("."),"x",Path("x"),max_attempts=4)
