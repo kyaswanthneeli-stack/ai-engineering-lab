@@ -73,7 +73,7 @@ jobs:
           assert data.get("choices"),"Local model returned no chat completion"
           print("PASS: Ollama returned real model JSON via supported endpoint")
           PY
-      - name: Attempt one pinned real SWE-bench Lite issue (bounded discovery and native fallback / ranked-source patch prompt v13)
+      - name: Attempt one pinned real SWE-bench Lite issue (bounded discovery and native fallback / source-first recovery v14)
         continue-on-error: true
         env:
           REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
@@ -83,14 +83,14 @@ jobs:
           curl -fsS "${REPOPILOT_BASE_URL}/models" >/dev/null
           python -m repopilot.benchmark_attempt pytest-dev__pytest-11148 --agentic --max-steps 12 \
             --manifest benchmarks/swebench-lite-12.json \
-            --output .runs/official-attempt-pytest-11148-v13-agentic
+            --output .runs/official-attempt-pytest-11148-v14-agentic
       - name: Report actual outcome without claiming resolution
         if: always()
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          path=Path(".runs/official-attempt-pytest-11148-v13-agentic/attempt.json")
+          path=Path(".runs/official-attempt-pytest-11148-v14-agentic/attempt.json")
           if not path.is_file():
               # Setup failure is explicitly unscored, never a model failure.
               result={"instance_id":"pytest-dev__pytest-11148",
@@ -119,8 +119,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-real-swebench-pytest-11148-v13-unscored
-          path: repopilot/.runs/official-attempt-pytest-11148-v13-agentic/
+          name: repopilot-real-swebench-pytest-11148-v14-unscored
+          path: repopilot/.runs/official-attempt-pytest-11148-v14-agentic/
           if-no-files-found: warn
           retention-days: 30
       - name: Stop local model
