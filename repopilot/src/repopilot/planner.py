@@ -43,8 +43,14 @@ def _parse_candidate(result:dict,known_files:list[str],repo:Path) -> tuple[Issue
     if not isinstance(data,dict):
         raise ValueError("Output must be a JSON object with six fields")
     # Lossless envelope extraction and newline normalization; never rewrite patch logic.
-    if isinstance(data.get("patch"),dict) and isinstance(data["patch"].get("patch"),str):
-        data["patch"]=data["patch"]["patch"]
+    if isinstance(data.get("patch"),dict):
+        # Accept only lossless string wrappers. Do NOT synthesize a patch from
+        # arbitrary file mappings or model-authored line objects.
+        wrapper=data["patch"]
+        for key in ("patch","diff","unified_diff"):
+            if set(wrapper)=={key} and isinstance(wrapper[key],str):
+                data["patch"]=wrapper[key]
+                break
     if not isinstance(data.get("patch"),str):
         raise ValueError("patch MUST be a single JSON string with unified-diff text")
     if not isinstance(data.get("reproduction_test"),str):
