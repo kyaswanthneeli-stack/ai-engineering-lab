@@ -81,6 +81,29 @@ def _safe_candidate_feedback(exc:Exception)->str:
     return safe_reasons.get(reason,"Candidate failed bounded source/patch validation.")
 
 
+def _safe_repair_instruction(root:Path,read_files:set[str])->str:
+    """Choose compatible patch format from already-inspected source sizes.
+
+    This is advice only, never an automatic source modification or patch
+    acceptance bypass. The same parser, source allowlist, and git check apply.
+    """
+    try:
+        large=any((root/name).stat().st_size>5500 for name in read_files)
+    except OSError:
+        large=True
+    if large:
+        return (
+            'Return a NEW action=finish with edits: '
+            '[{path, old, new}] ONLY, where old is a SHORT exact text span '
+            'from the inspected source and new is a syntax-valid replacement. '
+            'Do not return entire file contents, extra fields or uninspected '
+            'paths. Keep original surrounding source unchanged.')
+    return (
+        'Return a NEW action=finish with files: [{path, content}] for complete '
+        'corrected SMALL Python files, preserving imports and all other '
+        'functions. Do not return extra fields or uninspected paths.')
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self,req,fp,code,msg,headers,newurl):
         raise AgentToolError("Provider redirects not permitted")
@@ -707,9 +730,8 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 messages.append({"role":"assistant","content":content})
                 messages.append({"role":"user","content":
                     "Fix this specific error: "+reason+" "+
-                    "Return action=finish with files: [{path, content}] "+
-                    "containing COMPLETE corrected Python source for EVERY "+
-                    "required file. Do not repeat the rejected candidate."})
+                    _safe_repair_instruction(root,read_files)+
+                    " Do not repeat the rejected candidate."})
                 continue
             missing_targets=sorted(required-set(targets))
             if missing_targets:
