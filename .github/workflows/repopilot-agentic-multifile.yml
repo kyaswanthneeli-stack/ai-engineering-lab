@@ -1,0 +1,100 @@
+name: RepoPilot tool-using model multi-file trial
+
+on:
+  push:
+    paths:
+      - '.github/workflows/repopilot-agentic-multifile.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  agentic-multifile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install harness
+        run: python -m pip install -e .
+      - name: Pull test image and start local coding model
+        run: |
+          docker pull python:3.12-alpine
+          docker run -d --name repopilot-agent-model -p 127.0.0.1:11434:11434 ollama/ollama:latest
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
+          docker exec repopilot-agent-model ollama pull qwen2.5-coder:3b
+      - name: Agent inspect, propose, and verify multi-file fix
+        env:
+          REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
+          REPOPILOT_MODEL: qwen2.5-coder:3b
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from repopilot.agentic_benchmark import propose_agentic_benchmark
+          from repopilot.github_issue import fetch_public_issue
+          from repopilot.engine import execute
+          from repopilot.spec import IssueSpec
+          from repopilot.pr import patch_targets
+          from repopilot.review import review_proposal
+          repo=Path('fixtures/invoice-multifile')
+          run=Path('.runs/agentic-invoice-issue3')
+          run.mkdir(parents=True,exist_ok=False)
+          report={'model':'qwen2.5-coder:3b','model_generated':False,
+                  'verified':False,'issue':'https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/3',
+                  'test_source':'curated reference regression tests, not model generated'}
+          try:
+              issue=fetch_public_issue(report['issue'])
+              proposal,meta=propose_agentic_benchmark(
+                  repo, issue['text'], os.environ['REPOPILOT_MODEL'],
+                  os.environ['REPOPILOT_BASE_URL'],max_steps=8)
+              report['model_generated']=True
+              report['agent_steps']=meta['agent_steps']
+              report['tool_trace']=meta['tool_trace']
+              report['model_patch_targets']=patch_targets(proposal.patch)
+              (run/'model-patch.diff').write_text(proposal.patch)
+              reference=json.loads(Path('examples/invoice-multifile-issue.json').read_text())
+              spec=IssueSpec.from_dict({**reference,'patch':proposal.patch,'issue_id':issue['issue_id']})
+              review=review_proposal(spec)
+              report['static_review']=review['status']
+              if review['status']=='blocked':
+                  raise ValueError('Static review blocked proposed patch')
+              verification=execute(repo,spec,run/'docker-verification.json')
+              report['verified']=verification['outcome']=='verified_in_sandbox'
+              report['docker_baseline']=verification['baseline']['exit_code']
+              report['docker_reproduction']=verification['before']['exit_code']
+              report['docker_after']=verification['after']['exit_code']
+              if not {'pricing.py','checkout.py'} <= set(report['model_patch_targets']):
+                  raise ValueError('Model did not produce required two-file patch')
+              report['outcome']='verified'
+          except Exception as exc:
+              report['outcome']='failed'
+              report['error_type']=type(exc).__name__
+              report['error']=str(exc)[:320]
+          (run/'result.json').write_text(json.dumps(report,indent=2)+'\n')
+          print(json.dumps(report,indent=2))
+          if report['outcome']!='verified':
+              raise SystemExit('Agentic multi-file trial did not meet acceptance criteria')
+          PY
+      - name: Upload attempt evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-agentic-multifile-attempt
+          path: repopilot/.runs/agentic-invoice-issue3/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Stop model
+        if: always()
+        run: docker rm -f repopilot-agent-model || true
