@@ -1,0 +1,76 @@
+name: RepoPilot v2 official 12-task failure diagnostics
+
+on:
+  push:
+    paths:
+      - '.github/workflows/repopilot-v2-benchmark-diagnostics.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download original model-attempt and official evaluator evidence
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 44580636292
+          name: repopilot-12-model-attempts-v5-unscored
+          path: evidence/attempts
+      - name: Download official independent evaluator evidence
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 44580636292
+          name: repopilot-12-official-harness-v5
+          path: evidence/official
+      - name: Report each pinned issue without printing source or model responses
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          base=Path('evidence')
+          all_files=sorted(base.rglob('*'))
+          print('Evidence file paths:')
+          for p in all_files:
+              if p.is_file() and len(str(p))<220:
+                  print('  ',p)
+          summary_files=list(base.rglob('summary.json'))
+          for p in summary_files:
+              try: r=json.loads(p.read_text())
+              except (ValueError,OSError): continue
+              if isinstance(r,dict) and 'selected_tasks' in r:
+                  print('BATCH SUMMARY:',json.dumps({
+                      k:r.get(k) for k in (
+                          'selected_tasks','model_predictions','missing_predictions',
+                          'officially_evaluated','status')},sort_keys=True))
+                  for item in r.get('tasks',[]):
+                      print('TASK:',json.dumps({
+                          k:item.get(k) for k in (
+                              'instance_id','status','error_type','failure_category',
+                              'elapsed_ms','prediction_exported')},sort_keys=True))
+          for p in sorted(base.rglob('attempt.json')):
+              try: r=json.loads(p.read_text())
+              except (ValueError,OSError): continue
+              print('ATTEMPT:',json.dumps({
+                  k:r.get(k) for k in (
+                      'instance_id','status','error_type','failure_category',
+                      'elapsed_ms','agent_steps')},sort_keys=True))
+              if r.get('error'):
+                  # Traces only contain bounded error classifications; never
+                  # echo the model's source code or arbitrary issue text.
+                  msg=str(r['error'])
+                  labels=('timeout','provider','exhausted bounded','invalid','HTTP','memory')
+                  print('  error_class_matches:',[v for v in labels if v.lower() in msg.lower()])
+          for p in sorted(base.rglob('official-results.json')):
+              try: result=json.loads(p.read_text())
+              except (ValueError,OSError): continue
+              print('OFFICIAL:',json.dumps({
+                  'resolved_ids':result.get('resolved_ids',[]),
+                  'unresolved_ids':result.get('unresolved_ids',[]),
+                  'error_ids':result.get('error_ids',[])},sort_keys=True))
+          PY

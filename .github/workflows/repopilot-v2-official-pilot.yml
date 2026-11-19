@@ -1,0 +1,157 @@
+name: RepoPilot v2 official SWE-bench two-task pilot
+
+on:
+  push:
+    paths:
+      - '.github/workflows/repopilot-v2-official-pilot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-model-pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 125
+    defaults:
+      run:
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install v2 model runner and official dataset loader
+        run: |
+          python -m pip install -e .
+          python -m pip install 'datasets>=3,<5'
+      - name: Check two selected issues are from the unchanged 12-task manifest
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path('benchmarks/swebench-lite-12.json').read_text())
+          allowed={x['instance_id'] for x in manifest['tasks']}
+          selected={'sympy__sympy-14774','pytest-dev__pytest-11148'}
+          assert len(manifest['tasks'])==12 and selected<=allowed
+          print('Validated pilot task selection against original pinned cohort')
+          PY
+      - name: Launch local model on isolated GitHub Actions runner
+        run: |
+          docker run -d --name repopilot-v2-benchmark-model -p 127.0.0.1:11434:11434 ollama/ollama:latest
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
+          for attempt in 1 2 3; do
+            if docker exec repopilot-v2-benchmark-model ollama pull qwen2.5-coder:3b; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep $((attempt * 10))
+          done
+      - name: Try two genuine pinned issues without gold patches
+        env:
+          REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
+          REPOPILOT_MODEL: qwen2.5-coder:3b
+          REPOPILOT_OLLAMA_NATIVE: '1'
+          REPOPILOT_MAX_TOKENS: '1200'
+        run: |
+          python -m repopilot.benchmark_batch \
+            --manifest benchmarks/swebench-lite-12.json \
+            --instance-ids sympy__sympy-14774 pytest-dev__pytest-11148 \
+            --output .runs/v2-pilot-attempts \
+            --per-task-timeout 420 \
+            --max-steps 10
+      - name: Check prediction provenance and separate unsubmitted attempts
+        id: prediction_gate
+        run: |
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path('.runs/v2-pilot-attempts')
+          summaries=json.loads((root/'summary.json').read_text())
+          predictions=[json.loads(x) for x in (root/'predictions.jsonl').read_text().splitlines() if x.strip()]
+          allowed={'sympy__sympy-14774','pytest-dev__pytest-11148'}
+          ids=[x['instance_id'] for x in predictions]
+          assert summaries['selected_tasks']==2 and summaries['pinned_manifest_tasks']==12
+          assert len(set(ids))==len(ids) and set(ids)<=allowed
+          assert len(predictions)==summaries['model_predictions']
+          assert all(x['model_patch'].startswith('diff --git a/') and
+                     x['model_patch'].endswith('\n') for x in predictions)
+          assert summaries['officially_evaluated'] is False
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+              out.write('has_predictions='+str(bool(predictions)).lower()+'\n')
+          print('Model-generated valid predictions:',len(predictions),
+                '; no missing prediction is counted as a solved issue')
+          PY
+      - name: Install official evaluator only when predictions exist
+        if: steps.prediction_gate.outputs.has_predictions == 'true'
+        run: python -m pip install 'swebench>=3.0,<5.0'
+      - name: Officially score only submitted original patches
+        if: steps.prediction_gate.outputs.has_predictions == 'true'
+        run: |
+          mapfile -t IDS < <(python - <<'PY'
+          import json
+          from pathlib import Path
+          for line in Path('.runs/v2-pilot-attempts/predictions.jsonl').read_text().splitlines():
+              if line.strip():
+                  print(json.loads(line)['instance_id'])
+          PY
+          )
+          if [ "${#IDS[@]}" -lt 1 ]; then exit 1; fi
+          python -m swebench.harness.run_evaluation \
+            --dataset_name princeton-nlp/SWE-bench_Lite \
+            --split test \
+            --predictions_path .runs/v2-pilot-attempts/predictions.jsonl \
+            --instance_ids "${IDS[@]}" \
+            --max_workers 1 \
+            --run_id "repopilot-v2-pilot-${GITHUB_RUN_ID}"
+      - name: Preserve prediction summary and portable evaluator artifacts
+        if: always()
+        run: |
+          mkdir -p .runs/v2-pilot-evidence
+          python - <<'PY'
+          import json,shutil,tarfile
+          from pathlib import Path
+          out=Path('.runs/v2-pilot-evidence')
+          attempted=Path('.runs/v2-pilot-attempts')
+          for name in ['summary.json','predictions.jsonl','progress.json']:
+              p=attempted/name
+              if p.is_file():
+                  shutil.copy2(p,out/name)
+          candidates=list(Path('.').glob('*repopilot-v2-pilot-*.json'))
+          if Path('logs/evaluation').is_dir():
+              candidates+=list(Path('logs/evaluation').rglob('results.json'))
+              with tarfile.open(out/'official-logs.tar.gz','w:gz') as archive:
+                  archive.add('logs/evaluation',arcname='logs/evaluation')
+          for candidate in candidates:
+              try:
+                  result=json.loads(candidate.read_text())
+              except (ValueError,OSError):
+                  continue
+              if isinstance(result,dict) and 'resolved_ids' in result:
+                  (out/'official-results.json').write_text(json.dumps(result,indent=2)+'\n')
+                  print('Copied official score from',candidate)
+                  break
+          (out/'provenance.json').write_text(json.dumps({
+              'branch':'repopilot/v2-large-repository-context',
+              'selected_instances':['sympy__sympy-14774','pytest-dev__pytest-11148'],
+              'model':'qwen2.5-coder:3b','reference_patches_supplied':False,
+              'evaluated':(out/'official-results.json').is_file()
+          },indent=2)+'\n')
+          PY
+      - name: Upload authentic trial evidence, regardless of outcome
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-v2-official-pilot-evidence
+          path: |
+            repopilot/.runs/v2-pilot-evidence/
+            repopilot/.runs/v2-pilot-attempts/attempts/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Stop local model
+        if: always()
+        run: docker rm -f repopilot-v2-benchmark-model || true

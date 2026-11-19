@@ -1,0 +1,106 @@
+name: RepoPilot v2 real streaming Ollama model smoke test
+
+on:
+  push:
+    paths:
+      - '.github/workflows/repopilot-v2-model-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-model-calculator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the actual v2 branch agent
+        run: python -m pip install -e .
+      - name: Launch local Ollama, pull free coding model and restricted Docker test image
+        run: |
+          docker pull python:3.12-alpine
+          docker run -d --name repopilot-v2-ollama -p 127.0.0.1:11434:11434 ollama/ollama:latest
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:11434/api/tags && break
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
+          for attempt in 1 2 3; do
+            if docker exec repopilot-v2-ollama ollama pull qwen2.5-coder:1.5b; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep $((attempt * 8))
+          done
+      - name: Model generates code and independent restricted Docker suite verifies it
+        env:
+          REPOPILOT_OLLAMA_NATIVE: '1'
+          REPOPILOT_OLLAMA_STREAM: '1'
+          REPOPILOT_NATIVE_WALL_TIMEOUT: '300'
+          REPOPILOT_MAX_TOKENS: '768'
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from repopilot.agentic_benchmark import propose_agentic_benchmark
+          from repopilot.engine import execute
+          from repopilot.spec import IssueSpec
+          from repopilot.pr import patch_targets
+
+          source=Path("fixtures/calculator-buggy")
+          folder=Path(".runs/v2-real-model-smoke")
+          folder.mkdir(parents=True,exist_ok=True)
+          report={"kind":"synthetic_calculator_stream_smoke",
+                  "model":"qwen2.5-coder:1.5b","ollama_stream":True,
+                  "model_generated":False,"verified_in_docker":False,
+                  "officially_evaluated":False,"officially_resolved":None}
+          try:
+              issue=("Repair calculator.py divide(a, b): it must raise ZeroDivisionError "
+                     "when b == 0, never return zero. Preserve normal division "
+                     "behavior. Modify only existing calculator.py source.")
+              patch,meta=propose_agentic_benchmark(
+                  source,issue,"qwen2.5-coder:1.5b",
+                  "http://127.0.0.1:11434/v1",max_steps=8,
+                  required_targets={"calculator.py"})
+              report["model_generated"]=True
+              report["agent_steps"]=meta["agent_steps"]
+              report["tool_trace"]=meta["tool_trace"]
+              report["source_files_changed"]=sorted(patch_targets(patch.patch))
+              (folder/"generated.patch").write_text(patch.patch)
+              fixture=json.loads(Path("examples/issue.json").read_text())
+              spec=IssueSpec.from_dict({**fixture,"patch":patch.patch})
+              evidence=execute(source,spec,folder/"docker-evidence.json")
+              report["verified_in_docker"]=(
+                  evidence["outcome"]=="verified_in_sandbox"
+                  and evidence["before"]["exit_code"] != 0
+                  and evidence["after"]["exit_code"] == 0)
+              report["outcome"]=("model_patch_verified" if
+                                 report["verified_in_docker"] else
+                                 "model_patch_failed_verification")
+          except Exception as exc:
+              report["outcome"]="failed_model_attempt"
+              report["error_type"]=type(exc).__name__
+              report["error"]=str(exc)[:240]
+          (folder/"report.json").write_text(json.dumps(report,indent=2)+"\n")
+          print(json.dumps(report,indent=2))
+          if report["outcome"]!="model_patch_verified":
+              raise SystemExit("v2 live-model smoke test did not pass")
+          PY
+      - name: Upload real model outcome and Docker evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-v2-live-model-calculator-smoke
+          path: repopilot/.runs/v2-real-model-smoke/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Stop local model
+        if: always()
+        run: docker rm -f repopilot-v2-ollama || true

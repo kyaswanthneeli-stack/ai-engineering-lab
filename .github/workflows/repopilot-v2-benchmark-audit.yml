@@ -1,0 +1,82 @@
+name: RepoPilot v2 audit official SWE-bench evidence
+
+on:
+  push:
+    paths:
+      - '.github/workflows/repopilot-v2-benchmark-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the exact branch comparison tool
+        run: python -m pip install -e .
+      - name: Download independent evaluator results and actual model predictions
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 44580636292
+          name: repopilot-12-official-harness-v5
+          path: repopilot/.runs/verified-v2-full12
+      - name: Compare v1 and v2 on common officially evaluated pinned issues
+        run: |
+          python -m repopilot.benchmark_compare \
+            benchmarks/swebench-lite-12.json \
+            benchmarks/official-score-2026-11-19.json \
+            benchmarks/official-predictions-2026-11-19.jsonl \
+            .runs/verified-v2-full12/official-evaluation-result.json \
+            .runs/verified-v2-full12/real-model-predictions.jsonl \
+            --output .runs/verified-v2-full12/official-v1-v2-comparison.json
+      - name: Enforce unambiguous official denominators and audit provenance
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          from repopilot.swebench_results import official_summary
+          root=Path(".runs/verified-v2-full12")
+          result=official_summary(
+              Path("benchmarks/swebench-lite-12.json"),
+              root/"official-evaluation-result.json",
+              root/"real-model-predictions.jsonl")
+          assert (result["selected"],result["submitted"],result["evaluated"],
+                  result["resolved"],result["unresolved"],result["error"])==(12,4,4,1,3,0)
+          comparison=json.loads((root/"official-v1-v2-comparison.json").read_text())
+          assert comparison["selected_tasks"]==12
+          assert comparison["baseline_submitted"]==6
+          assert comparison["baseline_resolved"]==1
+          assert comparison["candidate_submitted"]==4
+          assert comparison["candidate_resolved"]==1
+          summary={
+              "evidence_run":44580636292,
+              "source_commit":"9c76697068f05535487f9824137c9875b08b1587",
+              "source":"independent_official_SWE-bench_harness",
+              "summary":result,
+              "comparison":comparison,
+              "note":"This is NOT a full SWE-bench leaderboard score. Unsubmitted tasks were not officially evaluated. No improvement in number resolved was observed."
+          }
+          (root/"audit.json").write_text(json.dumps(summary,indent=2)+"\n")
+          print("Independent evaluator:",result["resolved"],
+                "resolved of",result["evaluated"],"evaluated,",
+                result["submitted"],"predictions from",result["selected"],"selected tasks")
+          print("Comparable instance count:",comparison["comparable_officially_evaluated"])
+          print("Resolution delta on comparable instances:",comparison["resolved_delta_on_comparable"])
+          PY
+      - name: Save independently grounded comparison report
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-v2-verified-official-comparison
+          path: repopilot/.runs/verified-v2-full12/
+          if-no-files-found: error
+          retention-days: 90

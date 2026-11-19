@@ -1,9 +1,12 @@
 import json
+from functools import partial
+from repopilot.agentic_benchmark import propose_agentic_benchmark
 import tempfile
 import unittest
 from unittest.mock import patch
 from pathlib import Path
-from repopilot.benchmark_attempt import attempt_one,main,bounded_issue_context
+from repopilot.benchmark_attempt import attempt_one,main,bounded_issue_context,configured_issue_context_limit
+from repopilot.agentic_benchmark import ProviderTransportError
 
 SHA="a"*40
 INSTANCE="sample__repo-123"
@@ -44,6 +47,34 @@ class AttemptsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             bounded_issue_context("issue",50000)
 
+    def test_small_model_context_budget_preserves_front_and_last_issue_evidence(self):
+        statement="TITLE: investigate regression.\n"+("context-block\n"*1300)+"LAST REPRODUCTION: important"
+        observed=[]
+        def model(repo,issue,*args):
+            observed.append(issue)
+            return self.proposed()
+        with patch.dict("os.environ",{"REPOPILOT_ISSUE_CONTEXT_CHARS":"3000"}):
+            result=attempt_one(
+                self.manifest,INSTANCE,self.root/"smaller",
+                dataset_loader=lambda: [{
+                    **self.dataset()[0],"problem_statement":statement}],
+                checkout=self.checkout,model_proposer=model)
+        self.assertEqual(result["status"],"model_patch_proposed")
+        self.assertEqual(result["issue_context_chars"],3000)
+        self.assertTrue(result["issue_context_trimmed"])
+        self.assertLessEqual(len(observed[0]),3000)
+        self.assertIn("LAST REPRODUCTION: important",observed[0])
+        self.assertTrue(observed[0].startswith("TITLE: investigate regression."))
+
+    def test_reject_invalid_small_model_context_budgets(self):
+        for value in ["abc","0","12001","1999",""]:
+            with self.subTest(value=value),patch.dict(
+                    "os.environ",{"REPOPILOT_ISSUE_CONTEXT_CHARS":value}):
+                with self.assertRaises(ValueError):
+                    configured_issue_context_limit()
+        with patch.dict("os.environ",{"REPOPILOT_ISSUE_CONTEXT_CHARS":"6500"}):
+            self.assertEqual(configured_issue_context_limit(),6500)
+
     def test_records_real_model_patch_as_unreviewed_not_resolved(self):
         output=self.root/"run"
         result=attempt_one(self.manifest,INSTANCE,output,dataset_loader=self.dataset,
@@ -55,6 +86,10 @@ class AttemptsTests(unittest.TestCase):
         patch=json.loads((output/"unreviewed-prediction.json").read_text())
         self.assertFalse(patch["human_reviewed"])
         self.assertTrue(patch["generated_by_model"])
+        stage=json.loads((output/"stage.json").read_text())
+        self.assertEqual(stage["instance_id"],INSTANCE)
+        self.assertEqual(stage["last_completed_stage"],"model_response_received")
+        self.assertFalse(stage["officially_evaluated"])
     def test_agentic_cli_wires_requested_step_budget(self):
         observed=[]
         def mock_agent(repo,issue,model,url,token,max_steps=8,auto_issue_paths=False):
@@ -92,6 +127,98 @@ class AttemptsTests(unittest.TestCase):
                            checkout=self.checkout,model_proposer=lambda *a:(_ for _ in ()).throw(ValueError("bad output")))
         self.assertEqual(result["status"],"failed_model_attempt")
         self.assertFalse((output/"unreviewed-prediction.json").exists())
+    def test_ollama_timeout_is_provider_unavailable_not_failed_patch(self):
+        output=self.root/"provider-timeout"
+        def unresponsive(*args):
+            raise ProviderTransportError("Local Ollama native API timeout after 2 attempt(s)")
+        result=attempt_one(
+            self.manifest,INSTANCE,output,dataset_loader=self.dataset,
+            checkout=self.checkout,model_proposer=unresponsive)
+        self.assertEqual(result["status"],"provider_unavailable")
+        self.assertEqual(result["failure_category"],"model_transport")
+        self.assertEqual(result["error_type"],"ProviderTransportError")
+        self.assertFalse(result["officially_evaluated"])
+        self.assertIsNone(result["officially_resolved"])
+        self.assertFalse((output/"unreviewed-prediction.json").exists())
+        recorded=json.loads((output/"attempt.json").read_text())
+        self.assertEqual(recorded["status"],"provider_unavailable")
+
+    def test_actual_invalid_patch_is_not_reclassified_as_provider_timeout(self):
+        output=self.root/"invalid-patch"
+        def bad_output(*args):
+            raise ValueError("Invalid generated code")
+        result=attempt_one(
+            self.manifest,INSTANCE,output,dataset_loader=self.dataset,
+            checkout=self.checkout,model_proposer=bad_output)
+        self.assertEqual(result["status"],"failed_model_attempt")
+        self.assertEqual(result["failure_category"],"model_or_validation")
+
+    def test_source_checkpoint_survives_invalid_model_output_without_score(self):
+        output=self.root/"invalid-response-with-stage"
+        def invalid(*args):
+            raise ValueError("rejected model response")
+        result=attempt_one(
+            self.manifest,INSTANCE,output,dataset_loader=self.dataset,
+            checkout=self.checkout,model_proposer=invalid)
+        stage=json.loads((output/"stage.json").read_text())
+        self.assertEqual(stage["last_completed_stage"],"pinned_checkout_complete")
+        self.assertEqual(stage["instance_id"],INSTANCE)
+        self.assertFalse(stage["officially_evaluated"])
+        self.assertEqual(result["status"],"failed_model_attempt")
+        self.assertFalse((output/"unreviewed-prediction.json").exists())
+
+    def test_initial_checkpoint_precedes_setup_failure(self):
+        output=self.root/"missing-dataset-with-stage"
+        result=attempt_one(
+            self.manifest,INSTANCE,output,dataset_loader=lambda:[],
+            checkout=self.checkout,model_proposer=self.proposed)
+        stage=json.loads((output/"stage.json").read_text())
+        self.assertEqual(stage["last_completed_stage"],"initialized")
+        self.assertEqual(result["status"],"setup_failed")
+
+    def test_actual_agent_reports_model_call_step_before_provider_timeout(self):
+        output=self.root/"agent-model-step-timeout"
+        def client(url,model,token,messages):
+            stage=json.loads((output/"stage.json").read_text())
+            self.assertEqual(stage["last_completed_stage"],"model_call_started")
+            self.assertEqual(stage["model_step"],1)
+            self.assertFalse(stage["officially_evaluated"])
+            raise ProviderTransportError("Local Ollama native API timeout")
+        planner=partial(propose_agentic_benchmark,client=client,
+                        max_steps=3,required_targets={"main.py"})
+        result=attempt_one(
+            self.manifest,INSTANCE,output,dataset_loader=self.dataset,
+            checkout=self.checkout,model_proposer=planner,
+            model="mock",url="http://127.0.0.1:11434/v1")
+        self.assertEqual(result["status"],"provider_unavailable")
+        stage=json.loads((output/"stage.json").read_text())
+        self.assertEqual(stage["last_completed_stage"],"model_call_started")
+        self.assertEqual(stage["model_step"],1)
+        self.assertFalse((output/"unreviewed-prediction.json").exists())
+
+    def test_actual_agent_success_completes_stage_and_records_real_proposal(self):
+        output=self.root/"agent-step-success"
+        seen=[]
+        def client(url,model,token,messages):
+            stage=json.loads((output/"stage.json").read_text())
+            seen.append((stage["last_completed_stage"],stage.get("model_step")))
+            return {"choices":[{"message":{"content":json.dumps({
+                "action":"finish","edits":[{"path":"main.py",
+                    "old":"def bug():return 1",
+                    "new":"def bug():return 2"}]})}}]}
+        planner=partial(propose_agentic_benchmark,client=client,
+                        max_steps=3,required_targets={"main.py"})
+        result=attempt_one(
+            self.manifest,INSTANCE,output,dataset_loader=self.dataset,
+            checkout=self.checkout,model_proposer=planner,
+            model="mock",url="http://127.0.0.1:11434/v1")
+        self.assertEqual(result["status"],"model_patch_proposed")
+        self.assertEqual(seen,[("model_call_started",1)])
+        stage=json.loads((output/"stage.json").read_text())
+        self.assertEqual(stage["last_completed_stage"],"model_response_received")
+        self.assertNotIn("model_step",stage)
+        self.assertTrue((output/"unreviewed-prediction.json").is_file())
+
     def test_reject_unknown_instance(self):
         with self.assertRaises(ValueError):
             attempt_one(self.manifest,"unknown__repo-1",self.root/"missing",dataset_loader=self.dataset)

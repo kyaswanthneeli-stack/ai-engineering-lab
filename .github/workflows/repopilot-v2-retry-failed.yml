@@ -1,0 +1,186 @@
+name: RepoPilot v2 retry two previously unsubmitted SWE-bench issues
+
+on:
+  push:
+    paths:
+      - '.github/workflows/repopilot-v2-retry-failed.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  retry-generation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    outputs:
+      prediction_count: ${{ steps.count.outputs.prediction_count }}
+    defaults:
+      run:
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install RepoPilot v2 and pinned dataset reader
+        run: |
+          python -m pip install -e .
+          python -m pip install 'datasets>=3.0,<5.0'
+      - name: Download actual failed attempts from completed original twelve-task run
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 44580636292
+          name: repopilot-12-model-attempts-v5-unscored
+          path: repopilot/.runs/previous-v5
+      - name: Validate requested retry tasks were previously unsubmitted failures
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from repopilot.swebench_export import load_manifest
+          from repopilot.benchmark_batch import retryable_task_ids
+          tasks=load_manifest(Path("benchmarks/swebench-lite-12.json"))
+          old=Path(".runs/previous-v5/summary.json")
+          eligible=set(retryable_task_ids(tasks,old))
+          selected={"pytest-dev__pytest-11148","django__django-12589"}
+          assert selected<=eligible, "Refuse to retry a submitted or unknown instance"
+          print("Two real unsubmitted failures verified from run #44580636292")
+          print("Retrying:",sorted(selected))
+          PY
+      - name: Start loopback-only local Qwen coding model
+        run: |
+          docker run -d --name repopilot-targeted-retry-ollama -p 127.0.0.1:11434:11434 ollama/ollama:latest
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
+          for n in 1 2 3; do
+            if docker exec repopilot-targeted-retry-ollama ollama pull qwen2.5-coder:3b; then break; fi
+            if [ "$n" -eq 3 ]; then exit 1; fi
+            sleep $((n*10))
+          done
+          curl -fsS --retry 2 --max-time 120 -H 'Content-Type: application/json' \
+            -d '{"model":"qwen2.5-coder:3b","prompt":"OK","stream":false,"options":{"num_predict":8}}' \
+            http://127.0.0.1:11434/api/generate >/dev/null
+      - name: Run genuine model on only the two known failures
+        env:
+          REPOPILOT_MODEL: qwen2.5-coder:3b
+          REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
+          REPOPILOT_OLLAMA_NATIVE: '1'
+          REPOPILOT_NATIVE_RETRIES: '2'
+          REPOPILOT_NATIVE_TIMEOUT: '120'
+          REPOPILOT_MAX_TOKENS: '1200'
+        run: |
+          python -m repopilot.benchmark_batch \
+            --manifest benchmarks/swebench-lite-12.json \
+            --retry-from .runs/previous-v5/summary.json \
+            --instance-ids pytest-dev__pytest-11148 django__django-12589 \
+            --output .runs/targeted-retry \
+            --per-task-timeout 480 --max-steps 10
+      - id: count
+        name: Count only actual new model patch submissions
+        if: always()
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json,os
+          out=Path(".runs/targeted-retry/summary.json")
+          summary=json.loads(out.read_text()) if out.is_file() else {}
+          count=summary.get("model_predictions",0)
+          print("RETRIED ISSUES:",summary.get("selected_tasks","not run"))
+          print("NEW PATCH PREDICTIONS:",count)
+          print("UNSUBMITTED:",summary.get("missing_predictions","unknown"))
+          print("ATTEMPT FAILURE CLASSES:",summary.get("attempt_status_counts",{}))
+          print("OFFICIALLY EVALUATED: NO (until next independent job)")
+          with open(os.environ["GITHUB_OUTPUT"],"a") as stream:
+              stream.write("prediction_count="+str(count)+"\n")
+          PY
+      - name: Upload immutable retry evidence, including failures and timeouts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-v2-retried-two-model-attempts
+          path: repopilot/.runs/targeted-retry/
+          if-no-files-found: warn
+          retention-days: 90
+      - name: Stop local model
+        if: always()
+        run: docker rm -f repopilot-targeted-retry-ollama || true
+
+  evaluate-submitted:
+    needs: retry-generation
+    if: needs.retry-generation.outputs.prediction_count != '0' && needs.retry-generation.outputs.prediction_count != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: repopilot-v2-retried-two-model-attempts
+          path: repopilot/.runs/targeted-retry/
+      - name: Install independent official SWE-bench evaluator
+        run: python -m pip install 'swebench>=3.0,<5.0'
+      - name: Evaluate ONLY genuine predictions produced in this retry
+        run: |
+          mapfile -t IDS < <(python - <<'PY'
+          import json
+          from pathlib import Path
+          selected={'pytest-dev__pytest-11148','django__django-12589'}
+          rows=[json.loads(line) for line in Path(
+              '.runs/targeted-retry/predictions.jsonl').read_text().splitlines()
+              if line.strip()]
+          ids=[row['instance_id'] for row in rows]
+          assert ids and len(ids)==len(set(ids)) and set(ids)<=selected
+          for item in ids: print(item)
+          PY
+          )
+          python -m swebench.harness.run_evaluation \
+            --dataset_name princeton-nlp/SWE-bench_Lite \
+            --split test \
+            --predictions_path .runs/targeted-retry/predictions.jsonl \
+            --instance_ids "${IDS[@]}" \
+            --max_workers 1 \
+            --run_id "repopilot-v2-two-retries-${GITHUB_RUN_ID}"
+      - name: Preserve score file and original predictions without altered patches
+        if: always()
+        run: |
+          mkdir -p .runs/retry-official-evidence
+          python - <<'PY'
+          import json,shutil
+          from pathlib import Path
+          root=Path(".runs/retry-official-evidence")
+          source=Path(".runs/targeted-retry/predictions.jsonl")
+          if source.is_file():
+              shutil.copy2(source,root/"model-predictions.jsonl")
+          reports=list(Path(".").glob("*repopilot-v2-two-retries-*.json"))
+          reports+=list(Path("logs/evaluation").rglob("results.json")) if Path("logs/evaluation").is_dir() else []
+          for item in reports:
+              try:
+                  data=json.loads(item.read_text())
+              except (ValueError,OSError):
+                  continue
+              if isinstance(data,dict) and {"resolved_ids","unresolved_ids","error_ids"}<=set(data):
+                  (root/"official-results.json").write_text(json.dumps(data,indent=2)+"\n")
+                  print("Archived independently evaluated outcome from",item)
+                  print("Officially resolved IDs:",data["resolved_ids"])
+                  break
+          else:
+              print("Official result JSON unavailable: NO resolution is claimed")
+          PY
+      - name: Upload independent score evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-v2-retried-two-official-evidence
+          path: repopilot/.runs/retry-official-evidence/
+          if-no-files-found: warn
+          retention-days: 90

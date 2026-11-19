@@ -1,0 +1,44 @@
+name: RepoPilot v2 inspect streaming Pytest rejection evidence
+
+on:
+  push:
+    paths:
+      - '.github/workflows/repopilot-v2-pytest-failure-inspect.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get authentic Pytest model-attempt evidence
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 44618694208
+          name: repopilot-v2-streaming-pytest-evidence
+          path: evidence
+      - name: Print bounded failure classification, never generated patch/source
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          files=list(Path("evidence").rglob("attempt.json"))
+          print("Attempt files:",len(files))
+          for p in files:
+              item=json.loads(p.read_text())
+              assert item.get("instance_id")=="pytest-dev__pytest-11148"
+              print(json.dumps({
+                  "instance_id":item["instance_id"],
+                  "status":item.get("status"),
+                  "failure_category":item.get("failure_category"),
+                  "error_type":item.get("error_type"),
+                  "error":str(item.get("error",""))[:350],
+                  "elapsed_ms":item.get("elapsed_ms"),
+                  "last_completed_stage":item.get("last_completed_stage")
+              },indent=2))
+          assert len(files)==1
+          PY

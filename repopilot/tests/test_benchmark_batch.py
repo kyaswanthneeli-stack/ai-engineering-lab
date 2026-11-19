@@ -48,11 +48,261 @@ class BenchmarkBatchTests(unittest.TestCase):
             result = collect(self.manifest, self.root / "output")
         self.assertEqual(result["selected_tasks"], 12)
         self.assertEqual(result["model_predictions"], 1)
+        self.assertEqual(result["attempt_status_counts"], {
+            "failed_model_attempt": 11, "model_patch_proposed": 1})
+        self.assertEqual(result["failed_model_attempt_without_patch"], 11)
+        self.assertEqual(result["timeout_without_patch"], 0)
         self.assertFalse(result["officially_evaluated"])
         predictions = (self.root / "output/predictions.jsonl").read_text().splitlines()
         self.assertEqual(len(predictions), 1)
         self.assertEqual(json.loads(predictions[0])["instance_id"],
                          "sample__project-0")
+
+    def test_subset_uses_original_manifest_and_attempts_only_requested_ids(self):
+        called=[]
+        def fake_run(command, **kwargs):
+            identifier=command[3]
+            called.append(identifier)
+            self.assertEqual(
+                command[command.index("--manifest")+1],str(self.manifest))
+            output=Path(command[command.index("--output")+1])
+            output.mkdir(parents=True)
+            (output/"attempt.json").write_text(
+                json.dumps({"status":"failed_model_attempt"}))
+        with patch("repopilot.benchmark_batch.load_manifest",
+                   return_value=self.tasks), patch(
+                       "repopilot.benchmark_batch.subprocess.run",
+                       side_effect=fake_run):
+            result=collect(
+                self.manifest,self.root/"subset",
+                instance_ids=["sample__project-11","sample__project-0"])
+        self.assertEqual(called,["sample__project-0","sample__project-11"])
+        self.assertEqual(result["selected_tasks"],2)
+        self.assertEqual(result["pinned_manifest_tasks"],12)
+        self.assertEqual(result["missing_predictions"],2)
+        self.assertFalse(result["officially_evaluated"])
+
+    def test_reject_nonmanifest_duplicate_or_empty_pilot_selection(self):
+        with patch("repopilot.benchmark_batch.load_manifest",
+                   return_value=self.tasks):
+            for selection in ([],["sample__project-2","sample__project-2"],
+                              ["not-pinned__project-4"]):
+                with self.subTest(selection=selection):
+                    with self.assertRaisesRegex(ValueError,"unique nonempty IDs"):
+                        collect(self.manifest,self.root/"never-created",
+                                instance_ids=selection)
+            self.assertFalse((self.root/"never-created").exists())
+
+    def test_model_provider_failure_counted_but_never_called_solved(self):
+        def fake_run(command,**kwargs):
+            output=Path(command[command.index("--output")+1])
+            output.mkdir(parents=True)
+            (output/"attempt.json").write_text(json.dumps({
+                "status":"provider_unavailable",
+                "error_type":"ProviderTransportError",
+                "failure_category":"model_transport"}))
+        with patch("repopilot.benchmark_batch.load_manifest",
+                   return_value=self.tasks),patch(
+                       "repopilot.benchmark_batch.subprocess.run",
+                       side_effect=fake_run):
+            result=collect(self.manifest,self.root/"provider")
+        self.assertEqual(result["attempt_status_counts"],{"provider_unavailable":12})
+        self.assertEqual(result["provider_unavailable_without_patch"],12)
+        self.assertEqual(result["missing_predictions"],12)
+        self.assertIsNone(result["officially_resolved"])
+        self.assertFalse(result["officially_evaluated"])
+        self.assertTrue(all(t["failure_category"]=="model_transport"
+                            for t in result["tasks"]))
+
+    def test_retry_only_prior_unsubmitted_failures_preserves_existing_predictions(self):
+        previous=self.root/"prior-summary.json"
+        statuses={task["instance_id"]:"model_patch_proposed" for task in self.tasks}
+        statuses["sample__project-2"]="provider_unavailable"
+        statuses["sample__project-11"]="model_timeout"
+        previous.write_text(json.dumps({
+            "pinned_manifest_tasks":12,"selected_tasks":12,
+            "model_predictions":10,"missing_predictions":2,
+            "officially_evaluated":False,
+            "tasks":[{"instance_id":name,"status":status}
+                     for name,status in statuses.items()]
+        }))
+        called=[]
+        def fake_run(command,**kwargs):
+            instance=command[3]
+            called.append(instance)
+            folder=Path(command[command.index("--output")+1])
+            folder.mkdir(parents=True)
+            (folder/"attempt.json").write_text(
+                json.dumps({"status":"failed_model_attempt"}))
+        with patch("repopilot.benchmark_batch.load_manifest",
+                   return_value=self.tasks),patch(
+                       "repopilot.benchmark_batch.subprocess.run",
+                       side_effect=fake_run):
+            result=collect(self.manifest,self.root/"retries",
+                           retry_from=previous)
+        self.assertEqual(called,
+            ["sample__project-2","sample__project-11"])
+        self.assertEqual(result["selected_tasks"],2)
+        self.assertTrue(result["retry_only_unsubmitted_failures"])
+        self.assertFalse(result["officially_evaluated"])
+        self.assertTrue(previous.is_file())
+
+    def test_targeted_retry_only_accepts_unsubmitted_failures(self):
+        previous=self.root/"targeted-previous.json"
+        items=[{"instance_id":x["instance_id"],
+                "status":"model_timeout" if x["instance_id"] in {
+                    "sample__project-2","sample__project-11"}
+                else "model_patch_proposed"} for x in self.tasks]
+        previous.write_text(json.dumps({
+            "pinned_manifest_tasks":12,"selected_tasks":12,
+            "model_predictions":10,"missing_predictions":2,
+            "officially_evaluated":False,"tasks":items}))
+        called=[]
+        def fake_run(command,**kwargs):
+            called.append(command[3])
+            folder=Path(command[command.index("--output")+1])
+            folder.mkdir(parents=True)
+            (folder/"attempt.json").write_text(
+                json.dumps({"status":"failed_model_attempt"}))
+        with patch("repopilot.benchmark_batch.load_manifest",
+                   return_value=self.tasks),patch(
+                       "repopilot.benchmark_batch.subprocess.run",
+                       side_effect=fake_run):
+            result=collect(
+                self.manifest,self.root/"specific-retry",retry_from=previous,
+                instance_ids=["sample__project-11"])
+        self.assertEqual(called,["sample__project-11"])
+        self.assertEqual(result["selected_tasks"],1)
+        self.assertTrue(result["retry_only_unsubmitted_failures"])
+        self.assertEqual(result["model_predictions"],0)
+        with patch("repopilot.benchmark_batch.load_manifest",
+                   return_value=self.tasks):
+            with self.assertRaisesRegex(ValueError,"only previously unsubmitted"):
+                collect(
+                    self.manifest,self.root/"rejected-retry",
+                    retry_from=previous,instance_ids=["sample__project-0"])
+        self.assertFalse((self.root/"rejected-retry").exists())
+
+    def test_retry_rejects_wrong_manifest_or_inconsistent_previous_counts(self):
+        from repopilot.benchmark_batch import retryable_task_ids
+        previous=self.root/"wrong.json"
+        prior={"pinned_manifest_tasks":12,"selected_tasks":1,
+               "model_predictions":0,"missing_predictions":1,
+               "officially_evaluated":False,
+               "tasks":[{"instance_id":"unknown__project-1",
+                         "status":"model_timeout"}]}
+        previous.write_text(json.dumps(prior))
+        with self.assertRaises(ValueError):
+            retryable_task_ids(self.tasks,previous)
+        prior["tasks"]=[{"instance_id":"sample__project-1",
+                         "status":"model_timeout"}]
+        prior["model_predictions"]=1
+        previous.write_text(json.dumps(prior))
+        with self.assertRaisesRegex(ValueError,"inconsistent"):
+            retryable_task_ids(self.tasks,previous)
+        prior["model_predictions"]=0
+        prior["tasks"]=[{"instance_id":"sample__project-1",
+                         "status":"model_patch_proposed"}]
+        prior["model_predictions"]=1
+        prior["missing_predictions"]=0
+        previous.write_text(json.dumps(prior))
+        with self.assertRaisesRegex(ValueError,"No retryable"):
+            retryable_task_ids(self.tasks,previous)
+
+    def test_timeout_captures_safe_last_source_stage_without_fake_prediction(self):
+        def fake_run(command,**kwargs):
+            output=Path(command[command.index("--output")+1])
+            output.mkdir(parents=True)
+            output.joinpath("stage.json").write_text(json.dumps({
+                "instance_id":command[3],
+                "last_completed_stage":"pinned_checkout_complete",
+                "stage_elapsed_ms":12345,
+                "officially_evaluated":False,
+                "officially_resolved":None}))
+            raise subprocess.TimeoutExpired(command,30)
+        with patch("repopilot.benchmark_batch.load_manifest",
+                   return_value=self.tasks),patch(
+                       "repopilot.benchmark_batch.subprocess.run",
+                       side_effect=fake_run):
+            result=collect(self.manifest,self.root/"stage-timeouts")
+        self.assertEqual(result["timeout_without_patch"],12)
+        self.assertEqual(result["model_predictions"],0)
+        self.assertEqual(result["missing_predictions"],12)
+        self.assertEqual(result["timeout_last_completed_stage_counts"],
+                         {"pinned_checkout_complete":12})
+        self.assertEqual(result["tasks"][0]["stage_elapsed_ms"],12345)
+        self.assertEqual(result["tasks"][0]["last_completed_stage"],
+                         "pinned_checkout_complete")
+        self.assertFalse(result["officially_evaluated"])
+
+    def test_bogus_or_mismatched_stage_file_is_ignored(self):
+        from repopilot.benchmark_batch import _read_stage
+        path=self.root/"suspect"
+        path.mkdir()
+        stage=path/"stage.json"
+        for data in ({"instance_id":"different",
+                      "last_completed_stage":"pinned_checkout_complete",
+                      "stage_elapsed_ms":123,
+                      "officially_evaluated":False},
+                     {"instance_id":"sample__project-0",
+                      "last_completed_stage":"arbitrary_untrusted_status",
+                      "stage_elapsed_ms":3,
+                      "officially_evaluated":False},
+                     {"instance_id":"sample__project-0",
+                      "last_completed_stage":"dataset_verified",
+                      "stage_elapsed_ms":-1,
+                      "officially_evaluated":False}):
+            stage.write_text(json.dumps(data))
+            self.assertEqual(_read_stage(path,"sample__project-0"),{})
+        stage.write_text("{broken")
+        self.assertEqual(_read_stage(path,"sample__project-0"),{})
+
+    def test_model_call_progress_survives_task_timeout_without_exported_patch(self):
+        def fake_run(command,**kwargs):
+            output=Path(command[command.index("--output")+1])
+            output.mkdir(parents=True)
+            output.joinpath("stage.json").write_text(json.dumps({
+                "instance_id":command[3],
+                "last_completed_stage":"model_call_started",
+                "model_step":3,
+                "stage_elapsed_ms":74000,
+                "officially_evaluated":False,
+                "officially_resolved":None}))
+            raise subprocess.TimeoutExpired(command,30)
+        with patch("repopilot.benchmark_batch.load_manifest",
+                   return_value=self.tasks),patch(
+                       "repopilot.benchmark_batch.subprocess.run",
+                       side_effect=fake_run):
+            result=collect(self.manifest,self.root/"model-step-timeouts")
+        self.assertEqual(result["model_predictions"],0)
+        self.assertEqual(result["timeout_last_completed_stage_counts"],
+                         {"model_call_started":12})
+        self.assertEqual(result["tasks"][0]["model_step"],3)
+        self.assertIsNone(result["officially_resolved"])
+
+    def test_model_call_checkpoint_requires_real_bounded_step(self):
+        from repopilot.benchmark_batch import _read_stage
+        folder=self.root/"model-checkpoint-validation"
+        folder.mkdir()
+        stage=folder/"stage.json"
+        for bad_step in (None,0,25,True,"1",1.0,-1):
+            stage.write_text(json.dumps({
+                "instance_id":"sample__project-0",
+                "last_completed_stage":"model_call_started",
+                "model_step":bad_step,
+                "stage_elapsed_ms":100,
+                "officially_evaluated":False}))
+            self.assertEqual(_read_stage(folder,"sample__project-0"),{})
+        stage.write_text(json.dumps({
+            "instance_id":"sample__project-0",
+            "last_completed_stage":"model_call_completed",
+            "model_step":4,
+            "stage_elapsed_ms":900,
+            "officially_evaluated":False}))
+        self.assertEqual(_read_stage(folder,"sample__project-0"),{
+            "last_completed_stage":"model_call_completed",
+            "model_step":4,
+            "stage_elapsed_ms":900})
 
     def test_timeout_is_unscored_and_does_not_create_prediction(self):
         with patch("repopilot.benchmark_batch.load_manifest",
@@ -62,6 +312,9 @@ class BenchmarkBatchTests(unittest.TestCase):
             result = collect(self.manifest, self.root / "output")
         self.assertEqual(result["model_predictions"], 0)
         self.assertEqual(result["missing_predictions"], 12)
+        self.assertEqual(result["attempt_status_counts"], {"model_timeout":12})
+        self.assertEqual(result["timeout_without_patch"],12)
+        self.assertEqual(result["failed_model_attempt_without_patch"],0)
         self.assertTrue(all(x["status"] == "model_timeout" for x in result["tasks"]))
         self.assertIsNone(result["officially_resolved"])
         self.assertEqual((self.root / "output/predictions.jsonl").read_text(), "")

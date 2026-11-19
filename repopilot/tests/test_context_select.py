@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from repopilot.context_select import ranked_source_context,describe_context
+from repopilot.context_select import ranked_source_context,describe_context,issue_window_start
 
 class ContextSelectionTests(unittest.TestCase):
     def setUp(self):
@@ -33,6 +33,86 @@ class ContextSelectionTests(unittest.TestCase):
             self.root,"Bug in target_module.py when calling repair_target_module",
             max_files=1,scan_limit=1)
         self.assertEqual(items[0].path,"package/deep/target_module.py")
+
+
+    def test_v2_deep_ast_function_selected_beyond_first_120_lines(self):
+        module=self.root/"package"/"long_module.py"
+        module.parent.mkdir()
+        module.write_text(
+            "".join(f"FILLER_{i} = {i}\n" for i in range(260))
+            + "def calculate_invoice_tax(price):\n    return price*0.2\n")
+        start=issue_window_start(
+            self.root,"package/long_module.py",
+            "Bug in calculate_invoice_tax: incorrect invoice tax")
+        self.assertGreater(start,200)
+        lines=module.read_text().splitlines()
+        self.assertIn("def calculate_invoice_tax", "\n".join(lines[start-1:start+119]))
+
+    def test_v2_traceback_position_prioritized_over_first_lines(self):
+        module=self.root/"pkg"/"deep.py"
+        module.parent.mkdir()
+        module.write_text("".join(f"DATA_{i} = {i}\n" for i in range(360)))
+        start=issue_window_start(
+            self.root,"pkg/deep.py",
+            'Traceback: File "/tmp/source/pkg/deep.py", line 301, in run')
+        self.assertEqual(start,289)
+
+    def test_v2_unrelated_traceback_cannot_redirect_selected_file(self):
+        (self.root/"long.py").write_text("".join(
+            f"DATA_{i} = {i}\n" for i in range(260)))
+        self.assertEqual(issue_window_start(
+            self.root,"long.py",
+            'Error File "/somewhere/unrelated.py", line 200'),1)
+
+    def test_v2_window_rejects_traversal_and_symlinks(self):
+        with self.assertRaises(ValueError):
+            issue_window_start(self.root,"../secret.py","secret")
+        with self.assertRaises(ValueError):
+            issue_window_start(self.root,"billing.py","tax",count=10000)
+        target=self.root.parent/"context-window-outside.py"
+        target.write_text("def leak(): pass\n")
+        try:
+            (self.root/"outside.py").symlink_to(target)
+            with self.assertRaises(ValueError):
+                issue_window_start(self.root,"outside.py","leak")
+        finally:
+            target.unlink(missing_ok=True)
+
+
+    def test_v2_filename_pass_finds_nested_source_beyond_ast_scan_limit(self):
+        # No exact filename appears in the issue; source content after the
+        # AST scan cap is not otherwise read.
+        for i in range(110):
+            (self.root/f"a{i:04d}.py").write_text("def unrelated():\n    pass\n")
+        nested=self.root/"deep_pkg"/"service"
+        nested.mkdir(parents=True)
+        (nested/"invoice_tax_reconciler.py").write_text(
+            "def reconcile_invoice_tax(price):\n    return price\n")
+        items=ranked_source_context(
+            self.root,"Invoice tax reconciliation yields wrong result",
+            max_files=2,scan_limit=1)
+        self.assertEqual(items[0].path,"deep_pkg/service/invoice_tax_reconciler.py")
+        self.assertIn("reconcile_invoice_tax",items[0].symbols)
+
+    def test_v2_bounded_filename_scan_never_follows_directory_symlinks(self):
+        outside=self.root.parent/"repopilot-v2-external-src"
+        outside.mkdir(exist_ok=True)
+        (outside/"invoice_tax_reconciler.py").write_text("def secret_marker(): pass\n")
+        (self.root/"linked_source").symlink_to(outside,target_is_directory=True)
+        try:
+            items=ranked_source_context(
+                self.root,"invoice tax reconciliation",
+                max_files=5,scan_limit=1)
+            self.assertNotIn("linked_source/invoice_tax_reconciler.py",
+                             [item.path for item in items])
+        finally:
+            (self.root/"linked_source").unlink()
+            (outside/"invoice_tax_reconciler.py").unlink()
+            outside.rmdir()
+
+    def test_v2_rejects_unbounded_filename_indexing(self):
+        with self.assertRaises(ValueError):
+            ranked_source_context(self.root,"tax",scan_limit=20001)
 
     def test_limits(self):
         items=ranked_source_context(self.root,"tax",max_files=1,max_chars=900)

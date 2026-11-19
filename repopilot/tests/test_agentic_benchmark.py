@@ -4,7 +4,7 @@ import unittest
 import urllib.error
 from unittest.mock import patch
 from pathlib import Path
-from repopilot.agentic_benchmark import propose_agentic_benchmark,AgentToolError,_provider
+from repopilot.agentic_benchmark import propose_agentic_benchmark,AgentToolError,_provider,_read_native_ollama_stream,_safe_repair_instruction,_safe_candidate_feedback
 
 
 class AgentTests(unittest.TestCase):
@@ -20,6 +20,240 @@ class AgentTests(unittest.TestCase):
             return {"choices":[{"message":{"content":json.dumps(next(it))}}],"usage":{"total_tokens":5}}
         return client
 
+
+    def test_v2_auto_ranked_inspection_reaches_deep_function(self):
+        (self.repo/"large.py").write_text(
+            "".join(f"FILLER_{i} = {i}\n" for i in range(260))
+            + "def calculate_invoice_tax(price):\n    return 1\n")
+        seen=[]
+        def client(url,model,token,messages):
+            seen.append(list(messages))
+            return {"choices":[{"message":{"content":json.dumps({
+                "action":"finish","edits":[{
+                    "path":"large.py","old":"    return 1",
+                    "new":"    return round(price * 0.1, 2)"}]})}}]}
+        result,meta=propose_agentic_benchmark(
+            self.repo,"Fix calculate_invoice_tax, which returns the wrong tax",
+            "mock","http://127.0.0.1:11434/v1",client=client,
+            max_steps=4,auto_issue_paths=True)
+        self.assertIn("round(price * 0.1, 2)",result.patch)
+        self.assertIn("large.py",meta["inspected_files"])
+        self.assertTrue(any(t.get("start_line",1)>200 and
+                            t["target"]=="large.py"
+                            for t in meta["tool_trace"]
+                            if t["action"]=="ranked_initial_preinspect"))
+        self.assertTrue(any(
+            '"line": 261' in m["content"] and "calculate_invoice_tax" in m["content"]
+            for m in seen[0]))
+
+    def test_v2_issue_named_deep_path_uses_ast_window_not_module_prefix(self):
+        path=self.repo/"pkg"/"large.py"
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            "".join(f"UNRELATED_{i} = {i}\n" for i in range(300))
+            + "def compute_invoice_total(value):\n"
+              "    return value + 1\n")
+        seen=[]
+        def client(url,model,token,messages):
+            seen.append(list(messages))
+            return {"choices":[{"message":{"content":json.dumps({
+                "action":"finish","edits":[{
+                    "path":"pkg/large.py",
+                    "old":"    return value + 1",
+                    "new":"    return value + 2"}]})}}]}
+        patch,meta=propose_agentic_benchmark(
+            self.repo,
+            "Fix compute_invoice_total in pkg/large.py; wrong invoice amount",
+            "mock","http://127.0.0.1:11434/v1",
+            client=client,max_steps=4,auto_issue_paths=True)
+        self.assertIn("return value + 2",patch.patch)
+        trace=[x for x in meta["tool_trace"]
+               if x["action"]=="issue_path_preinspect"]
+        self.assertEqual(len(trace),1)
+        self.assertEqual(trace[0]["target"],"pkg/large.py")
+        self.assertGreater(trace[0]["start_line"],200)
+        self.assertTrue(any('"line": 301' in item["content"]
+                            for item in seen[0]))
+
+    def test_v2_required_large_file_uses_safe_issue_window(self):
+        (self.repo/"large.py").write_text(
+            "".join(f"FILLER_{i} = {i}\n" for i in range(270))
+            + "def calculate_invoice_tax(price):\n    return 1\n")
+        seen=[]
+        def client(url,model,token,messages):
+            seen.append(list(messages))
+            return {"choices":[{"message":{"content":json.dumps({
+                "action":"finish","edits":[{
+                    "path":"large.py","old":"    return 1",
+                    "new":"    return round(price * 0.1, 2)"}]})}}]}
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"Fix calculate_invoice_tax for invoice processing",
+            "mock","http://127.0.0.1:11434/v1",client=client,
+            max_steps=3,required_targets={"large.py"})
+        self.assertIn("round(price * 0.1, 2)",patch.patch)
+        self.assertTrue(any(t.get("start_line",1)>200
+                            for t in meta["tool_trace"] if t["action"]=="preinspect"))
+        self.assertTrue(any(
+            '"line": 271' in m["content"] for m in seen[0]))
+
+
+    def test_v2_identical_invalid_finish_is_rejected_without_revalidation(self):
+        invalid={"action":"finish","edits":[{
+            "path":"pricing.py","old":"invented_exact_text()",
+            "new":"return 999"}]}
+        valid={"action":"finish","edits":[{
+            "path":"pricing.py","old":"return sum(values)",
+            "new":"return round(sum(values), 2)"}]}
+        history=[]
+        steps=iter([invalid,invalid,valid])
+        def client(url,model,token,messages):
+            history.append(list(messages))
+            return {"choices":[{"message":{"content":json.dumps(next(steps))}}]}
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"fix subtotal","mock","http://127.0.0.1:11434/v1",
+            client=client,max_steps=4,required_targets={"pricing.py"})
+        self.assertIn("round(sum(values), 2)",patch.patch)
+        actions=[t["action"] for t in meta["tool_trace"]]
+        self.assertEqual(actions.count("duplicate_finish_rejected"),1)
+        self.assertEqual(actions.count("finish_rejected"),1)
+        self.assertTrue(any("identical to an earlier rejected patch" in m["content"]
+                            for m in history[2]))
+
+    def test_v2_repeated_invalid_patch_exhausts_bounded_steps(self):
+        bad={"action":"finish","edits":[{"path":"pricing.py",
+             "old":"not in file","new":"replacement"}]}
+        calls=[]
+        def client(url,model,token,messages):
+            calls.append(1)
+            return {"choices":[{"message":{"content":json.dumps(bad)}}]}
+        with self.assertRaisesRegex(AgentToolError,"Agent exhausted bounded"):
+            propose_agentic_benchmark(
+                self.repo,"fix subtotal","mock","http://127.0.0.1:11434/v1",
+                client=client,max_steps=4,required_targets={"pricing.py"})
+        self.assertEqual(len(calls),4)
+
+
+    def test_large_module_invalid_patch_prompts_small_exact_edit(self):
+        (self.repo/"deep.py").write_text(
+            "".join(f"MARKER_{i:04d} = {i}\n" for i in range(390))
+            + "def calculate_invoice_tax(value):\n    return value + 0\n")
+        history=[]
+        steps=iter([
+            {"action":"finish","edits":[{"path":"deep.py",
+                "old":"NONEXISTENT TEXT","new":"    return 1"}]},
+            {"action":"finish","edits":[{"path":"deep.py",
+                "old":"    return value + 0","new":"    return value + 1"}]}
+        ])
+        def model(url,model,token,messages):
+            history.append(list(messages))
+            return {"choices":[{"message":{"content":json.dumps(next(steps))}}]}
+        result,meta=propose_agentic_benchmark(
+            self.repo,"Fix calculate_invoice_tax in deep.py","mock",
+            "http://127.0.0.1:11434/v1",client=model,
+            max_steps=4,required_targets={"deep.py"})
+        self.assertIn("return value + 1",result.patch)
+        self.assertTrue(any("SHORT exact text span" in item["content"]
+            for item in history[1] if item["role"]=="user"))
+        self.assertFalse(any("containing COMPLETE corrected Python source" in item["content"]
+            for item in history[1] if item["role"]=="user"))
+        self.assertEqual(sum(t["action"]=="finish_rejected"
+                             for t in meta["tool_trace"]),1)
+
+    def test_large_module_recovery_names_only_valid_inspected_paths_and_schema(self):
+        module=self.repo/"large.py"
+        module.write_text("".join(f"ITEM_{i} = {i}\n" for i in range(550)))
+        message=_safe_repair_instruction(self.repo,{"large.py"})
+        self.assertIn("large.py",message)
+        self.assertIn("EXACTLY path, old, new",message)
+        self.assertIn("Preserve indentation",message)
+        self.assertNotIn("untrusted.py",message)
+
+    def test_invalid_edit_schema_gets_specific_safe_repair_feedback(self):
+        message=_safe_candidate_feedback(
+            ValueError("Each edit requires only path, old and new"))
+        self.assertIn("no commentary",message)
+        mismatch=_safe_candidate_feedback(
+            ValueError("Candidate changed a file outside inspected source"))
+        self.assertIn("uninspected",mismatch)
+        self.assertNotIn("Candidate failed bounded",mismatch)
+
+    def test_small_module_repair_prefers_complete_source(self):
+        recommendation=_safe_repair_instruction(
+            self.repo,{"pricing.py"})
+        self.assertIn("SMALL Python files",recommendation)
+        self.assertNotIn("SHORT exact text span",recommendation)
+
+
+    def test_line_edits_correct_large_inspected_source_after_bad_old_text(self):
+        (self.repo/"deep.py").write_text(
+            "".join(f"FILLER_{i:03d} = {i}\n" for i in range(400))
+            + "def calculate_invoice_tax(value):\n    return value + 0\n")
+        history=[]
+        sequence=iter([
+            {"action":"finish","edits":[{
+                "path":"deep.py","old":"invented old function body",
+                "new":"    return value + 1"}]},
+            {"action":"finish","line_edits":[{
+                "path":"deep.py","start_line":402,"end_line":402,
+                "new":"    return value + 1"}]}
+        ])
+        def model(url,model,token,messages):
+            history.append(list(messages))
+            return {"choices":[{"message":{"content":json.dumps(next(sequence))}}]}
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"Fix calculate_invoice_tax in deep.py",
+            "mock","http://127.0.0.1:11434/v1",
+            client=model,max_steps=5,required_targets={"deep.py"})
+        self.assertIn("return value + 1",patch.patch)
+        self.assertEqual(sum(t["action"]=="finish_rejected"
+                             for t in meta["tool_trace"]),1)
+        self.assertTrue(any("line_edits" in msg["content"]
+                            for msg in history[1] if msg["role"]=="user"))
+        self.assertEqual((self.repo/"deep.py").read_text().splitlines()[-1],
+                         "    return value + 0")
+
+    def test_line_edits_cannot_write_uninspected_range_even_for_known_file(self):
+        (self.repo/"deep.py").write_text(
+            "".join(f"FILLER_{i:03d} = {i}\n" for i in range(400))
+            + "def calculate_invoice_tax(value):\n    return value + 0\n")
+        steps=[
+            {"action":"finish","line_edits":[{
+                "path":"deep.py","start_line":1,"end_line":1,
+                "new":"FILLER_000 = 999"}]},
+            {"action":"finish","line_edits":[{
+                "path":"deep.py","start_line":402,"end_line":402,
+                "new":"    return value + 1"}]},
+        ]
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"Fix calculate_invoice_tax in deep.py",
+            "mock","http://127.0.0.1:11434/v1",client=self.sequence(steps),
+            max_steps=5,required_targets={"deep.py"})
+        self.assertIn("return value + 1",patch.patch)
+        self.assertNotIn("FILLER_000 = 999",patch.patch)
+        errors=[t.get("reason","") for t in meta["tool_trace"]
+                if t.get("action")=="finish_rejected"]
+        self.assertTrue(any("ENTIRELY within" in error for error in errors))
+
+    def test_line_edit_recovery_first_inspects_model_named_existing_file(self):
+        edit={"action":"finish","line_edits":[{
+            "path":"checkout.py","start_line":3,"end_line":3,
+            "new":"    return round(subtotal(values), 2)"}]}
+        steps=[
+            {"action":"read","path":"pricing.py","start":1,"count":2},
+            edit,edit
+        ]
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"Round checkout total in checkout.py",
+            "mock","http://127.0.0.1:11434/v1",client=self.sequence(steps),
+            max_steps=4)
+        self.assertIn("round(subtotal(values), 2)",patch.patch)
+        self.assertEqual(meta["inspected_files"],["checkout.py","pricing.py"])
+        self.assertTrue(any(t.get("action")=="candidate_preinspect"
+                            and t.get("target")=="checkout.py"
+                            for t in meta["tool_trace"]))
+        self.assertEqual((self.repo/"checkout.py").read_text().splitlines()[-1],
+                         "    return subtotal(values)")
+
     def test_opt_in_local_native_ollama_skips_compatible_api(self):
         with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1",
                                       "REPOPILOT_MAX_TOKENS":"512"}), patch(
@@ -29,6 +263,188 @@ class AgentTests(unittest.TestCase):
         native.assert_called_once_with(
             "http://127.0.0.1:11434/v1","mock",[],512)
         self.assertEqual(response["choices"][0]["message"]["content"],"{}")
+
+    def test_native_ollama_stream_assembles_valid_json_tool_action(self):
+        class Response:
+            def __init__(self):
+                self.lines=iter([
+                    b'{"message":{"content":"{\\"action\\":"},"done":false}\n',
+                    b'{"message":{"content":"\\"list\\",\\"prefix\\":\\"\\"}"},"done":false}\n',
+                    b'{"message":{"content":""},"done":true,"prompt_eval_count":9,"eval_count":7}\n'])
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def readline(self,n): return next(self.lines,b"")
+        class Opener:
+            def __init__(self): self.body=None;self.calls=0
+            def open(self,request,**kwargs):
+                self.calls+=1
+                self.body=json.loads(request.data)
+                self.assert_local(request)
+                return Response()
+            def assert_local(self,request):
+                assert request.full_url=="http://127.0.0.1:11434/api/chat"
+        opener=Opener()
+        with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1",
+                                     "REPOPILOT_OLLAMA_STREAM":"1"}),patch(
+             "repopilot.agentic_benchmark.urllib.request.build_opener",
+             return_value=opener):
+            result=_provider("http://127.0.0.1:11434/v1","qwen-test",None,
+                             [{"role":"user","content":"safe-input"}])
+        self.assertEqual(opener.calls,1)
+        self.assertTrue(opener.body["stream"])
+        self.assertEqual(opener.body["format"],"json")
+        self.assertEqual(result["choices"][0]["message"]["content"],
+                         '{"action":"list","prefix":""}')
+        self.assertEqual(result["usage"]["completion_tokens"],7)
+
+    def test_native_stream_late_complete_chunk_fails_closed_on_wall_deadline(self):
+        class Response:
+            def readline(self,n):
+                return b'{"message":{"content":"{}"},"done":true}\n'
+        with patch("repopilot.agentic_benchmark.time.monotonic",
+                   side_effect=[5,65]):
+            with self.assertRaisesRegex(AgentToolError,"wall-clock budget"):
+                _read_native_ollama_stream(Response(),started=0,max_seconds=60)
+
+    def test_native_stream_incomplete_response_must_not_return_patch(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def readline(self,n):
+                if not hasattr(self,"once"):
+                    self.once=True
+                    return b'{"message":{"content":"{\\"action\\":\\"finish\\"}"},"done":false}\n'
+                return b""
+        class Opener:
+            def open(self,*args,**kwargs): return Response()
+        with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1",
+                                     "REPOPILOT_OLLAMA_STREAM":"1",
+                                     "REPOPILOT_NATIVE_RETRIES":"1"}),patch(
+             "repopilot.agentic_benchmark.urllib.request.build_opener",
+             return_value=Opener()):
+            with self.assertRaisesRegex(AgentToolError,"ended before final"):
+                _provider("http://127.0.0.1:11434/v1","model",None,[])
+                
+    def test_native_stream_truncated_or_invalid_events_are_rejected(self):
+        class Response:
+            def __init__(self,line): self.line=line
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def readline(self,n):
+                if self.line is None:return b""
+                line=self.line
+                self.line=None
+                return line
+        class Opener:
+            def __init__(self,line):self.line=line
+            def open(self,*args,**kwargs):return Response(self.line)
+        for line,expected in [
+            (b'not valid JSON\n',"invalid JSON"),
+            (b'{"error":"untrusted source text","done":true}\n',"model error"),
+            (b'{"message":{"content":"{}"},"done":true}' + b' '*65550 + b'\n',
+             "size limit")]:
+            with self.subTest(expected=expected),patch.dict(
+                 "os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1",
+                               "REPOPILOT_OLLAMA_STREAM":"1",
+                               "REPOPILOT_NATIVE_RETRIES":"1"}),patch(
+                 "repopilot.agentic_benchmark.urllib.request.build_opener",
+                 return_value=Opener(line)):
+                with self.assertRaisesRegex(AgentToolError,expected) as exc:
+                    _provider("http://127.0.0.1:11434/v1","model",None,[])
+                self.assertNotIn("untrusted source text",str(exc.exception))
+
+    def test_native_ollama_timeout_retries_then_valid_response(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def read(self,n): return b'{"message":{"content":"{}"},"eval_count":5}'
+        class Opener:
+            calls=0
+            def open(self,request,**kwargs):
+                self.calls+=1
+                if self.calls==1:
+                    raise TimeoutError("test-only timeout")
+                return Response()
+        opener=Opener()
+        with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1",
+                                     "REPOPILOT_NATIVE_RETRIES":"2",
+                                     "REPOPILOT_NATIVE_TIMEOUT":"160"}), patch(
+             "repopilot.agentic_benchmark.urllib.request.build_opener",
+             return_value=opener), patch("repopilot.agentic_benchmark.time.sleep") as wait:
+            response=_provider("http://127.0.0.1:11434/v1","mock",None,[])
+        self.assertEqual(opener.calls,2)
+        self.assertEqual(response["choices"][0]["message"]["content"],"{}")
+        self.assertEqual(response["usage"]["completion_tokens"],5)
+        wait.assert_called_once_with(2)
+
+    def test_native_ollama_persistent_timeout_reports_classification(self):
+        class Opener:
+            calls=0
+            def open(self,request,**kwargs):
+                self.calls+=1
+                raise TimeoutError("untrusted host detail secret-key")
+        opener=Opener()
+        with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1",
+                                     "REPOPILOT_NATIVE_RETRIES":"2"}), patch(
+             "repopilot.agentic_benchmark.urllib.request.build_opener",
+             return_value=opener), patch("repopilot.agentic_benchmark.time.sleep"):
+            with self.assertRaises(AgentToolError) as caught:
+                _provider("http://127.0.0.1:11434/v1","mock",None,[])
+        self.assertEqual(opener.calls,2)
+        self.assertIn("timeout after 2 attempt",str(caught.exception))
+        self.assertNotIn("secret-key",str(caught.exception))
+
+    def test_native_ollama_reuses_loaded_local_model_without_remote_access(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def read(self,n): return b'{"message":{"content":"{}"}}'
+        class Opener:
+            requests=[]
+            def open(self,request,**kwargs):
+                self.requests.append(request)
+                return Response()
+        opener=Opener()
+        with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1"}), patch(
+             "repopilot.agentic_benchmark.urllib.request.build_opener",
+             return_value=opener):
+            result=_provider("http://127.0.0.1:11434/v1",
+                             "mock-model",None,[{"role":"user","content":"test"}])
+        self.assertEqual(result["choices"][0]["message"]["content"],"{}")
+        self.assertEqual(len(opener.requests),1)
+        request=opener.requests[0]
+        self.assertEqual(request.full_url,"http://127.0.0.1:11434/api/chat")
+        payload=json.loads(request.data)
+        self.assertEqual(payload["keep_alive"],"20m")
+        self.assertEqual(payload["model"],"mock-model")
+
+    def test_native_ollama_urlwrapped_socket_timeout_is_classified(self):
+        class Opener:
+            def open(self,request,**kwargs):
+                raise urllib.error.URLError(TimeoutError("private provider path"))
+        with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1",
+                                     "REPOPILOT_NATIVE_RETRIES":"1"}), patch(
+             "repopilot.agentic_benchmark.urllib.request.build_opener",
+             return_value=Opener()):
+            with self.assertRaises(AgentToolError) as error:
+                _provider("http://127.0.0.1:11434/v1","mock",None,[])
+        self.assertIn("timeout after 1 attempt",str(error.exception))
+        self.assertNotIn("private provider path",str(error.exception))
+
+    def test_native_ollama_http_400_does_not_retry(self):
+        class Opener:
+            calls=0
+            def open(self,request,**kwargs):
+                self.calls+=1
+                raise urllib.error.HTTPError(
+                    request.full_url,400,"private secret",None,None)
+        opener=Opener()
+        with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1"}), patch(
+             "repopilot.agentic_benchmark.urllib.request.build_opener",
+             return_value=opener):
+            with self.assertRaisesRegex(AgentToolError,"HTTP 400 after 1 attempt"):
+                _provider("http://127.0.0.1:11434/v1","mock",None,[])
+        self.assertEqual(opener.calls,1)
 
     def test_opt_in_native_never_sends_remote_source_or_token(self):
         with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1"}):

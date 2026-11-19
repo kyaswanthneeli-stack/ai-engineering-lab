@@ -1,0 +1,154 @@
+# RepoPilot v2.0 — Development plan
+
+**Status: v2 development, not released.** RepoPilot v1.0.0 is the stable, independently versioned portfolio release. This document tracks proposed improvements without presenting them as delivered production capabilities.
+
+## Target
+
+Make RepoPilot more reliable for real Python projects and larger source trees while retaining the existing security boundaries: no arbitrary model shell commands, safe source paths, restricted test execution, evidence-based benchmark reporting, and human review for merges.
+
+## Milestones and acceptance gates
+
+| Phase | Engineering goal | Evidence required | Status |
+|---|---|---|---|
+| 1. Deep source inspection | Use issue-named AST symbols and traceback line numbers to inspect the relevant region of long Python files, not the first 120 lines only | Unit tests for named symbols, tracebacks, required targets, unrelated source references, path traversal, and symlinks; full CI and Docker checks | Implemented in v2 development branch; merge pending |
+| 2. Large-repository selection | Filename-token candidate selection beyond the initial AST parse cap; safely prune generated and symlink directories | CI tests for nested sources after 100+ earlier files and strict 20,000-file metadata cap | Filename discovery implemented and CI passed; import-relationship context pending |
+| 3. Agent reliability | Reject repeat invalid patch proposals without redundant validation while permitting resubmission after legitimate new source inspection | CI tests for invalid-repeat rejection and proposals becoming valid after inspection, plus one live local-model smoke test | Duplicate-invalid suppression and real-model calculator smoke passed; impact on real SWE-bench success unmeasured |
+| 4. Verification and review | Generate additional reproduction tests with clear provenance and evaluate candidate patches in restricted disposable environments | Baseline/reproduction/patched evidence, source-only patch allowlist, reviewer approval | Planned |
+| 5. Official benchmark comparison | Run the same pinned SWE-bench cohort and compare genuine official outcomes on overlapping evaluated instances | Real model predictions and independent official evaluator reports; per-instance, per-denominator reporting | Full 12-task Qwen3B evaluation finished: 4 patches submitted, 1 officially resolved, 8 timeouts; no resolution improvement demonstrated over v1 |
+| 6. v2.0 release | Produce a new versioned package, public demo, release notes, security/limitations statement | Green CI, Docker checks, actual benchmark result, wheel and source distribution | Planned |
+
+## First implementation: issue-centered bounded source windows
+
+The first v2 branch adds `issue_window_start(repo, relative_path, issue, count=120)` to the existing context selector and uses it during agent preinspection. The function selects a source excerpt from a safe file by:
+
+1. Trusting only a validated repository-relative `.py` path, never a path suggested by untrusted issue text.
+2. Preferring a traceback line **only when it identifies the already selected file**.
+3. Otherwise parsing source with Python AST and preferring a named function, async function, or class mentioned in the issue.
+4. Falling back to line one when no reliable target is found.
+5. Limiting each read to at most 120 lines, preserving the inspected path allowlist, and recording the selected line number in the audit trace.
+
+This is **heuristic, static inspection**. It does not guarantee that the relevant source has been found or that a model patch is correct.
+
+## Second and third improvements: filename discovery and bounded retry hygiene
+
+The filename-only discovery pass scans a capped number of regular Python paths using top-down directory walking. It selects up to 32 paths with matching tokens from the issue, including files beyond the initial AST-parsing cap, without opening every source file. Generated directories and symlink directories are pruned, and the existing independent source-validation rules remain in force. No claim is made that all large repositories or languages are supported.
+
+The model-agent retry loop now hashes a candidate's canonical JSON internally **only after patch validation definitively fails**. An identical rejected edit is not revalidated in a subsequent model step. Proposals that require safe source inspection remain eligible to be resubmitted, so this optimization does not block the existing uninspected-target recovery path. No model output or source is printed in the duplicate-rejection audit message.
+
+[GitHub Actions verification](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44571384204) passed **180 unit tests**, **81% measured code coverage**, and restricted Docker checks. A new real-model/SWE-bench evaluation is still required before asserting any improved AI success rate. The previous v1 official benchmark score remains **one resolved of six evaluated submissions** (one out of 12 selected) until a new independent official run is complete.
+
+## Real-model validation (November 19, 2026)
+
+The [v2 Qwen2.5-Coder 1.5B smoke workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44572068161) **completed successfully**. The agent inspected `calculator.py`, produced its own patch in one model action, and independently verified the patch with restricted Docker baseline/failing-reproduction/patched tests. The GitHub Actions report recorded `model_generated=true`, `verified_in_docker=true`, and `outcome=model_patch_verified`.
+
+This is a **synthetic calculator integration test**, not official SWE-bench evaluation. It does not establish success on large real-world repositories; an independent v2 benchmark comparison remains outstanding.
+
+## Official benchmark development experiments
+
+- [Two-task pilot](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44573511295) uses the unchanged original 12-task manifest and the `--instance-ids` subset option; missing patch predictions must remain **unscored**, and official harness execution is conditional on real predictions.
+- [Full 12-task run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44573386221) also started from a batch-runner source update. Neither run's final official outcome was known when this development note was written.
+- `repopilot.benchmark_compare` validates both original official score files and submitted prediction JSONL, then only calculates deltas for instance IDs evaluated by the independent harness in **both** runs. It never treats local Docker verification or an unsubmitted patch as resolved.
+
+## Failed Pytest case — provider-timeout recovery
+
+The [first two-task pilot](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44573511295) showed **one official SymPy resolution** and **no Pytest submission**. The archived `pytest-dev__pytest-11148` attempt reported `AgentToolError: Local Ollama native chat failed or timed out`, elapsed approximately 315 seconds. This was a **model-service timeout**, not an officially scored incorrect Pytest patch.
+
+The v2 agent now retries only transient native Ollama HTTP 408/429/5xx, timeout and connection failures up to a configurable bounded count; it classifies wrapped socket timeouts explicitly and does not transmit issue/source content to another host. Unit tests cover recovery, persistent timeouts, HTTP 400 rejection, and no secret leakage.
+
+A [Pytest-only pinned-task retry](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44578518713) uses a locally prewarmed Qwen2.5-Coder 3B model, bounded 180-second native-request timeouts, at most two attempts per model call, and a 900-second task cap. The workflow preserves full evidence and conditionally executes the independent official evaluator only if the model produces a valid prediction. **Its outcome must be read from the completed run and cannot be assumed successful.**
+
+## Pytest follow-up — invalid model edits, not a passing benchmark
+
+The [prewarmed Pytest-only retry](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44578518713) finished with **zero model predictions and no official Pytest evaluation**. The archived attempt showed `failed_model_attempt`: five rejected edits (two invalid Python syntax, one invalid edit schema, one replacement outside inspected source, and one empty/oversized/unchanged edit). GitHub workflow completion must not be mistaken for issue resolution.
+
+The agent's validation-recovery prompt previously requested whole-file `files` replacements even for long Python modules. The v2 fix now recommends short `edits` with verbatim old spans for large inspected source; complete-file corrections remain available only for small modules. This is **model prompting and validation**, not a fabricated reference patch. Regression tests verify the large-file decision and a successful mock recovery.
+
+The [targeted Pytest recovery workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44581523248) reruns the actual pinned task and explicitly fails its final gate unless an independently evaluated prediction **resolves** `pytest-dev__pytest-11148`. Evidence is uploaded even when no patch is generated or the official evaluator rejects it. At the time of this note, the result was **not yet known**. No claim of improved official SWE-bench performance is justified until it finishes.
+
+## Verified v1-to-v2 benchmark audit and ongoing native test
+
+An independently reproduced [12-task official score audit](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44594457844) confirms the previous v2 development run generated **4 valid model predictions**, of which **1 resolved and 3 remained unresolved** in the official harness. Eight other selected tasks produced no valid predictions; none of those eight is counted as an officially evaluated resolution. The comparable four evaluated issues across v1 and v2 showed **zero resolved-count change**. See [full per-issue evidence](benchmarks/V2_OFFICIAL_COMPARISON_2026-11-19.md).
+
+Follow-up improvements include AST/traceback-centered reads for **issue-mentioned source paths**, local Ollama model reuse to reduce cold-start churn, and manual-only expensive full-benchmark scheduling. Current development CI completed [196 Python tests plus restricted Docker verification](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44595002312), with **81% measured code coverage**.
+
+A separate [12-task Qwen3B native-Ollama official run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44595055900) was started from the updated code. Its outcome must not be assumed before the independent official evaluator finishes. A separate [Pytest-only attempt](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44593908576) tests the changed deep-source inspection and recovery prompting. Neither is evidence of additional solved cases until actual scoring confirms it.
+
+## Efficient follow-up on missing benchmark predictions
+
+The v2 batch runner now preserves an **unscored failure breakdown** in its `summary.json`, including the number of task timeouts, provider transport failures, and model/patch validation failures. These are *attempt diagnostics*, not SWE-bench correctness scores.
+
+After a previous batch has finished, re-run **only failed/unsubmitted tasks** from its original pinned manifest:
+
+```bash
+cd repopilot
+python -m repopilot.benchmark_batch \
+  --manifest benchmarks/swebench-lite-12.json \
+  --retry-from .runs/previous-batch/summary.json \
+  --output .runs/retry-only-batch \
+  --per-task-timeout 420 --max-steps 10
+```
+
+The runner verifies that the previous summary belongs to the full pinned manifest, has unique selected task IDs, internally consistent prediction counts, and was **not** already presented as an official evaluation. Existing submitted model patches are never silently regenerated. If no retryable failure exists, it refuses to start a run. The new batch has separate immutable evidence and remains officially **unscored** until evaluated by the real harness. Never mix predictions from separate runs without explicit per-task provenance and official evaluator confirmation.
+
+## Targeted retry workflow (two real previously unsubmitted issues)
+
+The [retry-only GitHub Actions workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44599735460) downloads the previous **completed** 12-task model-attempt archive from [run #44580636292](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44580636292). It validates the original pinned manifest and verifies that both requested instances — `pytest-dev__pytest-11148` and `django__django-12589` — had no valid submission in that previous run. It **refuses to retry previously submitted model patches**.
+
+The workflow runs actual Qwen2.5-Coder 3B locally through native Ollama, saves immutable per-task model evidence, and conditionally launches the independent official SWE-bench harness **only for newly submitted patches**. A no-patch run is not assigned a success score. Results from the historical 12-task run and the retry run must remain separate unless recombined explicitly with pinned instance identity and model provenance.
+
+The targeted-selection option is available with `--retry-from` and `--instance-ids` together; every selected ID must be one of the previous run's unsubmitted failures. This behavior has regression tests for valid targeting and rejected resubmission of existing predictions. [The new branch CI run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44599745204) passed **202 unit tests** and the restricted Docker fixture checks (81% measured coverage).
+
+**Status when documented:** model generation/evaluation still underway; no official additional resolution claimed.
+
+## Faster CPU-inference experiment on previously unsubmitted cases
+
+The [full 12-task official SWE-bench run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44580636292) completed with **4 actual model-generated predictions, 1 officially resolved, 3 officially unresolved, zero evaluator errors, and 8 unsubmitted tasks**. The selected-task denominator remains **12**; this does **not** demonstrate more resolved cases than v1. The [targeted 3B retry](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44599735460) produced one new officially evaluated **unresolved** patch and one provider failure. It therefore does not increase the confirmed solved count.
+
+To test the cause of missing submissions without buying API credits or altering reference solutions, an isolated [small-model fallback workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44612051924) now tests two previously timed-out pinned issues (`pytest-dev__pytest-11148`, `sympy__sympy-13773`) with **Qwen2.5-Coder 1.5B**, an opt-in **3,000-character inference issue budget**, bounded model steps, and the same guarded source editing. Both tasks are selected strictly from the original completed 12-task failure archive using `--retry-from`; the existing dataset, pinned commits, and prior benchmark evidence remain unchanged.
+
+The `REPOPILOT_ISSUE_CONTEXT_CHARS` option is validated in `2000..12000`, defaults to the prior **6,500** characters, and preserves the start and end of long issue statements. It only changes the model input during an explicitly configured experiment; it never edits the official benchmark rows or generates reference patches. Regression tests verify retained reproduction evidence and invalid-budget rejection.
+
+The fallback experiment saves model-generated predictions and all missing attempts separately, and conditionally invokes the official SWE-bench harness only for actual model patches. **A run with zero patches or zero officially resolved issues must not be called a successful resolution**. The small-model run is a separate cohort-specific trial, not an official leaderboard score. At documentation time its outcome was pending; consult its actual GitHub Actions artifact before recording results.
+
+## Full benchmark result and timeout bottleneck — November 2026
+
+The [full 12-task Qwen2.5-Coder 3B run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44580636292) completed. **12 pinned issues were selected; 4 model-generated patches were officially evaluated; 1 resolved, 3 unresolved; 8 never produced a submitted patch.** The v1 baseline was 1 officially resolved out of 6 evaluated, from the same 12 pinned selections. These are separate run statistics and do **not** prove that v2 improved resolution.
+
+The independent [diagnostic reconstruction](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44613958799) confirmed all eight unsubmitted issues hit the **300-second per-task process timeout**. The four submitted patches were from `sympy__sympy-14774`, `pydata__xarray-4493`, `django__django-12125` and `matplotlib__matplotlib-22835`. A separate [small-model fallback experiment](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44612051924) generated a Pytest patch, but the official evaluator **did not** resolve it; a second selected task generated no patch.
+
+### Stage-level timeout diagnostics added
+
+Before this change, a force-stopped worker often left no `attempt.json` record. `benchmark_attempt` now atomically writes **source-free `stage.json` checkpoints** after initialization, matching the official dataset row, finishing the pinned checkout, and receiving a model response. `benchmark_batch` validates these files against the pinned task identity and approved stages and records `last_completed_stage`, `stage_elapsed_ms`, and aggregated `timeout_last_completed_stage_counts`. A timeout always remains **unscored** without a real model-generated patch; checkpoint data cannot become a prediction.
+
+The checkpoint feature has been verified by unit tests, full CI, and restricted Docker tests. **The eight historical timeout events predate this feature**, so their internal stages cannot be retroactively determined. A future bounded model run can distinguish source-setup bottlenecks from slow local model inference without exposing source code or changing the original evidence.
+
+## Opt-in streaming inference for local Ollama
+
+The [Qwen2.5-Coder 1.5B fallback](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44612051924) completed with **one submitted patch, zero officially resolved cases, and one invalid-model attempt**. It does **not** improve the official resolved count. Slow local inference remains a key availability problem in this pinned cohort.
+
+The v2 native-Ollama provider now supports `REPOPILOT_OLLAMA_STREAM=1` for loopback-only `/api/chat` NDJSON streaming. The provider reconstructs model output from individually validated bounded chunks, requires an explicit terminal `done=true`, enforces per-line, cumulative response and event-count caps, and applies a separate wall-clock cap set through `REPOPILOT_NATIVE_WALL_TIMEOUT` (bounded 60–600 seconds). The socket inactivity timeout and at-most-three transport retries remain independently bounded. Incomplete, malformed, oversized and late streams are rejected; partial output **cannot** become a patch or benchmark prediction. The default nonstreaming path remains supported.
+
+Automated regression tests cover valid reconstructed tool-call JSON, incomplete streams, malformed JSON, reported stream errors, oversized chunks, and terminal chunks arriving beyond the wall-clock deadline. The [real model + restricted Docker smoke workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44618124054) **passed**: Qwen2.5-Coder 1.5B generated a streamed model patch in one model step and Docker verified the failing-before/passing-after calculator reproduction. The run reported `model_generated=true`, `verified_in_docker=true`, and `outcome=model_patch_verified`. This is a **synthetic integration test, not SWE-bench resolution evidence**.
+
+The [streaming Qwen3B Pytest SWE-bench experiment](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44618694208) tests the original pinned `pytest-dev__pytest-11148` case with native Ollama streaming, an independent SWE-bench scorer, and a strict official-resolution success gate. It records the real submission or failure even if the evaluator has nothing to score. It **failed to produce a model-generated patch**, and the Pytest case remained unscored; see the inspected-line recovery section below for the subsequent change.
+
+[The current branch CI](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44618435754) passed **212 Python tests**, **82% code coverage**, and the restricted Docker fixture checks.
+
+## Inspected-line patch recovery (v2 feature)
+
+The [streaming Qwen3B Pytest run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44618694208) **completed without a patch**. Its independent [saved-failure inspection](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44621649199) confirmed `failed_model_attempt` after 577 seconds, with **four rejected finish candidates** including an old-text mismatch, a change outside inspected source, and invalid edit schemas. Because no patch was submitted, Pytest remained **unscored and unresolved**.
+
+RepoPilot now additionally supports `action=finish` with `line_edits: [{path, start_line, end_line, new}]`. Unlike model-supplied guessed `old` strings, the patch builder derives the existing original lines directly from the repository. A line edit is accepted **only when the source path is in the inspected-file allowlist AND the entire changed line span lies in a previously read numbered source window**. Changes are limited to at most twelve original lines per edit, bounded replacement sizes, eight files, and twelve line edits per action. Duplicate line text is unambiguous because the model supplies the exact line span. Unsafe paths, symlinks, unknown/uninspected files, truncated source lines, overlapping ranges, and unchanged replacements are rejected. Standard unified-diff validation and `git apply --check` still apply. The source is not modified by the model.
+
+Unit/integration tests cover source-window enforcement, repeated identical source lines, direct edits, unsafe targets, optional safe inspection recovery, and invalid-to-valid correction. [GitHub CI](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44623332129) passed **222 unit tests**, **82% code coverage**, and restricted Docker checks. A [new official Pytest trial](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44623446114) using the pinned original issue has been triggered; it requires an actual generated patch and independent official resolution before any success is claimed. The result is **not known at writing**, and this new feature does not yet demonstrate a better official score.
+
+
+## Model-step checkpointing and timed-out SymPy probe
+
+The generic stage diagnostics now distinguish **model call started** and **model call completed**, including the bounded 1–24 call index, through a progress callback available only to the trusted bounded agent. Each checkpoint is written atomically without issue text, model output, secrets or generated code. During a timed-out child process, the batch runner can report `model_step` and `last_completed_stage`, avoiding the earlier ambiguity between an unfinished checkout and a stuck second or third model call. Invalid checkpoint entries and indices are discarded, never counted as a model prediction or official resolution.
+
+[Regression CI](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44623391700) passed **224 Python tests**, **82% measured coverage**, and restricted Docker verification. The new [checkpointed SymPy model trial](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44623793791) runs one originally timed-out pinned issue (`sympy__sympy-13773`) through the actual streaming Qwen2.5-Coder 1.5B agent, preserving its per-call checkpoints. It submits a model-generated patch to the independent official SWE-bench harness **only when one exists**. This is a new experimental trial, not evidence of any additional resolved issue until scoring completes. The previously released v1.0.0 and earlier benchmark evidence are unchanged.
+
+## Engineering practice
+
+Keep v1.0.0 at [its immutable release](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v1.0.0). Use a separate v2 feature branch and an open review PR. Every milestone must have tests and evidence before being merged. Do not overwrite or reinterpret the original benchmark artifacts.

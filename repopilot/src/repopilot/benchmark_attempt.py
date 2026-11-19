@@ -19,9 +19,41 @@ import tempfile
 import time
 from .checkout import pinned_checkout
 from .benchmark_planner import propose_benchmark
+from .agentic_benchmark import ProviderTransportError
 from .swebench_export import load_manifest
 
 REPO=re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+# Safe, source-free progress checkpoints survive a timed-out worker process.
+# The final attempt.json remains authoritative; this file is diagnostic only.
+CHECKPOINT_STAGES=frozenset({
+    "initialized", "dataset_verified", "pinned_checkout_complete",
+    "model_call_started", "model_call_completed", "model_response_received",
+})
+
+
+def _save_checkpoint(output:Path,instance_id:str,stage:str,started:float,
+                     *,step:int|None=None)->None:
+    if stage not in CHECKPOINT_STAGES:
+        raise ValueError("Unknown benchmark checkpoint")
+    if stage.startswith("model_call_"):
+        if type(step) is not int or not 1<=step<=24:
+            raise ValueError("Invalid bounded model step checkpoint")
+    elif step is not None:
+        raise ValueError("Only per-call checkpoints accept model step")
+    row={
+        "instance_id":instance_id,
+        "last_completed_stage":stage,
+        "stage_elapsed_ms":round((time.monotonic()-started)*1000),
+        "officially_evaluated":False,
+        "officially_resolved":None,
+    }
+    if step is not None:
+        row["model_step"]=step
+    # Atomic replacement avoids a truncated JSON read when a worker times out.
+    temp=output/"stage.json.tmp"
+    temp.write_text(json.dumps(row,sort_keys=True)+"\n",encoding="utf-8")
+    os.replace(temp,output/"stage.json")
 
 def bounded_issue_context(statement: str, max_chars: int = 6500) -> str:
     """Preserve the issue's title/description and final reproduction evidence.
@@ -39,6 +71,23 @@ def bounded_issue_context(statement: str, max_chars: int = 6500) -> str:
     return statement[:head] + marker + statement[-tail:]
 
 
+def configured_issue_context_limit()->int:
+    """Validated inference-only issue context bound; never changes dataset rows.
+
+    Smaller local models can explicitly opt into a shorter text budget. The
+    default and official issue metadata remain unchanged. A malformed setting
+    is an error rather than silently changing the inference experiment.
+    """
+    raw=os.getenv("REPOPILOT_ISSUE_CONTEXT_CHARS","6500")
+    try:
+        budget=int(raw)
+    except (TypeError,ValueError) as exc:
+        raise ValueError("Invalid REPOPILOT_ISSUE_CONTEXT_CHARS") from exc
+    if not 2000<=budget<=12000:
+        raise ValueError("REPOPILOT_ISSUE_CONTEXT_CHARS must be in 2000..12000")
+    return budget
+
+
 def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
                 checkout=pinned_checkout,model_proposer=propose_benchmark,model=None,url=None,token=None)->dict:
     tasks={t["instance_id"]:t for t in load_manifest(manifest)}
@@ -54,6 +103,7 @@ def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
     report={"instance_id":instance_id,"repo":task["repo"],"base_commit":task["base_commit"],
             "status":"not_attempted","officially_evaluated":False,"officially_resolved":None,
             "is_reference_patch":False}
+    _save_checkpoint(output,instance_id,"initialized",started)
     try:
         if dataset_loader is None:
             try:
@@ -72,18 +122,32 @@ def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
         issue=row["problem_statement"]
         if not isinstance(issue,str) or not issue.strip():
             raise ValueError("Official issue statement missing")
+        _save_checkpoint(output,instance_id,"dataset_verified",started)
         report["status"]="attempted"
-        report["issue_context_trimmed"]=len(issue)>6500
+        issue_budget=configured_issue_context_limit()
+        report["issue_context_chars"]=issue_budget
+        report["issue_context_trimmed"]=len(issue)>issue_budget
         owner,repo=task["repo"].split("/")
         with tempfile.TemporaryDirectory(prefix="repopilot-swebench-") as tmp:
             # Checkout helper only parses the URL to derive the public repo;
             # the issue statement is read from the official pinned dataset.
             work=checkout(f"https://github.com/{owner}/{repo}/issues/1",
                           task["base_commit"],Path(tmp)/"repo")
-            spec,meta=model_proposer(work,bounded_issue_context(issue),
+            _save_checkpoint(output,instance_id,"pinned_checkout_complete",started)
+            # Only the known bounded agent accepts an optional progress
+            # callback. Generic planners and user-provided testing stubs keep
+            # their existing positional calling convention unchanged.
+            from .agentic_benchmark import propose_agentic_benchmark
+            actual=model_proposer.func if isinstance(model_proposer,partial) else model_proposer
+            extra=({"progress":lambda stage,step: _save_checkpoint(
+                output,instance_id,stage,started,step=step)}
+                if actual is propose_agentic_benchmark else {})
+            spec,meta=model_proposer(work,bounded_issue_context(issue,issue_budget),
                                      model or os.getenv("REPOPILOT_MODEL",""),
                                      url or os.getenv("REPOPILOT_BASE_URL",""),
-                                     token if token is not None else os.getenv("REPOPILOT_API_KEY"))
+                                     token if token is not None else os.getenv("REPOPILOT_API_KEY"),
+                                     **extra)
+            _save_checkpoint(output,instance_id,"model_response_received",started)
         report["model"]=meta.get("model","")
         report["agent_steps"]=meta.get("agent_steps")
         report["inspected_files"]=meta.get("inspected_files",[])
@@ -98,7 +162,18 @@ def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
         (output/"unreviewed-prediction.json").write_text(
             json.dumps(submission,indent=2)+"\n",encoding="utf-8")
     except Exception as exc:
-        report["status"]="failed_model_attempt" if report["status"]=="attempted" else "setup_failed"
+        # A provider outage/timeout is not evidence that model reasoning or
+        # a generated patch failed. Keep that distinct from a rejected patch
+        # and from failure to load the pinned dataset or source checkout.
+        if report["status"]=="attempted" and isinstance(exc,ProviderTransportError):
+            report["status"]="provider_unavailable"
+            report["failure_category"]="model_transport"
+        elif report["status"]=="attempted":
+            report["status"]="failed_model_attempt"
+            report["failure_category"]="model_or_validation"
+        else:
+            report["status"]="setup_failed"
+            report["failure_category"]="setup"
         report["error_type"]=type(exc).__name__
         report["error"]=str(exc)[:350]
     report["elapsed_ms"]=round((time.monotonic()-started)*1000)

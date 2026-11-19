@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import ast
+import hashlib
 import os
 import re
 import socket
@@ -19,8 +20,8 @@ import urllib.request
 from pathlib import Path
 
 from .benchmark_planner import BenchmarkPatch,BenchmarkProposalError
-from .context_select import ranked_source_context
-from .edit_plan import canonical_patch
+from .context_select import ranked_source_context,issue_window_start
+from .edit_plan import canonical_patch,canonical_line_patch
 from .patches import validate_patch
 from .pr import patch_targets
 from .repo_tools import list_python_files,search_python,read_python,InspectionError
@@ -34,6 +35,7 @@ Choose exactly one:
 {"action":"read","path":"existing.py","start":1,"count":80}
 {"action":"finish","edits":[{"path":"existing.py","old":"EXACT ORIGINAL TEXT","new":"REPLACEMENT TEXT"}]}
 {"action":"finish","patch":"complete unified git diff text"}
+{"action":"finish","line_edits":[{"path":"existing.py","start_line":10,"end_line":10,"new":"replacement line"}]}
 Before finishing, read every file you intend to change. Prefer exact edits.
 No shell commands, external hosts, file creation, deleted source files, or
 claims about tests passing. The caller will verify any final patch independently."""
@@ -43,6 +45,10 @@ class AgentToolError(BenchmarkProposalError):
     pass
 
 
+class ProviderTransportError(AgentToolError):
+    """A provider HTTP/connection/timeout failure; NOT a model patch failure."""
+
+
 def _safe_candidate_feedback(exc:Exception)->str:
     """Keep validation diagnostics useful without echoing model/source text."""
     if isinstance(exc,SyntaxError):
@@ -50,18 +56,20 @@ def _safe_candidate_feedback(exc:Exception)->str:
     reason=str(exc)
     safe_reasons={
         "Exact old text must occur once in the current source":
-            "An old edit snippet does not match the inspected source exactly once. "
-            "Prefer complete-file replacements using files [{path, content}].",
+            "The old edit text does not match the source exactly once. For long files, "
+            "prefer line_edits using existing numbered INSPECTED line ranges; "
+            "otherwise use a shorter verbatim old snippet. Never guess or "
+            "invent target source.",
         "Replacements must be distinct, nonempty, and bounded":
             "An old/new replacement is empty, unchanged, or exceeds size limits.",
         "No source modifications":
             "The proposal did not modify any inspected file.",
         "Each edit requires only path, old and new":
-            "Each exact edit needs only path, old, and new fields.",
+            "Each exact edit must contain EXACTLY path, old, and new string fields, with no commentary, line numbers, or additional keys.",
         "Expected 1–8 complete existing Python files":
             "Provide a nonempty files list of at most eight files.",
         "Each file requires path and content":
-            "Each complete-file entry must have path and content.",
+            "Each complete-file entry needs EXACTLY path and content string keys. For large files use short edits instead.",
         "Duplicate complete-file replacement":
             "Supply only one replacement for each path.",
         "Complete source must be newline-terminated and under 6 KB":
@@ -71,15 +79,98 @@ def _safe_candidate_feedback(exc:Exception)->str:
         "Edit path was not supplied to the model":
             "Only inspected Python paths are permitted.",
         "Final proposal requires only edits or patch":
-            "Use action=finish with files [{path, content}], edits, or patch.",
+            "Use action=finish containing only edits, line_edits, files or patch, with no explanation fields.",
+        "Candidate changed a file outside inspected source":
+            "Your proposal touches uninspected or unmatched source. Modify ONLY the exact approved source path in the inspected-files list.",
+        "Line edit range outside inspected window":
+            "Your line_edits range must lie ENTIRELY within a previously numbered inspected read window. Use an inspected line range.",
+        "Each line edit requires only path, start_line, end_line, new":
+            "Each line_edits entry needs EXACTLY path, start_line, end_line, new; no other keys.",
     }
     return safe_reasons.get(reason,"Candidate failed bounded source/patch validation.")
+
+
+def _safe_repair_instruction(root:Path,read_files:set[str])->str:
+    """Choose compatible patch format from already-inspected source sizes.
+
+    This is advice only, never an automatic source modification or patch
+    acceptance bypass. The same parser, source allowlist, and git check apply.
+    """
+    try:
+        large=any((root/name).stat().st_size>5500 for name in read_files)
+    except OSError:
+        large=True
+    if large:
+        return (
+            'If exact old source text is uncertain, return action=finish with ' 
+            'line_edits: [{path,start_line,end_line,new}] limited to ' 
+            'the actual numbered inspected source lines. Each line edit ' 
+            'must replace at most 12 consecutive INSPECTED lines; use only ' 
+            'the exact line numbers visible in your read result. Otherwise ' 
+            'return a NEW action=finish with edits: '
+            '[{path, old, new}] ONLY, where old is a SHORT exact text span '
+            'from the inspected source and new is a syntax-valid replacement. '
+            'Use valid JSON with EXACT keys: action, edits; each edit must '
+            'contain EXACTLY path, old, new as strings. Change only the '
+            'inspected Python paths listed here: '+
+            ', '.join(sorted(read_files)[:8])+
+            '. Do not return entire file contents, commentary, extra fields '
+            'or uninspected paths. Preserve indentation, imports, and '
+            'surrounding source unchanged.')
+    return (
+        'Return a NEW action=finish with files: [{path, content}] for complete '
+        'corrected SMALL Python files, preserving imports and all other '
+        'functions. Do not return extra fields or uninspected paths.')
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self,req,fp,code,msg,headers,newurl):
         raise AgentToolError("Provider redirects not permitted")
 
+
+
+def _read_native_ollama_stream(response, *, started:float, max_seconds:int)->dict:
+    """Collect bounded, local Ollama NDJSON events; require terminal done=true.
+
+    Stream content remains model-supplied and untrusted. Never emit a partial
+    model patch if the socket stalls, the stream ends early, or JSON is invalid.
+    Neither prompt nor model output is copied into failure diagnostics.
+    """
+    pieces=[]
+    total_bytes=0
+    usage={}
+    for _ in range(4096):
+        if time.monotonic()-started>max_seconds:
+            raise ProviderTransportError("Local Ollama stream exceeded wall-clock budget")
+        raw=response.readline(65537)
+        if time.monotonic()-started>max_seconds:
+            raise ProviderTransportError("Local Ollama stream exceeded wall-clock budget")
+        if not raw:
+            raise ProviderTransportError("Local Ollama stream ended before final response")
+        total_bytes+=len(raw)
+        if len(raw)>65536 or total_bytes>1_000_000:
+            raise AgentToolError("Local Ollama stream exceeded response size limit")
+        try:
+            event=json.loads(raw)
+        except (UnicodeDecodeError,ValueError) as exc:
+            raise AgentToolError("Local Ollama stream contained invalid JSON") from exc
+        if not isinstance(event,dict):
+            raise AgentToolError("Local Ollama stream event must be an object")
+        if "error" in event:
+            raise AgentToolError("Local Ollama stream returned a model error")
+        message=event.get("message")
+        if not isinstance(message,dict) or not isinstance(message.get("content"),str):
+            raise AgentToolError("Local Ollama stream missing message content")
+        pieces.append(message["content"])
+        if event.get("done") is True:
+            usage={"prompt_tokens":event.get("prompt_eval_count"),
+                   "completion_tokens":event.get("eval_count")}
+            result="".join(pieces)
+            if not result:
+                raise AgentToolError("Local Ollama stream returned empty model output")
+            return {"choices":[{"message":{"content":result}}],
+                    "usage":usage}
+    raise AgentToolError("Local Ollama stream exceeded event count limit")
 
 
 def _local_ollama_chat(url,model,messages,token_budget):
@@ -95,22 +186,56 @@ def _local_ollama_chat(url,model,messages,token_budget):
         raise AgentToolError("Native model fallback is restricted to local Ollama")
     endpoint=urllib.parse.urlunsplit(
         (parts.scheme,parts.netloc,"/api/chat","",""))
+    streaming=os.getenv("REPOPILOT_OLLAMA_STREAM","0").strip()=="1"
     body=json.dumps({
-        "model":model,"stream":False,"format":"json",
+        "model":model,"stream":streaming,"format":"json",
+        # Long-running pinned benchmark cohorts should not repeatedly evict
+        # the same local model between tasks. Still bounded and loopback-only.
+        "keep_alive":"20m",
         "options":{"temperature":0,"num_predict":token_budget},
         "messages":messages,
     }).encode("utf-8")
     request=urllib.request.Request(
         endpoint,data=body,method="POST",
         headers={"Content-Type":"application/json"})
+    # CPU-only model cold starts and transient Ollama failures can take
+    # longer than the first request. Retry the SAME read-only model call a
+    # bounded number of times; do not change provider/host or log prompt data.
+    # A candidate patch never enters the pipeline without normal validation.
+    retryable_http={408,429,500,502,503,504}
     try:
-        with urllib.request.build_opener(_NoRedirect()).open(
-                request,timeout=120) as response:
-            payload=response.read(1_000_001)
-    except urllib.error.HTTPError as exc:
-        raise AgentToolError("Local Ollama native API HTTP "+str(exc.code)) from exc
-    except (TimeoutError,socket.timeout,urllib.error.URLError) as exc:
-        raise AgentToolError("Local Ollama native chat failed or timed out") from exc
+        attempts=max(1,min(int(os.getenv("REPOPILOT_NATIVE_RETRIES","2")),3))
+        timeout=max(30,min(int(os.getenv("REPOPILOT_NATIVE_TIMEOUT","120")),240))
+        wall_timeout=max(60,min(int(os.getenv("REPOPILOT_NATIVE_WALL_TIMEOUT","300")),600))
+    except ValueError as exc:
+        raise AgentToolError("Invalid bounded Ollama retry/timeout configuration") from exc
+    payload=None
+    for attempt in range(attempts):
+        try:
+            with urllib.request.build_opener(_NoRedirect()).open(
+                    request,timeout=timeout) as response:
+                if streaming:
+                    return _read_native_ollama_stream(
+                        response,started=time.monotonic(),max_seconds=wall_timeout)
+                payload=response.read(1_000_001)
+            break
+        except urllib.error.HTTPError as exc:
+            category="HTTP "+str(exc.code)
+            retry=exc.code in retryable_http
+        except (TimeoutError,socket.timeout) as exc:
+            category="timeout"
+            retry=True
+        except urllib.error.URLError as exc:
+            category=("timeout" if isinstance(exc.reason,
+                (TimeoutError,socket.timeout)) else "connection failure")
+            retry=True
+        if not retry or attempt==attempts-1:
+            raise ProviderTransportError(
+                "Local Ollama native API "+category+
+                " after "+str(attempt+1)+" attempt(s)")
+        time.sleep(2)
+    if payload is None:
+        raise ProviderTransportError("Local Ollama native API returned no response")
     if len(payload)>1_000_000:
         raise AgentToolError("Local Ollama native response exceeded size limit")
     try:
@@ -191,10 +316,10 @@ def _provider(url,model,token,messages):
         except AgentToolError:
             raise  # Invalid JSON or shape is a model protocol error, not a timeout.
         if not retry or attempt==1:
-            raise AgentToolError("Model provider "+category+
+            raise ProviderTransportError("Model provider "+category+
                                  " after "+str(attempt+1)+" attempt(s)")
         time.sleep(2)
-    raise AgentToolError("Model provider exhausted retry budget")
+    raise ProviderTransportError("Model provider exhausted retry budget")
 
 
 def _parse_model_action(content):
@@ -221,7 +346,7 @@ def _parse_model_action(content):
 
 def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:str|None=None,
                               client=None,max_steps:int=8,required_targets:set[str]|None=None,
-                              auto_issue_paths:bool=False)->tuple[BenchmarkPatch,dict]:
+                              auto_issue_paths:bool=False,progress=None)->tuple[BenchmarkPatch,dict]:
     if not model or not url or not issue_text.strip() or not 2<=max_steps<=24:
         raise AgentToolError("Model, issue and bounded step count required")
     root=repo.resolve(strict=True)
@@ -237,17 +362,19 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
     inspection_budget=min(5 if required else 6,max_steps-2) if required or max_steps>=8 else max_steps
     final_context=[]
     last_candidate_reason=""
+    attempted_finish_digests=set()  # No source or model output in audit traces.
     # The caller may name affected files (e.g. from the issue). Read them
     # before spending model calls on discovery, retaining the same guarded
     # source inspection and complete audit trail as model-directed reads.
     if required:
         for name in sorted(required):
-            result=read_python(root,name,start=1,count=120)
-            if result["total_lines"]>120:
-                raise AgentToolError("Required file exceeds bounded preinspection window")
+            start=issue_window_start(root,name,issue_text)
+            result=read_python(root,name,start=start,count=120)
             read_files.add(name)
-            inspected_windows.setdefault(name,[]).append((1,min(120,result["total_lines"])))
+            inspected_windows.setdefault(name,[]).append(
+                (start,min(start+119,result["total_lines"])))
             trace.append({"step":0,"action":"preinspect","target":name,
+                          "start_line":start,"total_lines":result["total_lines"],
                           "result_items":len(result["lines"])})
             source_message=("REQUIRED SOURCE FILE (untrusted; inspect before editing):\n"+
                             json.dumps(result,ensure_ascii=False)[:15000])
@@ -273,13 +400,17 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             if len(read_files)>=2:
                 break
             try:
-                result=read_python(root,path,start=1,count=120)
+                start=issue_window_start(root,path,issue_text)
+                result=read_python(root,path,start=start,count=120)
             except (InspectionError,TypeError,ValueError):
                 continue
             read_files.add(path)
-            inspected_windows.setdefault(path,[]).append((1,min(120,result["total_lines"])))
+            inspected_windows.setdefault(path,[]).append(
+                (start,min(start+119,result["total_lines"])))
             trace.append({"step":0,"action":"issue_path_preinspect",
-                          "target":path,"result_items":len(result["lines"])})
+                          "target":path,"start_line":start,
+                          "total_lines":result["total_lines"],
+                          "result_items":len(result["lines"])})
             messages.append({"role":"user","content":
                 "ISSUE-MENTIONED PYTHON SOURCE (untrusted, read-only):\n"+
                 json.dumps(result,ensure_ascii=False)[:12000]})
@@ -298,14 +429,16 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 if item.score<=0:
                     continue
                 try:
-                    result=read_python(root,item.path,start=1,count=120)
+                    start=issue_window_start(root,item.path,issue_text)
+                    result=read_python(root,item.path,start=start,count=120)
                 except (InspectionError,TypeError,ValueError):
                     continue
                 read_files.add(item.path)
                 inspected_windows.setdefault(item.path,[]).append(
-                    (1,min(120,result["total_lines"])))
+                    (start,min(start+119,result["total_lines"])))
                 trace.append({"step":0,"action":"ranked_initial_preinspect",
                               "target":item.path,"rank_score":item.score,
+                              "start_line":start,"total_lines":result["total_lines"],
                               "result_items":len(result["lines"])})
                 messages.append({"role":"user","content":
                     "ISSUE-RANKED SOURCE CANDIDATE (read-only; not guaranteed "
@@ -323,11 +456,18 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 # Rank and inspect actual existing source, never reference fixes.
                 selected=ranked_source_context(root,issue_text,max_files=3,max_chars=15000)
                 for item in selected:
-                    result=read_python(root,item.path,start=1,count=120)
+                    try:
+                        start=issue_window_start(root,item.path,issue_text)
+                        result=read_python(root,item.path,start=start,count=120)
+                    except (InspectionError,TypeError,ValueError):
+                        continue
                     read_files.add(item.path)
-                    inspected_windows.setdefault(item.path,[]).append((1,min(120,result["total_lines"])))
+                    inspected_windows.setdefault(item.path,[]).append(
+                        (start,min(start+119,result["total_lines"])))
                     trace.append({"step":index+1,"action":"ranked_preinspect",
-                                  "target":item.path,"result_items":len(result["lines"])})
+                                  "target":item.path,"start_line":start,
+                                  "total_lines":result["total_lines"],
+                                  "result_items":len(result["lines"])})
             if not read_files:
                 raise AgentToolError("No inspectable Python source for patch proposal")
             # For benchmark tasks without declared targets, choose only
@@ -369,14 +509,18 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 "You are in FINAL PATCH MODE. Return ONLY a JSON object "
                 "with action=finish. Prefer files: [{path, content}] where content "
                 "is COMPLETE corrected Python source for SMALL inspected files. "
-                "For long inspected files, use edits: [{path,old,new}] with "
-                "exact original text. Do not call list, search or read. "
+                "For long inspected files, use edits: [{path,old,new}] or "
+                "line_edits: [{path,start_line,end_line,new}] with "
+                "exact original text or exact inspected line numbers. "
+                "Do not call list, search or read. "
                 "Use ONLY exact paths from Allowed inspected files. "
                 "When editing a large module, use a minimal edits entry: "
                 "{path: permitted_path, old: verbatim_existing_lines, "
                 "new: corrected_lines}. Copy old text byte-for-byte from "
                 "the provided excerpt; do not rewrite unrelated functions. "
                 "For a small module under 6KB, files mode is permitted. "
+                "When exact old text cannot be copied, select a short line_edits "
+                "range wholly inside previously displayed numbered source. "
                 "Preserve imports and existing functions. Never invent files "
                 "or claim tests passed."},
                 {"role":"user","content":
@@ -385,12 +529,20 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 "\n\nAllowed inspected files: "+", ".join(phase_files)+
                 (". Change EVERY required file." if required else
                  ". Modify one or more inspected relevant files, not necessarily all.")+
-                " Output action=finish with complete corrected source for small files or exact edits for long files."+
+                " Output action=finish with complete corrected source for small files, "
+                "exact edits or inspected line_edits for long files."+
 
                 (" Previous candidate error: "+last_candidate_reason if last_candidate_reason else "")}]
             trace.append({"step":index+1,"action":"final_phase_started"})
+        # The progress signal contains no source, prompt, model output or
+        # credentials. The worker persists it atomically so a forced timeout
+        # reveals which model invocation was still pending.
+        if progress is not None:
+            progress("model_call_started",index+1)
         response=(client(url,model,token,messages) if client is not None
                   else _provider(url,model,token,messages))
+        if progress is not None:
+            progress("model_call_completed",index+1)
         usage.append(response.get("usage",{}))
         try:
             content=response["choices"][0]["message"]["content"]
@@ -417,7 +569,8 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             messages.append({"role":"user","content":
                 "Discovery is finished. The inspected files are above. "
                 "Your next response MUST use action=finish with files "
-                "for small source or exact edits for long source. No tool actions."})
+                "for small inspected source or exact edits / inspected line_edits "
+                "for long source. No tool actions."})
             continue
         if name=="finish":
             missing=sorted(required-read_files)
@@ -431,7 +584,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 # reads. Never apply that uninspected candidate. Safely read
                 # existing proposed targets (or issue-ranked source) and
                 # require an entirely NEW model-generated patch.
-                proposals=action.get("files",action.get("edits",[]))
+                proposals=action.get("files",action.get("edits",action.get("line_edits",[])))
                 candidates=[]
                 if isinstance(proposals,list):
                     candidates=[item.get("path") for item in proposals
@@ -469,15 +622,18 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                     if not isinstance(candidate,str) or candidate in read_files:
                         continue
                     try:
-                        inspected=read_python(root,candidate,start=1,count=120)
+                        start=issue_window_start(root,candidate,issue_text)
+                        inspected=read_python(root,candidate,start=start,count=120)
                     except (InspectionError,TypeError,ValueError):
                         continue
                     read_files.add(candidate)
                     inspected_windows.setdefault(candidate,[]).append(
-                        (1,min(120,inspected["total_lines"])))
+                        (start,min(start+119,inspected["total_lines"])))
                     recovered.append(inspected)
                     trace.append({"step":index+1,"action":"initial_finish_preinspect",
-                                  "target":candidate,"result_items":len(inspected["lines"])})
+                                  "target":candidate,"start_line":start,
+                                  "total_lines":inspected["total_lines"],
+                                  "result_items":len(inspected["lines"])})
                 if not recovered:
                     # The model may have hallucinated an entirely unknown
                     # path. This is not an authorization to edit or an
@@ -508,7 +664,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 trace.append({"step":index+1,"action":"finish_deferred_uninspected"})
                 continue
             if set(action) not in ({"action","files"}, {"action","edits"},
-                                   {"action","patch"}):
+                                   {"action","line_edits"}, {"action","patch"}):
                 # JSON validity alone is not enough: a small model may return
                 # action=finish with no patch, or include explanation keys.
                 # Never interpret such output as an authorized source edit.
@@ -519,7 +675,8 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 # still receives feedback after that reset.
                 last_candidate_reason=("Your previous finish response had unsupported "
                     "fields. Respond with exactly {action:finish,edits:[{path,old,new}]}, "
-                    "{action:finish,files:[{path,content}]}, or "
+                    "{action:finish,files:[{path,content}]}, "
+                    "{action:finish,line_edits:[{path,start_line,end_line,new}]}, or "
                     "{action:finish,patch:unified_diff}; no other keys.")
                 if index==max_steps-1:
                     raise AgentToolError("Invalid finish schema after step budget")
@@ -536,6 +693,24 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                     "Edit ONLY these inspected existing files: "+
                     ", ".join(sorted(read_files)[:15])})
                 continue
+            # An invalid finish candidate should never trigger repeated patch
+            # construction or git apply checks when the model returns the exact
+            # same output. Hash only the validated JSON action, not its contents
+            # in diagnostics or the audit trace.
+            digest=hashlib.sha256(json.dumps(action,sort_keys=True,
+                ensure_ascii=False).encode("utf-8")).digest()
+            if digest in attempted_finish_digests:
+                trace.append({"step":index+1,
+                              "action":"duplicate_finish_rejected"})
+                last_candidate_reason=(
+                    "Your previous source proposal was identical to an earlier "
+                    "rejected patch. Generate a different corrected action=finish "
+                    "proposal, using the inspected source. Do not repeat it.")
+                messages.append({"role":"user","content":last_candidate_reason})
+                continue
+            # Record only verified-invalid candidates. A patch targeting a
+            # not-yet-inspected file may become valid after a read-only
+            # inspection, so that candidate must remain eligible on retry.
             try:
                 if set(action)=={"action","files"}:
                     files=action["files"]
@@ -570,6 +745,15 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                     ):
                         raise AgentToolError("Model modified a file it did not inspect")
                     patch=canonical_patch(root,edits,allowed_files=read_files)
+                elif set(action)=={"action","line_edits"}:
+                    proposed=action["line_edits"]
+                    if isinstance(proposed,list) and any(
+                        isinstance(edit,dict) and edit.get("path") not in read_files
+                        for edit in proposed
+                    ):
+                        raise AgentToolError("Model modified a file it did not inspect")
+                    patch=canonical_line_patch(root,proposed,
+                        allowed_files=read_files,inspected_windows=inspected_windows)
                 elif set(action)=={"action","patch"}:
                     patch=action["patch"]
                     if not isinstance(patch,str):
@@ -592,7 +776,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 # proposes a patch. Safely inspect at most two such existing
                 # Python files, then require a NEW model proposal. The
                 # uninspected candidate is always discarded, never applied.
-                proposed=action.get("files",action.get("edits",[]))
+                proposed=action.get("files",action.get("edits",action.get("line_edits",[])))
                 names=[]
                 if isinstance(proposed,list):
                     names=[entry.get("path") for entry in proposed
@@ -613,6 +797,9 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                     except (InspectionError,TypeError,ValueError):
                         continue
                     read_files.add(candidate)
+                    if inspected.get("lines"):
+                        inspected_windows.setdefault(candidate,[]).append(
+                            (inspected["lines"][0]["line"], inspected["lines"][-1]["line"]))
                     recovered.append(inspected)
                     trace.append({"step":index+1,"action":"candidate_preinspect",
                                   "target":candidate,
@@ -635,6 +822,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             except (ValueError,TypeError,KeyError,SyntaxError) as exc:
                 # A malformed candidate is a recoverable model error, not a
                 # reason to spend the entire run on a new model process.
+                attempted_finish_digests.add(digest)
                 reason=_safe_candidate_feedback(exc)
                 last_candidate_reason=reason
                 trace.append({"step":index+1,"action":"finish_rejected",
@@ -643,9 +831,8 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 messages.append({"role":"assistant","content":content})
                 messages.append({"role":"user","content":
                     "Fix this specific error: "+reason+" "+
-                    "Return action=finish with files: [{path, content}] "+
-                    "containing COMPLETE corrected Python source for EVERY "+
-                    "required file. Do not repeat the rejected candidate."})
+                    _safe_repair_instruction(root,read_files)+
+                    " Do not repeat the rejected candidate."})
                 continue
             missing_targets=sorted(required-set(targets))
             if missing_targets:
@@ -658,6 +845,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             check=subprocess.run(["git","apply","--check","-"],cwd=root,input=patch,
                 text=True,capture_output=True,timeout=10,check=False)
             if check.returncode:
+                attempted_finish_digests.add(digest)
                 trace.append({"step":index+1,"action":"finish_rejected",
                               "error_type":"GitApplyCheck"})
                 messages.append({"role":"assistant","content":content})
