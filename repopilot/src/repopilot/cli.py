@@ -33,6 +33,7 @@ def main(argv=None):
     g=sub.add_parser("draft-pr",help="Publish only after human review and explicit approval")
     g.add_argument("repo",type=Path);g.add_argument("proposal",type=Path);g.add_argument("report",type=Path)
     g.add_argument("--remote",required=True)
+    g.add_argument("--repo-subdir",default="",help="Path prefix inside the GitHub repository for a local subdirectory checkout")
     g.add_argument("--approve",default="",help="Must be exactly I_APPROVE_DRAFT_PR")
     h=sub.add_parser("select-swebench",help="Create 12-task public SWE-bench Lite manifest; no score computed")
     h.add_argument("--limit",type=int,default=12)
@@ -61,6 +62,6 @@ def main(argv=None):
         print(json.dumps(write_manifest(args.output,args.limit,args.seed),indent=2))
     elif args.cmd=="draft-pr":
         report=json.loads(args.report.read_text(encoding="utf-8"))
-        result=publish_approved_draft(args.repo,IssueSpec.from_json(args.proposal),report,args.remote,args.approve)
+        result=publish_approved_draft(args.repo,IssueSpec.from_json(args.proposal),report,args.remote,args.approve,repo_subdir=args.repo_subdir)
         print(json.dumps(result,indent=2))
 if __name__=="__main__":main()
