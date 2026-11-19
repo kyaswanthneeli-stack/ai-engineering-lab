@@ -4,7 +4,7 @@ import unittest
 import urllib.error
 from unittest.mock import patch
 from pathlib import Path
-from repopilot.agentic_benchmark import propose_agentic_benchmark,AgentToolError,_provider
+from repopilot.agentic_benchmark import propose_agentic_benchmark,AgentToolError,_provider,_safe_repair_instruction
 
 
 class AgentTests(unittest.TestCase):
@@ -102,6 +102,39 @@ class AgentTests(unittest.TestCase):
                 self.repo,"fix subtotal","mock","http://127.0.0.1:11434/v1",
                 client=client,max_steps=4,required_targets={"pricing.py"})
         self.assertEqual(len(calls),4)
+
+
+    def test_large_module_invalid_patch_prompts_small_exact_edit(self):
+        (self.repo/"deep.py").write_text(
+            "".join(f"MARKER_{i:04d} = {i}\n" for i in range(390))
+            + "def calculate_invoice_tax(value):\n    return value + 0\n")
+        history=[]
+        steps=iter([
+            {"action":"finish","edits":[{"path":"deep.py",
+                "old":"NONEXISTENT TEXT","new":"    return 1"}]},
+            {"action":"finish","edits":[{"path":"deep.py",
+                "old":"    return value + 0","new":"    return value + 1"}]}
+        ])
+        def model(url,model,token,messages):
+            history.append(list(messages))
+            return {"choices":[{"message":{"content":json.dumps(next(steps))}}]}
+        result,meta=propose_agentic_benchmark(
+            self.repo,"Fix calculate_invoice_tax in deep.py","mock",
+            "http://127.0.0.1:11434/v1",client=model,
+            max_steps=4,required_targets={"deep.py"})
+        self.assertIn("return value + 1",result.patch)
+        self.assertTrue(any("SHORT exact text span" in item["content"]
+            for item in history[1] if item["role"]=="user"))
+        self.assertFalse(any("containing COMPLETE corrected Python source" in item["content"]
+            for item in history[1] if item["role"]=="user"))
+        self.assertEqual(sum(t["action"]=="finish_rejected"
+                             for t in meta["tool_trace"]),1)
+
+    def test_small_module_repair_prefers_complete_source(self):
+        recommendation=_safe_repair_instruction(
+            self.repo,{"pricing.py"})
+        self.assertIn("SMALL Python files",recommendation)
+        self.assertNotIn("SHORT exact text span",recommendation)
 
     def test_opt_in_local_native_ollama_skips_compatible_api(self):
         with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1",
