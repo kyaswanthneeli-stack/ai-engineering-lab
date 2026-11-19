@@ -45,7 +45,7 @@ def ranked_source_context(repo:Path,issue:str,*,max_files:int=8,max_chars:int=32
     terms=_tokens(issue[:12000])
     candidates=[]
     # Issue-referenced files get priority in large repositories.
-    mentions=set(re.findall(r"[A-Za-z0-9_./-]+\\.py", issue[:12000]))
+    mentions=set(re.findall(r"[A-Za-z0-9_./-]+\.py", issue[:12000]))
     explicit=[]
     for name in sorted(mentions):
         target=root/name
