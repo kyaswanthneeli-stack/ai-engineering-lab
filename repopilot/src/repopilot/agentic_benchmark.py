@@ -123,6 +123,8 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 read_files.add(action["path"])
             else:
                 raise AgentToolError("Unknown or forbidden agent action")
+        except AgentToolError:
+            raise  # Unknown tool/action is forbidden, never retried as a normal lookup error.
         except (InspectionError,TypeError,ValueError) as exc:
             # The model receives only a safe bounded error message, not host internals.
             result={"error":type(exc).__name__,"hint":"Use listed Python files and bounded literal searches"}
