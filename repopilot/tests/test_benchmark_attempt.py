@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from pathlib import Path
-from repopilot.benchmark_attempt import attempt_one,main,bounded_issue_context
+from repopilot.benchmark_attempt import attempt_one,main,bounded_issue_context,configured_issue_context_limit
 from repopilot.agentic_benchmark import ProviderTransportError
 
 SHA="a"*40
@@ -44,6 +44,34 @@ class AttemptsTests(unittest.TestCase):
     def test_reject_unbounded_issue_context_request(self):
         with self.assertRaises(ValueError):
             bounded_issue_context("issue",50000)
+
+    def test_small_model_context_budget_preserves_front_and_last_issue_evidence(self):
+        statement="TITLE: investigate regression.\n"+("context-block\n"*1300)+"LAST REPRODUCTION: important"
+        observed=[]
+        def model(repo,issue,*args):
+            observed.append(issue)
+            return self.proposed()
+        with patch.dict("os.environ",{"REPOPILOT_ISSUE_CONTEXT_CHARS":"3000"}):
+            result=attempt_one(
+                self.manifest,INSTANCE,self.root/"smaller",
+                dataset_loader=lambda: [{
+                    **self.dataset()[0],"problem_statement":statement}],
+                checkout=self.checkout,model_proposer=model)
+        self.assertEqual(result["status"],"model_patch_proposed")
+        self.assertEqual(result["issue_context_chars"],3000)
+        self.assertTrue(result["issue_context_trimmed"])
+        self.assertLessEqual(len(observed[0]),3000)
+        self.assertIn("LAST REPRODUCTION: important",observed[0])
+        self.assertTrue(observed[0].startswith("TITLE: investigate regression."))
+
+    def test_reject_invalid_small_model_context_budgets(self):
+        for value in ["abc","0","12001","1999",""]:
+            with self.subTest(value=value),patch.dict(
+                    "os.environ",{"REPOPILOT_ISSUE_CONTEXT_CHARS":value}):
+                with self.assertRaises(ValueError):
+                    configured_issue_context_limit()
+        with patch.dict("os.environ",{"REPOPILOT_ISSUE_CONTEXT_CHARS":"6500"}):
+            self.assertEqual(configured_issue_context_limit(),6500)
 
     def test_records_real_model_patch_as_unreviewed_not_resolved(self):
         output=self.root/"run"
