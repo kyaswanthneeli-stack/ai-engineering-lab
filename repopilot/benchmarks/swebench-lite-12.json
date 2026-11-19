@@ -1,0 +1,106 @@
+{
+  "dataset": "SWE-bench/SWE-bench_Lite",
+  "split": "test",
+  "seed": 73,
+  "selection_count": 12,
+  "status": "selected_not_evaluated",
+  "tasks": [
+    {
+      "instance_id": "sympy__sympy-14774",
+      "repo": "sympy/sympy",
+      "base_commit": "8fc63c2d71752389a44367b8ef4aba8a91af6a45",
+      "status": "not_attempted",
+      "model_result": null,
+      "patch_file": null
+    },
+    {
+      "instance_id": "django__django-12589",
+      "repo": "django/django",
+      "base_commit": "895f28f9cbed817c00ab68770433170d83132d90",
+      "status": "not_attempted",
+      "model_result": null,
+      "patch_file": null
+    },
+    {
+      "instance_id": "sympy__sympy-13773",
+      "repo": "sympy/sympy",
+      "base_commit": "7121bdf1facdd90d05b6994b4c2e5b2865a4638a",
+      "status": "not_attempted",
+      "model_result": null,
+      "patch_file": null
+    },
+    {
+      "instance_id": "sympy__sympy-11870",
+      "repo": "sympy/sympy",
+      "base_commit": "5c2e1f96a7ff562d4a778f4ca9ffc9c81557197e",
+      "status": "not_attempted",
+      "model_result": null,
+      "patch_file": null
+    },
+    {
+      "instance_id": "sympy__sympy-20212",
+      "repo": "sympy/sympy",
+      "base_commit": "a106f4782a9dbe7f8fd16030f15401d977e03ae9",
+      "status": "not_attempted",
+      "model_result": null,
+      "patch_file": null
+    },
+    {
+      "instance_id": "django__django-12113",
+      "repo": "django/django",
+      "base_commit": "62254c5202e80a68f4fe6572a2be46a3d953de1a",
+      "status": "not_attempted",
+      "model_result": null,
+      "patch_file": null
+    },
+    {
+      "instance_id": "pytest-dev__pytest-11148",
+      "repo": "pytest-dev/pytest",
+      "base_commit": "2f7415cfbc4b6ca62f9013f1abd27136f46b9653",
+      "status": "not_attempted",
+      "model_result": null,
+      "patch_file": null
+    },
+    {
+      "instance_id": "django__django-14730",
+      "repo": "django/django",
+      "base_commit": "4fe3774c729f3fd5105b3001fe69a70bdca95ac3",
+      "status": "not_attempted",
+      "model_result": null,
+      "patch_file": null
+    },
+    {
+      "instance_id": "pydata__xarray-4493",
+      "repo": "pydata/xarray",
+      "base_commit": "a5f53e203c52a7605d5db799864046471115d04f",
+      "status": "not_attempted",
+      "model_result": null,
+      "patch_file": null
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-12471",
+      "repo": "scikit-learn/scikit-learn",
+      "base_commit": "02dc9ed680e7f53f1b0d410dcdd37341c7958eb1",
+      "status": "not_attempted",
+      "model_result": null,
+      "patch_file": null
+    },
+    {
+      "instance_id": "django__django-12125",
+      "repo": "django/django",
+      "base_commit": "89d41cba392b759732ba9f1db4ff29ed47da6a56",
+      "status": "not_attempted",
+      "model_result": null,
+      "patch_file": null
+    },
+    {
+      "instance_id": "matplotlib__matplotlib-22835",
+      "repo": "matplotlib/matplotlib",
+      "base_commit": "c33557d120eefe3148ebfcf2e758ff2357966000",
+      "status": "not_attempted",
+      "model_result": null,
+      "patch_file": null
+    }
+  ],
+  "notice": "Generated from an actual successful official-dataset selector GitHub Actions run on 2026-11-19. No task outcomes or model success rates claimed. Evaluate using official SWE-bench harness."
+}
