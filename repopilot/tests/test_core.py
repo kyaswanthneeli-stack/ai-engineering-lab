@@ -53,6 +53,27 @@ class Tests(unittest.TestCase):
             result={"choices":[{"message":{"content":json.dumps(body)}}]}
             with self.assertRaises(ProposalError):
                 propose(Path(t),"fix divide bug","local","http://127.0.0.1:11434/v1",client=lambda *_:result)
+    def test_model_structured_exact_edits_to_valid_patch(self):
+        with tempfile.TemporaryDirectory() as t:
+            Path(t,"calculator.py").write_text("def divide(a, b):\n    if b == 0:\n        return 0  # BUG: should raise ZeroDivisionError\n    return a / b\n")
+            body={**RAW, "patch":{"edits":[{"path":"calculator.py",
+                "old":"return 0  # BUG: should raise ZeroDivisionError",
+                "new":"raise ZeroDivisionError"}]}}
+            result={"choices":[{"message":{"content":json.dumps(body)}}]}
+            spec,meta=propose(Path(t),"fix division by zero","local",
+                "http://127.0.0.1:11434/v1",client=lambda *_:result)
+            self.assertIn("diff --git a/calculator.py b/calculator.py",spec.patch)
+            self.assertIn("+        raise ZeroDivisionError",spec.patch)
+            self.assertEqual(meta["proposal_attempts"],1)
+
+    def test_model_structured_edits_cannot_change_unindexed_file(self):
+        with tempfile.TemporaryDirectory() as t:
+            Path(t,"calculator.py").write_text("def divide(a,b):return 0\n")
+            Path(t,"config.txt").write_text("API_TOKEN=abc\n")
+            body={**RAW,"patch":{"edits":[{"path":"config.txt","old":"API_TOKEN","new":"EXPOSE"}]}}
+            result={"choices":[{"message":{"content":json.dumps(body)}}]}
+            with self.assertRaises(ProposalError):
+                propose(Path(t),"fix bug","local","http://127.0.0.1:11434/v1",client=lambda *_:result)
     def test_verify_mock(self):
         with tempfile.TemporaryDirectory() as t:
             root=Path(t,"repo");root.mkdir()
