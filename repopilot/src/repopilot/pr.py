@@ -14,6 +14,7 @@ import urllib.request
 from urllib.parse import quote
 from .spec import IssueSpec
 from .patches import validate_patch, apply_patch
+from .review import review_proposal
 
 class PublishError(ValueError):
     pass
@@ -56,6 +57,8 @@ class GitHubApi:
 def publish_approved_draft(repo:Path,spec:IssueSpec,verification:dict,remote:str,approval:str,api:GitHubApi=None,repo_subdir:str="")->dict:
     if approval!="I_APPROVE_DRAFT_PR":
         raise PublishError("Explicit human approval is required")
+    if review_proposal(spec)["status"]=="blocked":
+        raise PublishError("Static proposal review reported blockers; draft PR publishing refused")
     if verification.get("outcome")!="verified_in_sandbox" or verification.get("baseline",{}).get("exit_code")!=0 or verification.get("before",{}).get("exit_code") in (None,0) or verification.get("after",{}).get("exit_code")!=0:
         raise PublishError("Verified fail-before/pass-after evidence required")
     if verification.get("issue_id")!=spec.issue_id:
