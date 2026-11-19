@@ -13,12 +13,14 @@ from .benchmark import read_and_aggregate
 from .pr import publish_approved_draft
 from .swebench import write_manifest
 from .checkout import pinned_checkout
+from .graph import import_graph
 import tempfile
 
 def main(argv=None):
     parser=argparse.ArgumentParser(prog="repopilot")
     sub=parser.add_subparsers(dest="cmd",required=True)
     a=sub.add_parser("index");a.add_argument("repo",type=Path)
+    ggraph=sub.add_parser("graph",help="Read-only static Python module graph");ggraph.add_argument("repo",type=Path)
     b=sub.add_parser("propose");b.add_argument("repo",type=Path);b.add_argument("issue_file",type=Path)
     b.add_argument("--output",type=Path,default=Path(".runs/proposal.json"))
     c=sub.add_parser("verify");c.add_argument("repo",type=Path);c.add_argument("spec",type=Path)
@@ -47,6 +49,8 @@ def main(argv=None):
     args=parser.parse_args(argv)
     if args.cmd=="index":
         print(json.dumps([vars(s) for s in index_python(args.repo)],indent=2))
+    elif args.cmd=="graph":
+        print(json.dumps(import_graph(args.repo),indent=2))
     elif args.cmd=="propose":
         spec,meta=propose(args.repo,args.issue_file.read_text(),os.getenv("REPOPILOT_MODEL",""),os.getenv("REPOPILOT_BASE_URL",""),os.getenv("REPOPILOT_API_KEY"))
         save_proposal(spec,meta,args.output)
