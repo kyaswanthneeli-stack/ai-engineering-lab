@@ -33,18 +33,31 @@ def _safe_python_paths(root:Path,max_files:int):
             continue
         count+=1
         if count>max_files:
-            raise ValueError("Repository exceeds bounded Python file scan")
+            break  # Partial index, not a complete search
         if path.stat().st_size>100_000:
             continue
         yield path,rel.as_posix()
 
-def ranked_source_context(repo:Path,issue:str,*,max_files:int=8,max_chars:int=32000,scan_limit:int=300)->list[ContextItem]:
+def ranked_source_context(repo:Path,issue:str,*,max_files:int=8,max_chars:int=32000,scan_limit:int=1800)->list[ContextItem]:
     root=repo.resolve(strict=True)
     if not root.is_dir() or not 1<=max_files<=20 or not 300<=max_chars<=100000:
         raise ValueError("Invalid context request")
     terms=_tokens(issue[:12000])
     candidates=[]
-    for path,rel in _safe_python_paths(root,scan_limit):
+    # Issue-referenced files get priority in large repositories.
+    mentions=set(re.findall(r"[A-Za-z0-9_./-]+\\.py", issue[:12000]))
+    explicit=[]
+    for name in sorted(mentions):
+        target=root/name
+        if (not name.startswith("/") and ".." not in Path(name).parts and
+                target.is_file() and not target.is_symlink() and
+                target.resolve().is_relative_to(root) and target.stat().st_size<=100000):
+            explicit.append((target,name))
+    visited=set()
+    for path,rel in [*explicit,*_safe_python_paths(root,scan_limit)]:
+        if rel in visited:
+            continue
+        visited.add(rel)
         try:
             source=path.read_text(encoding="utf-8")
             tree=ast.parse(source)
