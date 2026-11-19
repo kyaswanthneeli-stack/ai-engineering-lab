@@ -27,6 +27,9 @@ def execute(repo:Path,spec:IssueSpec,output:Path,timeout:int=30,runner=run_tests
     with tempfile.TemporaryDirectory(prefix="repopilot-") as temp:
         work=Path(temp)/"repo"
         shutil.copytree(repo,work,ignore=shutil.ignore_patterns(".git",".venv","__pycache__",".runs"))
+        baseline=runner(work,spec.test_command,timeout=timeout)
+        if baseline.timed_out or baseline.exit_code!=0:
+            raise VerificationError("Original test suite must pass before reproduction test is added")
         target=work/spec.test_path
         if target.exists() or target.is_symlink() or not target.resolve().is_relative_to(work.resolve()):
             raise VerificationError("Unsafe or existing reproduction test")
@@ -40,7 +43,7 @@ def execute(repo:Path,spec:IssueSpec,output:Path,timeout:int=30,runner=run_tests
         after=runner(work,spec.test_command,timeout=timeout)
         if after.timed_out or after.exit_code!=0:
             raise VerificationError("Patched tests must pass")
-        report={"issue_id":spec.issue_id,"outcome":"verified_in_sandbox","model_called_during_verification":False,"draft_pr_created":False,"symbol_count":len(symbols),"before":asdict(before),"after":asdict(after),"elapsed_ms":round((time.monotonic()-start)*1000)}
+        report={"issue_id":spec.issue_id,"outcome":"verified_in_sandbox","model_called_during_verification":False,"draft_pr_created":False,"symbol_count":len(symbols),"baseline":asdict(baseline),"before":asdict(before),"after":asdict(after),"elapsed_ms":round((time.monotonic()-start)*1000)}
         output.parent.mkdir(parents=True,exist_ok=True)
         output.write_text(json.dumps(report,indent=2)+"\n",encoding="utf-8")
         return report
