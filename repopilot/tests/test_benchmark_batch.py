@@ -116,37 +116,16 @@ class BenchmarkBatchTests(unittest.TestCase):
 
     def test_retry_only_prior_unsubmitted_failures_preserves_existing_predictions(self):
         previous=self.root/"prior-summary.json"
-        statuses={
-            "sample__project-0":"model_patch_proposed",
-            "sample__project-2":"provider_unavailable",
-            "sample__project-11":"model_timeout",
-        }
+        statuses={task["instance_id"]:"model_patch_proposed" for task in self.tasks}
+        statuses["sample__project-2"]="provider_unavailable"
+        statuses["sample__project-11"]="model_timeout"
         previous.write_text(json.dumps({
             "pinned_manifest_tasks":12,"selected_tasks":12,
-            "model_predictions":1,"missing_predictions":11,
+            "model_predictions":10,"missing_predictions":2,
             "officially_evaluated":False,
-            "tasks":[{"instance_id":task["instance_id"],
-                      "status":statuses.get(task["instance_id"],"model_patch_proposed")
-                      if task["instance_id"]=="sample__project-0" else
-                      (statuses.get(task["instance_id"],"model_patch_proposed")
-                       if task["instance_id"] not in ("sample__project-1",
-                                                   "sample__project-3",
-                                                   "sample__project-4",
-                                                   "sample__project-5",
-                                                   "sample__project-6",
-                                                   "sample__project-7",
-                                                   "sample__project-8",
-                                                   "sample__project-9",
-                                                   "sample__project-10") else
-                       "model_patch_proposed")}
-                     for task in self.tasks]
+            "tasks":[{"instance_id":name,"status":status}
+                     for name,status in statuses.items()]
         }))
-        # The previous summary above intentionally has mostly proposed patches
-        # and two unsubmitted failed attempts: correct the declared counts.
-        rows=json.loads(previous.read_text())
-        rows["model_predictions"]=10
-        rows["missing_predictions"]=2
-        previous.write_text(json.dumps(rows))
         called=[]
         def fake_run(command,**kwargs):
             instance=command[3]
