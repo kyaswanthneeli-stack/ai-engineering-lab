@@ -1,8 +1,8 @@
 # SWE-bench Lite: 12-task evaluation protocol
 
-**Current verified status:** 12 tasks selected, **0 official task evaluations** and **no SWE-bench resolution rate**.
+**Current verified status (November 19, 2026):** 12 selected tasks attempted; six model-generated predictions officially evaluated; **one issue resolved, five unresolved, zero evaluator errors**. Another six tasks timed out without predictions. See [full official evidence](OFFICIAL_EVALUATION_2026-11-19.md), [predictions](official-predictions-2026-11-19.jsonl), and [official result JSON](official-score-2026-11-19.json). This is **1/6 evaluated**, not a full SWE-bench score.
 
-This folder contains a deterministic sample of twelve real SWE-bench Lite issue IDs and their exact upstream base commits. The manifest does not include a model patch, attempted run, or score.
+This folder contains a deterministic sample of twelve real SWE-bench Lite issue IDs and their exact upstream base commits. The immutable selection manifest intentionally does not include outcomes; results are stored separately to avoid rewriting task provenance.
 
 ## Preparing authentic model predictions
 
@@ -47,4 +47,4 @@ Inspect `logs/evaluation/<run_id>/results.json` and individual `report.json` fil
 
 Publish all twelve selected IDs. Show predictions submitted, tasks unattempted, official resolved/unresolved/error counts, reproducible run ID, model and cost. Do **not** treat model-suggested patches or RepoPilot's local tests as official SWE-bench resolutions.
 
-**Known limitation:** RepoPilot's current context engine and fixed Python-unittest verifier are built for small Python repositories. Large Django/SymPy/Matplotlib SWE-bench tasks require broader multi-file context, task-specific dependency environments, and full official evaluation. The exporter is infrastructure, not evidence that these tasks have been solved.
+**Known limitation:** RepoPilot is a Python-focused prototype. Large Django/SymPy/Matplotlib SWE-bench tasks need broader context and dedicated dependencies. The **independent official harness** did evaluate six submitted model patches and resolved one; most selected issues remain unresolved or unsubmitted. The exporter alone does not establish a solve.
