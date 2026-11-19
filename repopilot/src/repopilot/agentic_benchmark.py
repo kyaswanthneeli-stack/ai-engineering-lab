@@ -401,13 +401,27 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                         candidates=list(patch_targets(action["patch"]))
                     except (TypeError,ValueError):
                         pass
-                # Model-suggested paths may be invented. Fall back to
-                # issue-ranked existing source, but only with positive
-                # path/symbol/body evidence. Never trust a fabricated path.
-                ranked=ranked_source_context(root,issue_text,max_files=3,
-                                             max_chars=12000,scan_limit=1800)
-                ranked_paths=[item.path for item in ranked if item.score>0]
-                candidates=list(dict.fromkeys([*candidates,*ranked_paths]))
+                # Explicit traversal or absolute paths are not recoverable
+                # model mistakes: reject them without attempting any read.
+                if any(isinstance(candidate,str) and
+                       (Path(candidate).is_absolute() or
+                        ".." in Path(candidate).parts)
+                       for candidate in candidates):
+                    raise AgentToolError("Cannot change source before inspecting files")
+                # Inspect an existing model-suggested file first. Only when
+                # none exists should we fall back to issue-ranked sources;
+                # never broaden the file-edit allowlist unnecessarily.
+                existing=[candidate for candidate in candidates
+                          if isinstance(candidate,str) and
+                          (root/candidate).is_file() and
+                          not (root/candidate).is_symlink()]
+                if existing:
+                    candidates=existing
+                else:
+                    ranked=ranked_source_context(
+                        root,issue_text,max_files=3,
+                        max_chars=12000,scan_limit=1800)
+                    candidates=[item.path for item in ranked if item.score>0]
                 recovered=[]
                 for candidate in candidates:
                     if len(recovered)>=2:
