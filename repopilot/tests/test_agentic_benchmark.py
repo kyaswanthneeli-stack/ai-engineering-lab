@@ -161,6 +161,55 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(patch.patch.count("diff --git"),2)
         self.assertIn("finish_rejected",[x["action"] for x in meta["tool_trace"]])
 
+    def test_exact_mismatch_feedback_explains_correction(self):
+        responses=[
+            {"action":"finish","edits":[
+                {"path":"pricing.py","old":"missing original snippet","new":"x=1"}]},
+            {"action":"finish","files":[
+                {"path":"pricing.py","content":
+                    "def subtotal(values):\n    return round(sum(values), 2)\n"},
+                {"path":"checkout.py","content":
+                    "from pricing import subtotal\ndef total(values):\n"
+                    "    return round(subtotal(values), 2)\n"}]}
+        ]
+        seen=[]
+        it=iter(responses)
+        def client(url,model,token,messages):
+            seen.append(list(messages))
+            return {"choices":[{"message":{"content":json.dumps(next(it))}}]}
+        patch,meta=propose_agentic_benchmark(self.repo,"round totals","mock",
+            "http://127.0.0.1:11434/v1",client=client,
+            max_steps=3,required_targets={"pricing.py","checkout.py"})
+        self.assertEqual(patch.patch.count("diff --git"),2)
+        reasons=[item.get("reason","") for item in meta["tool_trace"]]
+        self.assertTrue(any("does not match" in reason for reason in reasons))
+        self.assertTrue(any("Fix this specific error" in item["content"]
+                            for item in seen[1]))
+
+    def test_complete_source_without_trailing_newline_normalized(self):
+        response={"action":"finish","files":[
+            {"path":"pricing.py","content":
+                "def subtotal(values):\n    return round(sum(values), 2)"},
+            {"path":"checkout.py","content":
+                "from pricing import subtotal\ndef total(values):\n"
+                "    return round(subtotal(values), 2)"}]}
+        patch,_=propose_agentic_benchmark(self.repo,"round totals","mock",
+            "http://127.0.0.1:11434/v1",client=self.sequence([response]),
+            max_steps=2,required_targets={"pricing.py","checkout.py"})
+        self.assertEqual(patch.patch.count("diff --git"),2)
+
+    def test_exhaustion_exposes_rejection_reason_without_candidate_source(self):
+        invalid={"action":"finish","edits":[
+            {"path":"pricing.py","old":"not in source","new":"private_marker=1"}]}
+        with self.assertRaises(AgentToolError) as context:
+            propose_agentic_benchmark(self.repo,"fix","mock",
+                "http://127.0.0.1:11434/v1",
+                client=lambda *a:{"choices":[{"message":{"content":json.dumps(invalid)}}]},
+                max_steps=3,required_targets={"pricing.py","checkout.py"})
+        self.assertIn("rejection_reasons=",str(context.exception))
+        self.assertIn("does not match",str(context.exception))
+        self.assertNotIn("private_marker",str(context.exception))
+
     def test_refuses_to_modify_uninspected_file(self):
         steps=[
             {"action":"read","path":"pricing.py"},
