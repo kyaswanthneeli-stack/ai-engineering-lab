@@ -88,6 +88,37 @@ class AgentTests(unittest.TestCase):
                 "http://127.0.0.1:11434/v1",client=self.sequence([]),
                 required_targets={"../other.py"})
 
+    def test_final_phase_forces_patch_without_more_tool_reads(self):
+        calls=[]
+        def client(url,model,token,messages):
+            calls.append(list(messages))
+            if len(calls)<=5:
+                action={"action":"search","query":"taxable_subtotal"}
+            else:
+                self.assertIn("FINAL PATCH MODE",messages[0]["content"])
+                action={"action":"finish","edits":[
+                    {"path":"pricing.py","old":"return sum(values)",
+                     "new":"return round(sum(values), 2)"},
+                    {"path":"checkout.py","old":"return subtotal(values)",
+                     "new":"return round(subtotal(values), 2)"}]}
+            return {"choices":[{"message":{"content":json.dumps(action)}}],
+                    "usage":{"total_tokens":7}}
+        proposal,meta=propose_agentic_benchmark(
+            self.repo,"round totals","mock","http://127.0.0.1:11434/v1",
+            client=client,max_steps=10,required_targets={"pricing.py","checkout.py"})
+        self.assertEqual(proposal.patch.count("diff --git"),2)
+        self.assertEqual(meta["agent_steps"],6)
+        self.assertIn("final_phase_started",[x["action"] for x in meta["tool_trace"]])
+
+    def test_final_phase_rejects_repeated_exploration(self):
+        response={"choices":[{"message":{"content":json.dumps(
+            {"action":"search","query":"subtotal"})}}]}
+        with self.assertRaisesRegex(AgentToolError,"action_counts"):
+            propose_agentic_benchmark(
+                self.repo,"fix","mock","http://127.0.0.1:11434/v1",
+                client=lambda *args:response,max_steps=8,
+                required_targets={"pricing.py","checkout.py"})
+
     def test_refuses_to_modify_uninspected_file(self):
         steps=[
             {"action":"read","path":"pricing.py"},
