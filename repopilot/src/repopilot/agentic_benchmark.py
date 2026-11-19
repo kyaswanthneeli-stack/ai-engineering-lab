@@ -37,6 +37,39 @@ class AgentToolError(BenchmarkProposalError):
     pass
 
 
+def _safe_candidate_feedback(exc:Exception)->str:
+    """Keep validation diagnostics useful without echoing model/source text."""
+    if isinstance(exc,SyntaxError):
+        return "Invalid Python syntax near line "+str(exc.lineno or 1)
+    reason=str(exc)
+    safe_reasons={
+        "Exact old text must occur once in the current source":
+            "An old edit snippet does not match the inspected source exactly once. "
+            "Prefer complete-file replacements using files [{path, content}].",
+        "Replacements must be distinct, nonempty, and bounded":
+            "An old/new replacement is empty, unchanged, or exceeds size limits.",
+        "No source modifications":
+            "The proposal did not modify any inspected file.",
+        "Each edit requires only path, old and new":
+            "Each exact edit needs only path, old, and new fields.",
+        "Expected 1–8 complete existing Python files":
+            "Provide a nonempty files list of at most eight files.",
+        "Each file requires path and content":
+            "Each complete-file entry must have path and content.",
+        "Duplicate complete-file replacement":
+            "Supply only one replacement for each path.",
+        "Complete source must be newline-terminated and under 6 KB":
+            "Whole-file content must be nonempty and under 6 KB.",
+        "Require between 1 and 12 exact source replacements":
+            "The final proposal needs 1–12 changed source replacements.",
+        "Edit path was not supplied to the model":
+            "Only inspected Python paths are permitted.",
+        "Final proposal requires only edits or patch":
+            "Use action=finish with files [{path, content}], edits, or patch.",
+    }
+    return safe_reasons.get(reason,"Candidate failed bounded source/patch validation.")
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self,req,fp,code,msg,headers,newurl):
         raise AgentToolError("Provider redirects not permitted")
@@ -165,8 +198,10 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                         if path in seen:
                             raise ValueError("Duplicate complete-file replacement")
                         seen.add(path)
-                        if not isinstance(content,str) or not content.endswith("\n") or len(content)>6000:
+                        if not isinstance(content,str) or not content or len(content)>6000:
                             raise ValueError("Complete source must be newline-terminated and under 6 KB")
+                        if not content.endswith("\n"):
+                            content+="\n"
                         ast.parse(content)
                         original=(root/path).read_text(encoding="utf-8")
                         if original==content:
@@ -196,15 +231,16 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             except (ValueError,TypeError,KeyError,SyntaxError) as exc:
                 # A malformed candidate is a recoverable model error, not a
                 # reason to spend the entire run on a new model process.
+                reason=_safe_candidate_feedback(exc)
                 trace.append({"step":index+1,"action":"finish_rejected",
-                              "error_type":type(exc).__name__})
+                              "error_type":type(exc).__name__,
+                              "reason":reason})
                 messages.append({"role":"assistant","content":content})
                 messages.append({"role":"user","content":
-                    "Your final candidate failed validation ("+
-                    type(exc).__name__+"). Return action=finish with files: "+
-                    "[{path, content}] containing COMPLETE corrected Python "+
-                    "source for every required file. Preserve imports, "+
-                    "functions, and indentation. No partial snippets."})
+                    "Fix this specific error: "+reason+" "+
+                    "Return action=finish with files: [{path, content}] "+
+                    "containing COMPLETE corrected Python source for EVERY "+
+                    "required file. Do not repeat the rejected candidate."})
                 continue
             missing_targets=sorted(required-set(targets))
             if missing_targets:
@@ -257,6 +293,12 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
         if action in {"preinspect","list","search","read",
                       "finish_deferred","finish_rejected"}:
             summary[action]=summary.get(action,0)+1
+    reasons={}
+    for entry in trace:
+        if entry.get("action")=="finish_rejected":
+            reason=entry.get("reason","unknown")
+            reasons[reason]=reasons.get(reason,0)+1
     raise AgentToolError(
         "Agent exhausted bounded model-tool calls without a valid patch; "
-        "action_counts="+json.dumps(summary,sort_keys=True))
+        "action_counts="+json.dumps(summary,sort_keys=True)+
+        "; rejection_reasons="+json.dumps(reasons,sort_keys=True)[:1100])
