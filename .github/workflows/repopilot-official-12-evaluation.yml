@@ -43,13 +43,14 @@ jobs:
       - name: Run all 12 pinned tasks using actual model-generated patches
         env:
           REPOPILOT_MODEL: qwen2.5-coder:3b
-          REPOPILOT_BASE_URL: http://127.0.0.1:11434/v2
-          REPOPILOT_MAX_TOKENS: '950'
+          REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
+          REPOPILOT_MAX_TOKENS: '1200'
         run: |
+          curl -fsS "${REPOPILOT_BASE_URL}/models" >/dev/null
           python -m repopilot.benchmark_batch \
             --manifest benchmarks/swebench-lite-12.json \
             --output .runs/swebench-batch \
-            --per-task-timeout 300 --max-steps 10
+            --per-task-timeout 300 --max-steps 12
       - id: count
         name: Summarize attempted and unsubmitted tasks without inventing scores
         if: always()
@@ -72,7 +73,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-12-model-attempts-v2-unscored
+          name: repopilot-12-model-attempts-v3-unscored
           path: repopilot/.runs/swebench-batch/
           if-no-files-found: warn
           retention-days: 30
@@ -95,7 +96,7 @@ jobs:
           python-version: '3.11'
       - uses: actions/download-artifact@v4
         with:
-          name: repopilot-12-model-attempts-v2-unscored
+          name: repopilot-12-model-attempts-v3-unscored
           path: repopilot/.runs/swebench-batch/
       - name: Install official SWE-bench harness
         run: python -m pip install 'swebench>=3.0,<5.0'
@@ -114,12 +115,12 @@ jobs:
             --predictions_path .runs/swebench-batch/predictions.jsonl \
             --instance_ids "${INSTANCES[@]}" \
             --max_workers 1 \
-            --run_id repopilot-12-qwen3b-v2
+            --run_id repopilot-12-qwen3b-v3
       - name: Upload authoritative official harness logs and reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-12-official-harness-v2
+          name: repopilot-12-official-harness-v3
           path: |
             repopilot/logs/evaluation/
             repopilot/*.json
