@@ -104,14 +104,39 @@ def _local_ollama_chat(url,model,messages,token_budget):
     request=urllib.request.Request(
         endpoint,data=body,method="POST",
         headers={"Content-Type":"application/json"})
+    # CPU-only model cold starts and transient Ollama failures can take
+    # longer than the first request. Retry the SAME read-only model call a
+    # bounded number of times; do not change provider/host or log prompt data.
+    # A candidate patch never enters the pipeline without normal validation.
+    retryable_http={408,429,500,502,503,504}
     try:
-        with urllib.request.build_opener(_NoRedirect()).open(
-                request,timeout=120) as response:
-            payload=response.read(1_000_001)
-    except urllib.error.HTTPError as exc:
-        raise AgentToolError("Local Ollama native API HTTP "+str(exc.code)) from exc
-    except (TimeoutError,socket.timeout,urllib.error.URLError) as exc:
-        raise AgentToolError("Local Ollama native chat failed or timed out") from exc
+        attempts=max(1,min(int(os.getenv("REPOPILOT_NATIVE_RETRIES","2")),3))
+        timeout=max(30,min(int(os.getenv("REPOPILOT_NATIVE_TIMEOUT","120")),240))
+    except ValueError as exc:
+        raise AgentToolError("Invalid bounded Ollama retry/timeout configuration") from exc
+    payload=None
+    for attempt in range(attempts):
+        try:
+            with urllib.request.build_opener(_NoRedirect()).open(
+                    request,timeout=timeout) as response:
+                payload=response.read(1_000_001)
+            break
+        except urllib.error.HTTPError as exc:
+            category="HTTP "+str(exc.code)
+            retry=exc.code in retryable_http
+        except (TimeoutError,socket.timeout) as exc:
+            category="timeout"
+            retry=True
+        except urllib.error.URLError as exc:
+            category="connection failure"
+            retry=True
+        if not retry or attempt==attempts-1:
+            raise AgentToolError(
+                "Local Ollama native API "+category+
+                " after "+str(attempt+1)+" attempt(s)")
+        time.sleep(2)
+    if payload is None:
+        raise AgentToolError("Local Ollama native API returned no response")
     if len(payload)>1_000_000:
         raise AgentToolError("Local Ollama native response exceeded size limit")
     try:
