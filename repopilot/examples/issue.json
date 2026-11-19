@@ -1,0 +1,16 @@
+{
+  "issue_id": "LOCAL-001",
+  "summary": "Division by zero should raise ZeroDivisionError",
+  "test_path": "tests/test_reproduction.py",
+  "reproduction_test": "import unittest\nfrom calculator import divide\n\nclass TestZeroDivision(unittest.TestCase):\n    def test_zero_division(self):\n        with self.assertRaises(ZeroDivisionError):\n            divide(12, 0)\n",
+  "patch": "diff --git a/calculator.py b/calculator.py\n--- a/calculator.py\n+++ b/calculator.py\n@@ -1,4 +1,4 @@\n def divide(a, b):\n     if b == 0:\n-        return 0  # BUG: should raise ZeroDivisionError\n+        raise ZeroDivisionError\n     return a / b\n",
+  "test_command": [
+    "python",
+    "-m",
+    "unittest",
+    "discover",
+    "-s",
+    "tests",
+    "-v"
+  ]
+}
