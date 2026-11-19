@@ -6,6 +6,10 @@ on:
       - '.github/workflows/repopilot-official-12-evaluation.yml'
   workflow_dispatch:
 
+concurrency:
+  group: repopilot-official-swebench-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -78,7 +82,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-12-model-attempts-v4-unscored
+          name: repopilot-12-model-attempts-v5-unscored
           path: repopilot/.runs/swebench-batch/
           if-no-files-found: warn
           retention-days: 30
@@ -101,31 +105,42 @@ jobs:
           python-version: '3.11'
       - uses: actions/download-artifact@v4
         with:
-          name: repopilot-12-model-attempts-v4-unscored
+          name: repopilot-12-model-attempts-v5-unscored
           path: repopilot/.runs/swebench-batch/
       - name: Install official SWE-bench harness
         run: python -m pip install 'swebench>=3.0,<5.0'
       - name: Evaluate actual predictions for the pinned 12 instances
         run: |
+          # Evaluate only actual model-submitted predictions. Other pinned
+          # tasks remain explicitly unsubmitted and must never be counted as
+          # officially resolved, unresolved, or evaluated.
           mapfile -t INSTANCES < <(python - <<'PY'
           import json
-          for task in json.load(open('benchmarks/swebench-lite-12.json'))['tasks']:
-              print(task['instance_id'])
+          from pathlib import Path
+          selected={x['instance_id'] for x in json.loads(
+              Path('benchmarks/swebench-lite-12.json').read_text())['tasks']}
+          rows=[json.loads(line) for line in Path(
+              '.runs/swebench-batch/predictions.jsonl').read_text().splitlines()
+              if line.strip()]
+          ids=[row['instance_id'] for row in rows]
+          assert ids and len(ids)==len(set(ids)) and set(ids)<=selected
+          for instance in ids:
+              print(instance)
           PY
           )
-          test "${#INSTANCES[@]}" -eq 12
+          test "${#INSTANCES[@]}" -gt 0
           python -m swebench.harness.run_evaluation \
             --dataset_name princeton-nlp/SWE-bench_Lite \
             --split test \
             --predictions_path .runs/swebench-batch/predictions.jsonl \
             --instance_ids "${INSTANCES[@]}" \
             --max_workers 1 \
-            --run_id repopilot-12-qwen3b-v4
+            --run_id repopilot-12-qwen3b-v5
       - name: Upload authoritative official harness logs and reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-12-official-harness-v4
+          name: repopilot-12-official-harness-v5
           path: |
             repopilot/logs/evaluation/
             repopilot/*.json
