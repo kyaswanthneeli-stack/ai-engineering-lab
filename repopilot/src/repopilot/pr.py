@@ -15,6 +15,7 @@ from urllib.parse import quote
 from .spec import IssueSpec
 from .patches import validate_patch, apply_patch
 from .review import review_proposal
+from .integrity import proposal_digest
 
 class PublishError(ValueError):
     pass
@@ -63,6 +64,8 @@ def publish_approved_draft(repo:Path,spec:IssueSpec,verification:dict,remote:str
         raise PublishError("Verified fail-before/pass-after evidence required")
     if verification.get("issue_id")!=spec.issue_id:
         raise PublishError("Issue mismatch")
+    if verification.get("proposal_sha256")!=proposal_digest(spec):
+        raise PublishError("Verification report does not match exact proposed patch and test")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+",remote):
         raise PublishError("Invalid remote")
     if not spec.issue_id.startswith(remote+"#"):
