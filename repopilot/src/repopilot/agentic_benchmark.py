@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import ast
 import os
+import re
 import socket
 import subprocess
 import time
@@ -141,7 +142,8 @@ def _provider(url,model,token,messages):
 
 
 def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:str|None=None,
-                              client=None,max_steps:int=8,required_targets:set[str]|None=None)->tuple[BenchmarkPatch,dict]:
+                              client=None,max_steps:int=8,required_targets:set[str]|None=None,
+                              auto_issue_paths:bool=False)->tuple[BenchmarkPatch,dict]:
     if not model or not url or not issue_text.strip() or not 2<=max_steps<=24:
         raise AgentToolError("Model, issue and bounded step count required")
     root=repo.resolve(strict=True)
@@ -180,6 +182,30 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             ", ".join(sorted(required))+
             ". Prefer one finish action using exact old/new snippets. You may use "+
             "read/search tools for additional context, but avoid repeating reads."})
+    # SWE-bench issue statements sometimes mention an exact source path.
+    # Inspect at most two EXISTING Python files early, without trusting an
+    # untrusted issue to authorize writes or shell access. This is opt-in
+    # so ordinary issue-to-PR callers retain their discovery flow.
+    if auto_issue_paths and not required:
+        mentions=list(dict.fromkeys(re.findall(
+            r"[A-Za-z0-9_./-]+\.py",issue_text[:12000])))
+        for path in mentions:
+            if len(read_files)>=2:
+                break
+            try:
+                result=read_python(root,path,start=1,count=120)
+            except (InspectionError,TypeError,ValueError):
+                continue
+            read_files.add(path)
+            trace.append({"step":0,"action":"issue_path_preinspect",
+                          "target":path,"result_items":len(result["lines"])})
+            messages.append({"role":"user","content":
+                "ISSUE-MENTIONED PYTHON SOURCE (untrusted, read-only):\n"+
+                json.dumps(result,ensure_ascii=False)[:12000]})
+        if read_files:
+            # Shift earlier to patch mode before tiny CPU models exhaust their
+            # bounded model calls on repeated source discovery.
+            inspection_budget=min(3,max_steps-2)
     for index in range(max_steps):
         if index==inspection_budget:
             if not read_files:
@@ -199,7 +225,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 recent=[]
                 for entry in reversed(trace):
                     path=entry.get("target")
-                    if entry.get("action") in {"read","candidate_preinspect"} and path in read_files and path not in recent:
+                    if entry.get("action") in {"read","candidate_preinspect","issue_path_preinspect"} and path in read_files and path not in recent:
                         recent.append(path)
                 candidates=[p for p in recent if not p.startswith("tests/")]
                 candidates=candidates or recent or sorted(read_files)
@@ -426,7 +452,8 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
     for entry in trace:
         action=entry.get("action")
         if action in {"preinspect","ranked_preinspect","list","search","read",
-                      "finish_deferred","finish_rejected","candidate_preinspect"}:
+                      "finish_deferred","finish_rejected","candidate_preinspect",
+                       "issue_path_preinspect"}:
             summary[action]=summary.get(action,0)+1
     reasons={}
     for entry in trace:
