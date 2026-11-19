@@ -514,6 +514,13 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 # Never interpret such output as an authorized source edit.
                 trace.append({"step":index+1,"action":"finish_schema_rejected",
                               "error_type":"InvalidFinishSchema"})
+                # The forced final-phase prompt resets conversation history.
+                # Persist the safe schema diagnostic so the next model call
+                # still receives feedback after that reset.
+                last_candidate_reason=("Your previous finish response had unsupported "
+                    "fields. Respond with exactly {action:finish,edits:[{path,old,new}]}, "
+                    "{action:finish,files:[{path,content}]}, or "
+                    "{action:finish,patch:unified_diff}; no other keys.")
                 if index==max_steps-1:
                     raise AgentToolError("Invalid finish schema after step budget")
                 messages.append({"role":"user","content":
