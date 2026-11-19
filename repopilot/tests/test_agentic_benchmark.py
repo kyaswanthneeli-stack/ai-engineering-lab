@@ -307,9 +307,26 @@ class AgentTests(unittest.TestCase):
             {"action":"read","path":"pricing.py"},
             {"action":"finish","edits":[{"path":"checkout.py","old":"return subtotal(values)","new":"return 4"}]}
         ]
-        with self.assertRaises(ValueError):
+        with self.assertRaises(AgentToolError):
             propose_agentic_benchmark(self.repo,"fix","mock","http://127.0.0.1:11434/v1",
-                                     client=self.sequence(steps))
+                                     client=self.sequence(steps),max_steps=2)
+
+    def test_uninspected_target_is_rejected_then_corrected(self):
+        steps=[
+            {"action":"read","path":"pricing.py"},
+            {"action":"finish","edits":[
+                {"path":"checkout.py","old":"return subtotal(values)","new":"return 4"}]},
+            {"action":"finish","edits":[
+                {"path":"pricing.py","old":"return sum(values)",
+                 "new":"return round(sum(values),2)"}]}
+        ]
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"correct subtotal","mock","http://127.0.0.1:11434/v1",
+            client=self.sequence(steps),max_steps=4)
+        self.assertIn("round(sum(values),2)",patch.patch)
+        self.assertTrue(any(
+            step.get("error_type")=="UninspectedPatchTarget"
+            for step in meta["tool_trace"]))
     def test_forbids_model_shell_access(self):
         with self.assertRaises(AgentToolError):
             propose_agentic_benchmark(self.repo,"fix","mock","http://127.0.0.1:11434/v1",
