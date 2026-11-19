@@ -2,6 +2,21 @@
 
 RepoPilot is an independent Python engineering project exploring issue-to-patch automation. The source is inspectable, with explicit trust boundaries and tests.
 
+## Current implementation status (verify before citing)
+
+| Capability | Current implementation | Publicly demonstrated |
+|---|---|---|
+| Python AST indexing | Built | Yes, GitHub Actions |
+| Model proposal over OpenAI-compatible API | Built | Mocked transport only; no real LLM solution claimed |
+| Public GitHub issue retrieval | Built | Unit tested with mock HTTP |
+| Issue → proposal → restricted Docker verification | Built | Pipeline tested with mocks; **reference-patch** Docker run verified |
+| Offline dashboard and execution-event report | Built | CI-generated HTML artifact from reference fixture |
+| Approval-gated draft PR via GitHub API | Built | Mock/security tests; **no real PR published** |
+| 12 public SWE-bench Lite task selection | Built | Selector unit-tested; live dataset not fetched in CI |
+| SWE-bench model issue resolution rate | Not measured | **None** |
+
+[Open the recruiter-facing explanation](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/) · [View CI and downloadable run artifacts](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/workflows/repopilot.yml)
+
 ## Current scope
 
 - Parses local Python repositories with `ast`, without importing target code.
@@ -29,7 +44,24 @@ python -m repopilot.cli propose examples/calculator examples/issue.txt --output 
 # Review generated proposal and patch first.
 docker pull python:3.12-alpine
 python -m repopilot.cli verify examples/calculator examples/issue.json --output .runs/verification.json
-# To test a model-generated proposal, substitute .runs/proposal.json after reviewing it.
+python -m repopilot.cli dashboard .runs/verification.json --output .runs/dashboard.html
+python -m repopilot.cli benchmark .runs/verification.json --dataset "reference-patch fixture"
+
+# When Ollama is running locally and the desired model is already downloaded:
+# ollama list
+# export REPOPILOT_BASE_URL=http://127.0.0.1:11434/v1
+# export REPOPILOT_MODEL=<installed-model-name>
+# Run against a public issue URL that applies to the exact local repository version:
+# python -m repopilot.cli run /path/to/local/repository https://github.com/OWNER/REPO/issues/NUMBER --output .runs/issue-001
+
+# Optional: draft PR only AFTER personally inspecting proposal, Docker evidence,
+# changed files and confirming the issue matches the target repo.
+# export GITHUB_TOKEN=<fine-grained-token-with-contents-and-PR-write-permissions>
+# python -m repopilot.cli draft-pr /path/to/local/repository .runs/issue-001/proposal.json .runs/issue-001/run.json --remote OWNER/REPO --approve I_APPROVE_DRAFT_PR
+
+# Select reproducibly: 12 public SWE-bench Lite tasks. This does NOT run them.
+# python -m pip install datasets
+# python -m repopilot.cli select-swebench --limit 12 --seed 73 --output .runs/swebench-manifest.json
 ```
 
 For remote providers, set `REPOPILOT_BASE_URL`, `REPOPILOT_MODEL`, and `REPOPILOT_API_KEY` via environment variables. Never commit keys. **Only connect to trusted model endpoints**.
@@ -38,6 +70,20 @@ For remote providers, set `REPOPILOT_BASE_URL`, `REPOPILOT_MODEL`, and `REPOPILO
 
 Repository data and issue text are untrusted. Generated patches are never automatically approved. Docker provides defense in depth, not hardened hostile-code isolation. Run verification only on disposable worker machines, without host credentials or Docker socket mounts. Network is disabled within the container; image is pre-pulled. Container timeouts may require manual worker disposal if daemon cleanup fails.
 
-No automatic repository cloning, PR creation, GitHub issue retrieval, SWE-bench result, token-saving percentage, or live model resolution rate is claimed.
+There is **no automatic repository cloning**. GitHub issues can be read via the public REST API. Draft PR publication is implemented behind explicit review and approval, but has **not** been exercised against a real remote repository. Neither a SWE-bench resolution score nor model-derived cost or token savings are claimed.
+
+## Benchmark policy
+
+The official [SWE-bench Lite](https://github.com/SWE-bench/SWE-bench) dataset has 300 issue/patch pairs. Its official evaluation harness requires task-specific environments and regression tests; passing RepoPilot's tiny calculator fixture does not mean a SWE-bench instance is resolved.
+
+Select 12 tasks with `select-swebench`, run actual model-generated patches against their pinned base revisions, evaluate with [official SWE-bench tooling](https://github.com/SWE-bench/SWE-bench/blob/main/docs/guides/evaluation.md), and publish every attempted task, including failures. The reporting module distinguishes reference fixtures and model-generated attempts. **No benchmark score is available yet.**
+
+## Human reviewer checklist
+
+Before publishing a draft PR, verify the GitHub issue, compare the exact local source with its remote revision, inspect the proposed diff for unrelated changes or secrets, review the test's intent, and confirm the restricted container and CI output. The explicit `I_APPROVE_DRAFT_PR` parameter is a final safeguard, not a substitute for review.
+
+## Recruiter demo
+
+GitHub Actions produces an artifact named `repopilot-verification-fixture` containing an offline HTML dashboard, verification JSON and an explicitly labeled reference-fixture benchmark report. A real model response or PR appears only after an independently verifiable run.
 
 This project is deliberately distinct from the existing portfolio's browser simulations. Real provider inference, Docker verification, and issue benchmarks must be demonstrated and measured before being advertised as completed features.
