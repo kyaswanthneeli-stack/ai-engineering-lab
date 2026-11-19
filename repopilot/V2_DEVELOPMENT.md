@@ -14,7 +14,7 @@ Make RepoPilot more reliable for real Python projects and larger source trees wh
 | 2. Large-repository selection | Filename-token candidate selection beyond the initial AST parse cap; safely prune generated and symlink directories | CI tests for nested sources after 100+ earlier files and strict 20,000-file metadata cap | Filename discovery implemented and CI passed; import-relationship context pending |
 | 3. Agent reliability | Reject repeat invalid patch proposals without redundant validation while permitting resubmission after legitimate new source inspection | CI tests for invalid-repeat rejection and proposals becoming valid after inspection, plus one live local-model smoke test | Duplicate-invalid suppression and real-model calculator smoke passed; impact on real SWE-bench success unmeasured |
 | 4. Verification and review | Generate additional reproduction tests with clear provenance and evaluate candidate patches in restricted disposable environments | Baseline/reproduction/patched evidence, source-only patch allowlist, reviewer approval | Planned |
-| 5. Official benchmark comparison | Rerun pinned real SWE-bench tasks against the exact same cohort and publish per-task results | Real model predictions, official SWE-bench evaluator reports, errors/timeouts, and both evaluated-patch and selected-cohort denominators | Planned |
+| 5. Official benchmark comparison | Run the same pinned SWE-bench cohort and compare genuine official outcomes on overlapping evaluated instances | Two-task pilot and full 12-task runs with actual model patches; real evaluator reports; strict per-instance comparison before claiming improved resolution | Comparator and safe subset runner implemented/tested. Both real benchmark runs in progress; official v2 result pending |
 | 6. v2.0 release | Produce a new versioned package, public demo, release notes, security/limitations statement | Green CI, Docker checks, actual benchmark result, wheel and source distribution | Planned |
 
 ## First implementation: issue-centered bounded source windows
@@ -42,6 +42,12 @@ The model-agent retry loop now hashes a candidate's canonical JSON internally **
 The [v2 Qwen2.5-Coder 1.5B smoke workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44572068161) **completed successfully**. The agent inspected `calculator.py`, produced its own patch in one model action, and independently verified the patch with restricted Docker baseline/failing-reproduction/patched tests. The GitHub Actions report recorded `model_generated=true`, `verified_in_docker=true`, and `outcome=model_patch_verified`.
 
 This is a **synthetic calculator integration test**, not official SWE-bench evaluation. It does not establish success on large real-world repositories; an independent v2 benchmark comparison remains outstanding.
+
+## Official benchmark development experiments
+
+- [Two-task pilot](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44573511295) uses the unchanged original 12-task manifest and the `--instance-ids` subset option; missing patch predictions must remain **unscored**, and official harness execution is conditional on real predictions.
+- [Full 12-task run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44573386221) also started from a batch-runner source update. Neither run's final official outcome was known when this development note was written.
+- `repopilot.benchmark_compare` validates both original official score files and submitted prediction JSONL, then only calculates deltas for instance IDs evaluated by the independent harness in **both** runs. It never treats local Docker verification or an unsubmitted patch as resolved.
 
 ## Engineering practice
 
