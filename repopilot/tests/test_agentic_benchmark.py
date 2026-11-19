@@ -193,6 +193,86 @@ class AgentTests(unittest.TestCase):
             "http://127.0.0.1:11434/v1","mock",[],512)
         self.assertEqual(response["choices"][0]["message"]["content"],"{}")
 
+    def test_native_ollama_stream_assembles_valid_json_tool_action(self):
+        class Response:
+            def __init__(self):
+                self.lines=iter([
+                    b'{"message":{"content":"{\\"action\\":"},"done":false}\n',
+                    b'{"message":{"content":"\\"list\\",\\"prefix\\":\\"\\"}"},"done":false}\n',
+                    b'{"message":{"content":""},"done":true,"prompt_eval_count":9,"eval_count":7}\n'])
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def readline(self,n): return next(self.lines,b"")
+        class Opener:
+            def __init__(self): self.body=None;self.calls=0
+            def open(self,request,**kwargs):
+                self.calls+=1
+                self.body=json.loads(request.data)
+                self.assert_local(request)
+                return Response()
+            def assert_local(self,request):
+                assert request.full_url=="http://127.0.0.1:11434/api/chat"
+        opener=Opener()
+        with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1",
+                                     "REPOPILOT_OLLAMA_STREAM":"1"}),patch(
+             "repopilot.agentic_benchmark.urllib.request.build_opener",
+             return_value=opener):
+            result=_provider("http://127.0.0.1:11434/v1","qwen-test",None,
+                             [{"role":"user","content":"safe-input"}])
+        self.assertEqual(opener.calls,1)
+        self.assertTrue(opener.body["stream"])
+        self.assertEqual(opener.body["format"],"json")
+        self.assertEqual(result["choices"][0]["message"]["content"],
+                         '{"action":"list","prefix":""}')
+        self.assertEqual(result["usage"]["completion_tokens"],7)
+
+    def test_native_stream_incomplete_response_must_not_return_patch(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def readline(self,n):
+                if not hasattr(self,"once"):
+                    self.once=True
+                    return b'{"message":{"content":"{\\"action\\":\\"finish\\"}"},"done":false}\n'
+                return b""
+        class Opener:
+            def open(self,*args,**kwargs): return Response()
+        with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1",
+                                     "REPOPILOT_OLLAMA_STREAM":"1",
+                                     "REPOPILOT_NATIVE_RETRIES":"1"}),patch(
+             "repopilot.agentic_benchmark.urllib.request.build_opener",
+             return_value=Opener()):
+            with self.assertRaisesRegex(AgentToolError,"ended before final"):
+                _provider("http://127.0.0.1:11434/v1","model",None,[])
+                
+    def test_native_stream_truncated_or_invalid_events_are_rejected(self):
+        class Response:
+            def __init__(self,line): self.line=line
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def readline(self,n):
+                if self.line is None:return b""
+                line=self.line
+                self.line=None
+                return line
+        class Opener:
+            def __init__(self,line):self.line=line
+            def open(self,*args,**kwargs):return Response(self.line)
+        for line,expected in [
+            (b'not valid JSON\n',"invalid JSON"),
+            (b'{"error":"untrusted source text","done":true}\n',"model error"),
+            (b'{"message":{"content":"{}"},"done":true}' + b' '*65550 + b'\n',
+             "size limit")]:
+            with self.subTest(expected=expected),patch.dict(
+                 "os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1",
+                               "REPOPILOT_OLLAMA_STREAM":"1",
+                               "REPOPILOT_NATIVE_RETRIES":"1"}),patch(
+                 "repopilot.agentic_benchmark.urllib.request.build_opener",
+                 return_value=Opener(line)):
+                with self.assertRaisesRegex(AgentToolError,expected) as exc:
+                    _provider("http://127.0.0.1:11434/v1","model",None,[])
+                self.assertNotIn("untrusted source text",str(exc.exception))
+
     def test_native_ollama_timeout_retries_then_valid_response(self):
         class Response:
             def __enter__(self): return self
