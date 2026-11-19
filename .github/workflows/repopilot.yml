@@ -29,10 +29,12 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Index sample
         run: python -m repopilot.cli index examples/calculator
+      - name: Test current sample application
+        run: cd examples/calculator && python -m unittest discover -s tests -v
       - name: Prepare pinned Docker test image
         run: docker pull python:3.12-alpine
       - name: Verify sample issue in restricted Docker container
-        run: python -m repopilot.cli verify examples/calculator examples/issue.json --output .runs/sample-verification.json
+        run: python -m repopilot.cli verify fixtures/calculator-buggy examples/issue.json --output .runs/sample-verification.json
       - name: Inspect reproduction evidence
         run: |
           python - <<'PY'
