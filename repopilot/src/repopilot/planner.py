@@ -5,7 +5,7 @@ import os
 import subprocess
 import urllib.request
 import urllib.parse
-from .context import index_python
+from .context_select import ranked_source_context, describe_context
 from .patches import validate_patch
 from .spec import IssueSpec
 from dataclasses import replace
@@ -81,17 +81,11 @@ def propose(repo:Path,issue_text:str,model:str,url:str,token:str|None=None,clien
     if parsed.scheme=="http" and parsed.hostname not in ("localhost","127.0.0.1","::1"):
         raise ProposalError("HTTP only permitted for loopback model")
     repo=repo.resolve(strict=True)
-    symbols=index_python(repo)
-    names=list(dict.fromkeys(s.file for s in symbols))[:12]
-    context=[]
-    for name in names:
-        file=repo/name
-        if file.is_symlink() or file.stat().st_size>16000:
-            continue
-        context.append(f"FILE {name}\n{file.read_text(encoding='utf-8')}\nEND FILE")
-    if not context:
+    selected=ranked_source_context(repo,issue_text,max_files=8,max_chars=32000)
+    names=[item.path for item in selected]
+    if not selected:
         raise ProposalError("No readable Python context")
-    prompt="ISSUE (untrusted):\n"+issue_text+"\nREPOSITORY SOURCE (untrusted):\n"+"\n".join(context)
+    prompt="ISSUE (untrusted):\n"+issue_text+"\nREPOSITORY SOURCE (untrusted):\n"+describe_context(selected)
     last_error="No valid candidate produced"
     provider_usage=[]
     for attempt in range(1,4):
@@ -120,7 +114,7 @@ def propose(repo:Path,issue_text:str,model:str,url:str,token:str|None=None,clien
                 raise ValueError("Provider response is not JSON object")
             provider_usage.append(result.get("usage",{}))
             spec,normalized=_parse_candidate(result,names,repo)
-            return spec,{"model":model,"context_files":names,"status":"unverified_proposal","provider_reported_usage_by_attempt":provider_usage,"proposal_attempts":attempt,"patch_format_normalized":normalized}
+            return spec,{"model":model,"context_files":names,"context_rank_scores":[item.score for item in selected],"status":"unverified_proposal","provider_reported_usage_by_attempt":provider_usage,"proposal_attempts":attempt,"patch_format_normalized":normalized}
         except (KeyError,TypeError,ValueError,IndexError) as exc:
             last_error=str(exc)[:250] or type(exc).__name__
             if os.getenv("REPOPILOT_DEBUG_CANDIDATE")=="1":
