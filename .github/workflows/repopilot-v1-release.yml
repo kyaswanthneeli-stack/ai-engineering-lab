@@ -1,0 +1,113 @@
+name: RepoPilot v1.0.0 release (verified)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/repopilot-v1-release.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repopilot-v1-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'kyaswanthneeli-stack/ai-engineering-lab' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: bash
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install package, test tools and release builder
+        run: |
+          python -m pip install -e .
+          python -m pip install 'coverage>=7,<9' 'build>=1,<3'
+      - name: Validate exact v1 package version and official SWE-bench evidence
+        run: |
+          python - <<'PY'
+          from importlib.metadata import version
+          from pathlib import Path
+          from repopilot.swebench_results import official_summary
+          assert version("repopilot") == "1.0.0"
+          b=Path("benchmarks")
+          summary=official_summary(
+              b/"swebench-lite-12.json",
+              b/"official-score-2026-11-19.json",
+              b/"official-predictions-2026-11-19.jsonl")
+          assert (summary["selected"],summary["submitted"],summary["evaluated"],
+                  summary["resolved"],summary["unresolved"],summary["error"]) == (12,6,6,1,5,0)
+          assert (b/"SYMPY_14774_CASE_STUDY.md").is_file()
+          assert Path("RELEASE_NOTES_v1.0.0.md").is_file()
+          print("Verified v1.0.0, 12 selected, 6 evaluated, exactly 1 resolved")
+          PY
+      - name: Run full Python test suite with coverage
+        run: |
+          python -m compileall -q src/repopilot tests
+          python -m coverage run --source=repopilot -m unittest discover -s tests -v
+          python -m coverage report --show-missing
+      - name: Run reference fixture and merged invoice checks in restricted Docker
+        run: |
+          docker pull python:3.12-alpine
+          mkdir -p .runs
+          python -m repopilot.cli verify fixtures/calculator-buggy examples/issue.json \
+            --output .runs/release-reference-verification.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path(".runs/release-reference-verification.json").read_text())
+          assert r["outcome"] == "verified_in_sandbox"
+          assert r["before"]["exit_code"] != 0 and r["after"]["exit_code"] == 0
+          print("Reference fixture baseline/reproduction/patched verification passed")
+          PY
+          cd fixtures/invoice-multifile
+          python -m unittest discover -s tests -v
+      - name: Build wheel and source package
+        run: |
+          python -m build --wheel --sdist --outdir dist .
+          python - <<'PY'
+          from pathlib import Path
+          wheels=list(Path("dist").glob("repopilot-1.0.0-*.whl"))
+          sdists=list(Path("dist").glob("repopilot-1.0.0.tar.gz"))
+          assert len(wheels)==1 and len(sdists)==1, "Missing expected release artifacts"
+          print("Built:",wheels[0],sdists[0])
+          PY
+      - name: Archive verification evidence and distribution files
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-v1.0.0-release-verification
+          path: |
+            repopilot/dist/
+            repopilot/.runs/release-reference-verification.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish GitHub v1.0.0 release only after all gates pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v1.0.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::v1.0.0 is already published: refusing to replace release artifacts"
+            exit 1
+          fi
+          if git ls-remote --tags "https://github.com/$GITHUB_REPOSITORY.git" 'refs/tags/v1.0.0' | grep -q .; then
+            echo "::error::v1.0.0 tag exists: refusing to overwrite the tag"
+            exit 1
+          fi
+          gh release create v1.0.0 dist/repopilot-1.0.0-*.whl dist/repopilot-1.0.0.tar.gz \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "RepoPilot v1.0.0 — Evidence-first AI Coding Agent" \
+            --notes-file RELEASE_NOTES_v1.0.0.md
+          gh release view v1.0.0 --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,isPrerelease,url
