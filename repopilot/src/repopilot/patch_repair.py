@@ -29,29 +29,39 @@ def reconstruct_single_hunk(repo:Path,patch:str)->str:
     if target.stat().st_size>200_000:
         raise PatchRepairError("Target exceeds patch-repair size limit")
     changed=lines[hunks[0]+1:]
-    removed=[]
-    inserted=[]
+    old_span=[]
+    new_span=[]
+    removed=0
+    inserted=0
     for line in changed:
         if line.startswith("-"):
-            removed.append(line[1:])
+            old_span.append(line[1:])
+            removed+=1
         elif line.startswith("+"):
-            inserted.append(line[1:])
-        elif line.startswith(" ") or line.startswith("\\ No newline at end of file"):
-            continue
+            new_span.append(line[1:])
+            inserted+=1
+        elif line.startswith(" "):
+            # Context is part of both spans. It must match the original
+            # exactly, not be silently discarded during normalization.
+            old_span.append(line[1:])
+            new_span.append(line[1:])
+        elif line=="\\\\ No newline at end of file":
+            raise PatchRepairError("Non-newline-terminated hunks are unsupported")
         else:
             raise PatchRepairError("Unrecognized diff hunk line")
-    if not removed or not inserted or len(removed)>35 or len(inserted)>35:
-        raise PatchRepairError("A bounded replacement block is required")
+    if not removed or not inserted or len(old_span)>100 or len(new_span)>100:
+        raise PatchRepairError("A bounded replacement hunk is required")
     source=target.read_text(encoding="utf-8")
     if not source.endswith("\n"):
         raise PatchRepairError("Only newline-terminated Python source supported")
     original=source.splitlines(keepends=True)
     stripped=[line.rstrip("\r\n") for line in original]
-    matches=[i for i in range(len(stripped)-len(removed)+1) if stripped[i:i+len(removed)]==removed]
+    matches=[i for i in range(len(stripped)-len(old_span)+1)
+             if stripped[i:i+len(old_span)]==old_span]
     if len(matches)!=1:
-        raise PatchRepairError("Model-deleted lines must match exactly once in source")
+        raise PatchRepairError("Entire old hunk including context must match exactly once")
     at=matches[0]
-    result=original[:at]+[line+"\n" for line in inserted]+original[at+len(removed):]
+    result=original[:at]+[line+"\n" for line in new_span]+original[at+len(old_span):]
     if result==original:
         raise PatchRepairError("Patch made no change")
     unified="".join(difflib.unified_diff(original,result,fromfile="a/"+name,tofile="b/"+name))
