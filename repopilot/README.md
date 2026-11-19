@@ -20,6 +20,7 @@ Python 3.11+ and Docker are required for the full workflow.
 
 ```sh
 cd repopilot
+python -m pip install -e .
 python -m unittest discover -s tests -v
 python -m repopilot.cli index examples/calculator
 export REPOPILOT_BASE_URL=http://127.0.0.1:11434/v1
