@@ -49,7 +49,7 @@ jobs:
           from repopilot.pr import patch_targets
           from repopilot.review import review_proposal
           repo=Path('fixtures/invoice-multifile')
-          run=Path('.runs/agentic-invoice-issue3-v2')
+          run=Path('.runs/agentic-invoice-issue3-v3')
           run.mkdir(parents=True,exist_ok=False)
           report={'model':'qwen2.5-coder:3b','model_generated':False,
                   'verified':False,'issue':'https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/3',
@@ -58,7 +58,8 @@ jobs:
               issue=fetch_public_issue(report['issue'])
               proposal,meta=propose_agentic_benchmark(
                   repo, issue['text'], os.environ['REPOPILOT_MODEL'],
-                  os.environ['REPOPILOT_BASE_URL'],max_steps=10,\n                  required_targets={'pricing.py','checkout.py'})
+                  os.environ['REPOPILOT_BASE_URL'],max_steps=10,
+                  required_targets={'pricing.py','checkout.py'})
               report['model_generated']=True
               report['agent_steps']=meta['agent_steps']
               report['tool_trace']=meta['tool_trace']
@@ -91,8 +92,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-agentic-multifile-attempt-v2
-          path: repopilot/.runs/agentic-invoice-issue3-v2/
+          name: repopilot-agentic-multifile-attempt-v3
+          path: repopilot/.runs/agentic-invoice-issue3-v3/
           if-no-files-found: warn
           retention-days: 30
       - name: Stop model
