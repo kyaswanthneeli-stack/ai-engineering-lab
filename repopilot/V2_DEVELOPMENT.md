@@ -100,6 +100,16 @@ The targeted-selection option is available with `--retry-from` and `--instance-i
 
 **Status when documented:** model generation/evaluation still underway; no official additional resolution claimed.
 
+## Faster CPU-inference experiment on previously unsubmitted cases
+
+The [full 12-task official SWE-bench run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44580636292) completed with **4 actual model-generated predictions, 1 officially resolved, 3 officially unresolved, zero evaluator errors, and 8 unsubmitted tasks**. The selected-task denominator remains **12**; this does **not** demonstrate more resolved cases than v1. The [targeted 3B retry](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44599735460) produced one new officially evaluated **unresolved** patch and one provider failure. It therefore does not increase the confirmed solved count.
+
+To test the cause of missing submissions without buying API credits or altering reference solutions, an isolated [small-model fallback workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44612051924) now tests two previously timed-out pinned issues (`pytest-dev__pytest-11148`, `sympy__sympy-13773`) with **Qwen2.5-Coder 1.5B**, an opt-in **3,000-character inference issue budget**, bounded model steps, and the same guarded source editing. Both tasks are selected strictly from the original completed 12-task failure archive using `--retry-from`; the existing dataset, pinned commits, and prior benchmark evidence remain unchanged.
+
+The `REPOPILOT_ISSUE_CONTEXT_CHARS` option is validated in `2000..12000`, defaults to the prior **6,500** characters, and preserves the start and end of long issue statements. It only changes the model input during an explicitly configured experiment; it never edits the official benchmark rows or generates reference patches. Regression tests verify retained reproduction evidence and invalid-budget rejection.
+
+The fallback experiment saves model-generated predictions and all missing attempts separately, and conditionally invokes the official SWE-bench harness only for actual model patches. **A run with zero patches or zero officially resolved issues must not be called a successful resolution**. The small-model run is a separate cohort-specific trial, not an official leaderboard score. At documentation time its outcome was pending; consult its actual GitHub Actions artifact before recording results.
+
 ## Engineering practice
 
 Keep v1.0.0 at [its immutable release](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v1.0.0). Use a separate v2 feature branch and an open review PR. Every milestone must have tests and evidence before being merged. Do not overwrite or reinterpret the original benchmark artifacts.
