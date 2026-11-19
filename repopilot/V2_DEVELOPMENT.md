@@ -73,6 +73,23 @@ Follow-up improvements include AST/traceback-centered reads for **issue-mentione
 
 A separate [12-task Qwen3B native-Ollama official run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44595055900) was started from the updated code. Its outcome must not be assumed before the independent official evaluator finishes. A separate [Pytest-only attempt](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44593908576) tests the changed deep-source inspection and recovery prompting. Neither is evidence of additional solved cases until actual scoring confirms it.
 
+## Efficient follow-up on missing benchmark predictions
+
+The v2 batch runner now preserves an **unscored failure breakdown** in its `summary.json`, including the number of task timeouts, provider transport failures, and model/patch validation failures. These are *attempt diagnostics*, not SWE-bench correctness scores.
+
+After a previous batch has finished, re-run **only failed/unsubmitted tasks** from its original pinned manifest:
+
+```bash
+cd repopilot
+python -m repopilot.benchmark_batch \
+  --manifest benchmarks/swebench-lite-12.json \
+  --retry-from .runs/previous-batch/summary.json \
+  --output .runs/retry-only-batch \
+  --per-task-timeout 420 --max-steps 10
+```
+
+The runner verifies that the previous summary belongs to the full pinned manifest, has unique selected task IDs, internally consistent prediction counts, and was **not** already presented as an official evaluation. Existing submitted model patches are never silently regenerated. If no retryable failure exists, it refuses to start a run. The new batch has separate immutable evidence and remains officially **unscored** until evaluated by the real harness. Never mix predictions from separate runs without explicit per-task provenance and official evaluator confirmation.
+
 ## Engineering practice
 
 Keep v1.0.0 at [its immutable release](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v1.0.0). Use a separate v2 feature branch and an open review PR. Every milestone must have tests and evidence before being merged. Do not overwrite or reinterpret the original benchmark artifacts.
