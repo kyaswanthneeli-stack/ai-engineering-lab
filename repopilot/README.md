@@ -8,13 +8,13 @@ RepoPilot is an independent Python engineering project exploring issue-to-patch 
 |---|---|---|
 | Python AST indexing and issue-aware bounded context | Built | Ranked context and safety unit tests in GitHub Actions; model used a simpler context in the prior verified seeded run |
 | Model proposal over OpenAI-compatible API | Built | Real Ollama Qwen2.5-coder:3b produced a fix and regression test for seeded issue #1; [verified CI run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44482479486) |
-| Public GitHub issue retrieval and opt-in pinned clone | Built | URL parsing and Git checkout command tests in CI; new combined command needs a live model run |
+| Public GitHub issue retrieval and opt-in pinned clone | Built | [Actual end-to-end live model + pinned clone + Docker CI](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44497087568) passed |
 | Issue → proposal → restricted Docker verification | Built | Real model-generated fix passed baseline/reproduction/patched Docker sequence for one seeded integration-test issue; separate reference-patch verification also passes |
 | Static pre-execution review and Docker verification | Built | Static review unit tested; still requires human judgment on real patches |
 | Offline dashboard and execution-event report | Built | [Actual Ollama model run](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/model-run.html) and separate [reference patch dashboard](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/review-dashboard.html) |
 | Approval-gated draft PR via GitHub API | Built | CLI external API publisher has mock tests; actual [open, unmerged draft PR #2](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/2) was created via connected GitHub for the model-generated seeded fix; CI passed |
 | 12 SWE-bench Lite task preparation and result import | Built | Manifest, prediction export and official-result parser added; **0 official issues evaluated** |
-| Real SWE-bench model issue attempts | Attempt runner and GitHub Actions job available | One pinned pytest task failed proposal validation in an [actual model attempt](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44495694284); a revised model attempt is separate from evaluation |
+| Real SWE-bench model issue attempts | Attempt runner and GitHub Actions job available | Pinned pytest task failed proposal validation in [attempt 1](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44495694284) and [attempt 2](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44496682030); no official evaluation or valid benchmark patch |
 | SWE-bench model issue resolution rate | Not measured | **None** |
 
 [Open the recruiter-facing explanation](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/) · [View CI and downloadable run artifacts](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/workflows/repopilot.yml)
@@ -33,11 +33,17 @@ RepoPilot is an independent Python engineering project exploring issue-to-patch 
 - Validates the proposed test path and patch path; no arbitrary shell command is accepted from a model.
 - Requires a failing reproduction test **before** applying the patch, then a passing test suite **after** applying it.
 - Uses an isolated temporary copy and a restricted Docker container with network disabled.
-- Produces a local report. The issue-run command does not publish a PR automatically; the separate draft-PR command requires explicit approval. A real model was called in the linked seeded integration run, but further attempts require provider configuration.
-- Provides optional pinned GitHub checkout and ranked source-context selection, with pre-execution review of proposed patch and regression test. These newer features are CI-tested but have not yet passed a new live-model benchmark.
+- Produces a local report. The issue-run command does not publish a PR automatically; the separate draft-PR command requires explicit approval. A real model was called in the linked seeded integration run, and the pinned-clone end-to-end command passed in CI; further attempts require provider configuration.
+- Provides optional pinned GitHub checkout and ranked source-context selection, with pre-execution review of proposed patch and regression test. These components have CI evidence, including a successful pinned-clone live-model seeded integration; they have not resolved official SWE-bench tasks.
 - A GitHub Actions workflow runs unit tests and proves a real sample reproduction fails before the patch and succeeds afterward inside restricted Docker.
 
 [View RepoPilot CI and Docker verification](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/workflows/repopilot.yml)
+
+## Verified integrated end-to-end run — pinned clone
+
+[GitHub Actions run #44497087568](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44497087568) passed the entire supported integration flow: fetch public issue #1 → clone the repository at an immutable commit → select the vulnerable calculator fixture → generate a fix with local Ollama/Qwen2.5-Coder 3B → run static review → verify baseline pass / reproduction fail / patched pass in restricted Docker → save dashboard and evidence as CI artifacts.
+
+This is an intentionally small public issue. It demonstrates **end-to-end operability on the supported fixture**, not reliable autonomy on arbitrary repositories. Human review is still needed to create a draft PR and independent benchmark evaluation is still pending.
 
 ## Additional engineering evidence
 
