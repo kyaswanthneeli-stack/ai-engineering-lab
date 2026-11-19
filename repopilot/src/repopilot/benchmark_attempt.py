@@ -10,6 +10,7 @@ fail to produce a valid patch. Failures are first-class recorded outcomes.
 from __future__ import annotations
 
 import argparse
+from functools import partial
 import json
 import os
 from pathlib import Path
@@ -67,6 +68,9 @@ def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
                                      url or os.getenv("REPOPILOT_BASE_URL",""),
                                      token if token is not None else os.getenv("REPOPILOT_API_KEY"))
         report["model"]=meta.get("model","")
+        report["agent_steps"]=meta.get("agent_steps")
+        report["inspected_files"]=meta.get("inspected_files",[])
+        report["tool_trace"]=meta.get("tool_trace",[])
         report["provider_usage"]=meta.get("provider_reported_usage_by_attempt",[])
         report["status"]="model_patch_proposed"
         report["model_generated"]=True
@@ -90,10 +94,13 @@ def main(argv=None):
     parser.add_argument("--manifest",type=Path,default=Path("benchmarks/swebench-lite-12.json"))
     parser.add_argument("--output",type=Path,default=Path(".runs/swebench-attempt"))
     parser.add_argument("--agentic",action="store_true",help="Enable bounded model-directed read-only tool calls")
+    parser.add_argument("--max-steps",type=int,default=18,help="Bounded tool-agent model calls (2–24)")
     args=parser.parse_args(argv)
     if args.agentic:
+        if not 2<=args.max_steps<=24:
+            parser.error("--max-steps must be between 2 and 24")
         from .agentic_benchmark import propose_agentic_benchmark
-        planner=propose_agentic_benchmark
+        planner=partial(propose_agentic_benchmark,max_steps=args.max_steps)
     else:
         planner=propose_benchmark
     result=attempt_one(args.manifest,args.instance_id,args.output,model_proposer=planner)
