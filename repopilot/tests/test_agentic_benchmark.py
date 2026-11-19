@@ -186,7 +186,7 @@ class AgentTests(unittest.TestCase):
 
     def test_line_edits_correct_large_inspected_source_after_bad_old_text(self):
         (self.repo/"deep.py").write_text(
-            "".join(f"FILLER_{i:03d} = {i}\n" for i in range(300))
+            "".join(f"FILLER_{i:03d} = {i}\n" for i in range(400))
             + "def calculate_invoice_tax(value):\n    return value + 0\n")
         history=[]
         sequence=iter([
@@ -194,7 +194,7 @@ class AgentTests(unittest.TestCase):
                 "path":"deep.py","old":"invented old function body",
                 "new":"    return value + 1"}]},
             {"action":"finish","line_edits":[{
-                "path":"deep.py","start_line":302,"end_line":302,
+                "path":"deep.py","start_line":402,"end_line":402,
                 "new":"    return value + 1"}]}
         ])
         def model(url,model,token,messages):
@@ -214,14 +214,14 @@ class AgentTests(unittest.TestCase):
 
     def test_line_edits_cannot_write_uninspected_range_even_for_known_file(self):
         (self.repo/"deep.py").write_text(
-            "".join(f"FILLER_{i:03d} = {i}\n" for i in range(300))
+            "".join(f"FILLER_{i:03d} = {i}\n" for i in range(400))
             + "def calculate_invoice_tax(value):\n    return value + 0\n")
         steps=[
             {"action":"finish","line_edits":[{
                 "path":"deep.py","start_line":1,"end_line":1,
                 "new":"FILLER_000 = 999"}]},
             {"action":"finish","line_edits":[{
-                "path":"deep.py","start_line":302,"end_line":302,
+                "path":"deep.py","start_line":402,"end_line":402,
                 "new":"    return value + 1"}]},
         ]
         patch,meta=propose_agentic_benchmark(
