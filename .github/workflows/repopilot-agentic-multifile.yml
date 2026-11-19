@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   issues: read
 
 jobs:
@@ -54,7 +54,7 @@ jobs:
           from repopilot.pr import patch_targets
           from repopilot.review import review_proposal
           repo=Path('fixtures/invoice-multifile')
-          run=Path('.runs/agentic-invoice-issue3-v11-7b')
+          run=Path('.runs/agentic-invoice-issue3-v12-7b')
           run.mkdir(parents=True,exist_ok=False)
           report={'model':'qwen2.5-coder:7b','model_generated':False,
                   'verified':False,'issue':'https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/3',
@@ -95,12 +95,59 @@ jobs:
           if report['outcome']!='verified':
               raise SystemExit('Agentic multi-file trial did not meet acceptance criteria')
           PY
+      - name: Publish verified code to human-review branch (never create PR automatically)
+        if: success()
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          run=Path('.runs/agentic-invoice-issue3-v12-7b')
+          result=json.loads((run/'result.json').read_text())
+          assert result['outcome']=='verified'
+          assert result['model_generated'] is True
+          assert result['verified'] is True
+          assert set(result['model_patch_targets'])=={'pricing.py','checkout.py'}
+          assert (run/'model-patch.diff').is_file()
+          print('Verified AI patch contains EXACTLY pricing.py and checkout.py')
+          PY
+          PATCH_FILE="$PWD/.runs/agentic-invoice-issue3-v12-7b/model-patch.diff"
+          BRANCH="repopilot/issue-3-ai-verified-$GITHUB_RUN_ID"
+          export BRANCH
+          git -C .. fetch --no-tags origin main
+          git -C .. switch -c "$BRANCH" FETCH_HEAD
+          git -C .. apply --check --directory=repopilot/fixtures/invoice-multifile "$PATCH_FILE"
+          git -C .. apply --directory=repopilot/fixtures/invoice-multifile "$PATCH_FILE"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          spec=json.loads(Path('examples/invoice-multifile-issue.json').read_text())
+          test=Path('fixtures/invoice-multifile/tests/test_reproduction.py')
+          test.write_text(spec['reproduction_test'],encoding='utf-8')
+          PY
+          git -C .. config user.name 'github-actions[bot]'
+          git -C .. config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C .. add repopilot/fixtures/invoice-multifile/pricing.py repopilot/fixtures/invoice-multifile/checkout.py repopilot/fixtures/invoice-multifile/tests/test_reproduction.py
+          git -C .. diff --cached --check
+          git -C .. commit -m 'fix(repopilot): verified Qwen 7B multi-file invoice repair (#3)'
+          git -C .. push origin "HEAD:refs/heads/$BRANCH"
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          path=Path('.runs/agentic-invoice-issue3-v12-7b/result.json')
+          report=json.loads(path.read_text())
+          report['candidate_branch']=os.environ['BRANCH']
+          report['requires_human_review_before_pr']=True
+          path.write_text(json.dumps(report,indent=2)+'\\n')
+          print('Candidate branch published:',report['candidate_branch'])
+          print('Draft PR not created: requires explicit human review.')
+          PY
       - name: Upload attempt evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-agentic-multifile-attempt-v11-7b
-          path: repopilot/.runs/agentic-invoice-issue3-v11-7b/
+          name: repopilot-agentic-multifile-attempt-v12-7b
+          path: repopilot/.runs/agentic-invoice-issue3-v12-7b/
           if-no-files-found: warn
           retention-days: 30
       - name: Stop model
