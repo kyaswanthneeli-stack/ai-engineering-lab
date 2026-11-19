@@ -117,7 +117,13 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 raise AgentToolError("Cannot change source before inspecting files")
             try:
                 if set(action)=={"action","edits"}:
-                    patch=canonical_patch(root,action["edits"],allowed_files=read_files)
+                    edits=action["edits"]
+                    if isinstance(edits,list) and any(
+                        isinstance(edit,dict) and
+                        edit.get("path") not in read_files for edit in edits
+                    ):
+                        raise AgentToolError("Model modified a file it did not inspect")
+                    patch=canonical_patch(root,edits,allowed_files=read_files)
                 elif set(action)=={"action","patch"}:
                     patch=action["patch"]
                     if not isinstance(patch,str):
