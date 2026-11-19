@@ -114,6 +114,86 @@ class BenchmarkBatchTests(unittest.TestCase):
         self.assertTrue(all(t["failure_category"]=="model_transport"
                             for t in result["tasks"]))
 
+    def test_retry_only_prior_unsubmitted_failures_preserves_existing_predictions(self):
+        previous=self.root/"prior-summary.json"
+        statuses={
+            "sample__project-0":"model_patch_proposed",
+            "sample__project-2":"provider_unavailable",
+            "sample__project-11":"model_timeout",
+        }
+        previous.write_text(json.dumps({
+            "pinned_manifest_tasks":12,"selected_tasks":12,
+            "model_predictions":1,"missing_predictions":11,
+            "officially_evaluated":False,
+            "tasks":[{"instance_id":task["instance_id"],
+                      "status":statuses.get(task["instance_id"],"model_patch_proposed")
+                      if task["instance_id"]=="sample__project-0" else
+                      (statuses.get(task["instance_id"],"model_patch_proposed")
+                       if task["instance_id"] not in ("sample__project-1",
+                                                   "sample__project-3",
+                                                   "sample__project-4",
+                                                   "sample__project-5",
+                                                   "sample__project-6",
+                                                   "sample__project-7",
+                                                   "sample__project-8",
+                                                   "sample__project-9",
+                                                   "sample__project-10") else
+                       "model_patch_proposed")}
+                     for task in self.tasks]
+        }))
+        # The previous summary above intentionally has mostly proposed patches
+        # and two unsubmitted failed attempts: correct the declared counts.
+        rows=json.loads(previous.read_text())
+        rows["model_predictions"]=10
+        rows["missing_predictions"]=2
+        previous.write_text(json.dumps(rows))
+        called=[]
+        def fake_run(command,**kwargs):
+            instance=command[3]
+            called.append(instance)
+            folder=Path(command[command.index("--output")+1])
+            folder.mkdir(parents=True)
+            (folder/"attempt.json").write_text(
+                json.dumps({"status":"failed_model_attempt"}))
+        with patch("repopilot.benchmark_batch.load_manifest",
+                   return_value=self.tasks),patch(
+                       "repopilot.benchmark_batch.subprocess.run",
+                       side_effect=fake_run):
+            result=collect(self.manifest,self.root/"retries",
+                           retry_from=previous)
+        self.assertEqual(called,
+            ["sample__project-2","sample__project-11"])
+        self.assertEqual(result["selected_tasks"],2)
+        self.assertTrue(result["retry_only_unsubmitted_failures"])
+        self.assertFalse(result["officially_evaluated"])
+        self.assertTrue(previous.is_file())
+
+    def test_retry_rejects_wrong_manifest_or_inconsistent_previous_counts(self):
+        from repopilot.benchmark_batch import retryable_task_ids
+        previous=self.root/"wrong.json"
+        prior={"pinned_manifest_tasks":12,"selected_tasks":1,
+               "model_predictions":0,"missing_predictions":1,
+               "officially_evaluated":False,
+               "tasks":[{"instance_id":"unknown__project-1",
+                         "status":"model_timeout"}]}
+        previous.write_text(json.dumps(prior))
+        with self.assertRaises(ValueError):
+            retryable_task_ids(self.tasks,previous)
+        prior["tasks"]=[{"instance_id":"sample__project-1",
+                         "status":"model_timeout"}]
+        prior["model_predictions"]=1
+        previous.write_text(json.dumps(prior))
+        with self.assertRaisesRegex(ValueError,"inconsistent"):
+            retryable_task_ids(self.tasks,previous)
+        prior["model_predictions"]=0
+        prior["tasks"]=[{"instance_id":"sample__project-1",
+                         "status":"model_patch_proposed"}]
+        prior["model_predictions"]=1
+        prior["missing_predictions"]=0
+        previous.write_text(json.dumps(prior))
+        with self.assertRaisesRegex(ValueError,"No retryable"):
+            retryable_task_ids(self.tasks,previous)
+
     def test_timeout_is_unscored_and_does_not_create_prediction(self):
         with patch("repopilot.benchmark_batch.load_manifest",
                    return_value=self.tasks), patch(
