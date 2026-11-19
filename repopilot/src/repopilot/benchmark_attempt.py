@@ -33,7 +33,7 @@ def bounded_issue_context(statement: str, max_chars: int = 6500) -> str:
         raise ValueError("Invalid issue statement or bounded context size")
     if len(statement) <= max_chars:
         return statement
-    marker = "\\n\\n[RepoPilot: middle of long issue omitted for bounded inference]\\n\\n"
+    marker = "\n\n[RepoPilot: middle of long issue omitted for bounded inference]\n\n"
     head = int(max_chars * 0.70)
     tail = max_chars - head - len(marker)
     return statement[:head] + marker + statement[-tail:]
