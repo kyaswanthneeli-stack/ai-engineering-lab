@@ -17,7 +17,7 @@ class BenchmarkComparisonTests(unittest.TestCase):
         self.baseline_predictions=root/"baseline-predictions.jsonl"
         self.candidate_results=root/"candidate-score.json"
         self.candidate_predictions=root/"candidate-predictions.jsonl"
-        self.ids=[f"project__repo-{i}" for i in range(4)]
+        self.ids=[f"project__repo-{i}" for i in range(12)]
         self.manifest.write_text(json.dumps({"tasks":[
             {"instance_id":name,"base_commit":"a"*40} for name in self.ids]}))
         self.predictions(self.baseline_predictions,self.ids[:3])
@@ -42,7 +42,7 @@ class BenchmarkComparisonTests(unittest.TestCase):
 
     def test_only_common_officially_evaluated_tasks_are_compared(self):
         outcome=self.compare()
-        self.assertEqual(outcome["selected_tasks"],4)
+        self.assertEqual(outcome["selected_tasks"],12)
         self.assertEqual(outcome["baseline_officially_evaluated"],3)
         self.assertEqual(outcome["candidate_officially_evaluated"],2)
         self.assertEqual(outcome["comparable_officially_evaluated"],2)
