@@ -264,6 +264,37 @@ class AgentTests(unittest.TestCase):
         self.assertIn("does not match",str(context.exception))
         self.assertNotIn("private_marker",str(context.exception))
 
+
+    def test_large_source_final_prompt_keeps_deep_inspected_window(self):
+        # The bug is far beyond the first 6 KB of a large source file.
+        large="".join(
+            f"DATA_{i} = 'padding to represent a realistic large source module'\\n"
+            for i in range(190)
+        )+"def affected():\\n    return 1\\n"
+        (self.repo/"large.py").write_text(large)
+        calls=[]
+        def client(url,model,token,messages):
+            calls.append(list(messages))
+            if len(calls)<=6:
+                action={"action":"read","path":"large.py",
+                        "start":175,"count":35}
+            else:
+                self.assertIn("FINAL PATCH MODE",messages[0]["content"])
+                final=messages[-1]["content"]
+                self.assertIn("def affected():",final)
+                self.assertIn("return 1",final)
+                self.assertNotIn("DATA_0 =",final)
+                action={"action":"finish","edits":[
+                    {"path":"large.py","old":"    return 1",
+                     "new":"    return 2"}]}
+            return {"choices":[{"message":{"content":json.dumps(action)}}]}
+        patch,meta=propose_agentic_benchmark(
+            self.repo,"fix affected()","mock",
+            "http://127.0.0.1:11434/v1",
+            client=client,max_steps=8)
+        self.assertIn("+    return 2",patch.patch)
+        self.assertEqual(meta["agent_steps"],7)
+
     def test_unscoped_benchmark_forces_patch_after_bounded_search(self):
         calls=[]
         def client(url,model,token,messages):
