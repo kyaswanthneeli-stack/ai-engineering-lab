@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 from repopilot.patch_repair import reconstruct_single_hunk,PatchRepairError
 
-SOURCE="def divide(a, b):\n    if b == 0:\n        return 0  # BUG: should raise ZeroDivisionError\n     return a / b\n"
-BAD="diff --git a/calculator.py b/calculator.py\n--- a/calculator.py\n+++ b/calculator.py\n@@ -1,5 +1,5 @@\n def divide(a, b):\n-    if b == 0:\n-        return 0  # BUG: should raise ZeroDivisionError\n+    if b == 0:\n+        raise ZeroDivisionError('Division by zero')\n    return a / b\n"
+SOURCE="def divide(a, b):\n    if b == 0:\n        return 0  # BUG: should raise ZeroDivisionError\n    return a / b\n"
+BAD="diff --git a/calculator.py b/calculator.py\n--- a/calculator.py\n+++ b/calculator.py\n@@ -1,5 +1,5 @@\n def divide(a, b):\n-    if b == 0:\n-        return 0  # BUG: should raise ZeroDivisionError\n+    if b == 0:\n+        raise ZeroDivisionError('Division by zero')\n     return a / b\n"
 
 class PatchNormalizationTests(unittest.TestCase):
     def test_normalize_model_change_with_wrong_hunk_count(self):
