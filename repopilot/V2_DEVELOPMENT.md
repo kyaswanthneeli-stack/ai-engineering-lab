@@ -49,6 +49,14 @@ This is a **synthetic calculator integration test**, not official SWE-bench eval
 - [Full 12-task run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44573386221) also started from a batch-runner source update. Neither run's final official outcome was known when this development note was written.
 - `repopilot.benchmark_compare` validates both original official score files and submitted prediction JSONL, then only calculates deltas for instance IDs evaluated by the independent harness in **both** runs. It never treats local Docker verification or an unsubmitted patch as resolved.
 
+## Failed Pytest case — provider-timeout recovery
+
+The [first two-task pilot](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44573511295) showed **one official SymPy resolution** and **no Pytest submission**. The archived `pytest-dev__pytest-11148` attempt reported `AgentToolError: Local Ollama native chat failed or timed out`, elapsed approximately 315 seconds. This was a **model-service timeout**, not an officially scored incorrect Pytest patch.
+
+The v2 agent now retries only transient native Ollama HTTP 408/429/5xx, timeout and connection failures up to a configurable bounded count; it classifies wrapped socket timeouts explicitly and does not transmit issue/source content to another host. Unit tests cover recovery, persistent timeouts, HTTP 400 rejection, and no secret leakage.
+
+A [Pytest-only pinned-task retry](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44578518713) uses a locally prewarmed Qwen2.5-Coder 3B model, bounded 180-second native-request timeouts, at most two attempts per model call, and a 900-second task cap. The workflow preserves full evidence and conditionally executes the independent official evaluator only if the model produces a valid prediction. **Its outcome must be read from the completed run and cannot be assumed successful.**
+
 ## Engineering practice
 
 Keep v1.0.0 at [its immutable release](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v1.0.0). Use a separate v2 feature branch and an open review PR. Every milestone must have tests and evidence before being merged. Do not overwrite or reinterpret the original benchmark artifacts.
