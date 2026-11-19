@@ -147,13 +147,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 messages.append({"role":"user","content":"Candidate incomplete: these REQUIRED files have no changes: "+", ".join(missing_targets)+". Prepare coordinated edits for every required file, preserving the existing edits."})
                 continue
             if not set(targets)<=read_files:
-                trace.append({"step":index+1,"action":"finish_deferred",
-                              "missing_read_files":sorted(set(targets)-read_files)})
-                messages.append({"role":"assistant","content":content})
-                messages.append({"role":"user","content":
-                    "First inspect these changed files using the read tool: "+
-                    ", ".join(sorted(set(targets)-read_files))})
-                continue
+                raise AgentToolError("Model modified a file it did not inspect")
             check=subprocess.run(["git","apply","--check","-"],cwd=root,input=patch,
                 text=True,capture_output=True,timeout=10,check=False)
             if check.returncode:
