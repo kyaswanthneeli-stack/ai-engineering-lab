@@ -20,6 +20,23 @@ class AgentTests(unittest.TestCase):
             return {"choices":[{"message":{"content":json.dumps(next(it))}}],"usage":{"total_tokens":5}}
         return client
 
+    def test_opt_in_local_native_ollama_skips_compatible_api(self):
+        with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1",
+                                      "REPOPILOT_MAX_TOKENS":"512"}), patch(
+              "repopilot.agentic_benchmark._local_ollama_chat",
+              return_value={"choices":[{"message":{"content":"{}"}}]}) as native:
+            response=_provider("http://127.0.0.1:11434/v1","mock",None,[])
+        native.assert_called_once_with(
+            "http://127.0.0.1:11434/v1","mock",[],512)
+        self.assertEqual(response["choices"][0]["message"]["content"],"{}")
+
+    def test_opt_in_native_never_sends_remote_source_or_token(self):
+        with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1"}):
+            with self.assertRaisesRegex(AgentToolError,"restricted to local Ollama"):
+                _provider("https://example.com/v1","mock",None,[])
+            with self.assertRaisesRegex(AgentToolError,"does not use API tokens"):
+                _provider("http://127.0.0.1:11434/v1","mock","test-secret",[])
+
     def test_provider_transient_503_retries_then_returns_response(self):
         class Response:
             def __enter__(self): return self
