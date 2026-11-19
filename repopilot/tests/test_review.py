@@ -25,7 +25,7 @@ class ReviewTests(unittest.TestCase):
         result=review_proposal(self.spec(reproduction_test=test))
         self.assertTrue(any(f["code"]=="dangerous_test_import" for f in result["findings"]))
     def test_warning_for_added_shell(self):
-        patch=PATCH.replace("+x=2","+x=__import__('os').system('date')")
+        patch=PATCH.replace("+x=2","+x=os.system('date')")
         self.assertEqual(review_proposal(self.spec(patch=patch))["warnings"],1)
     def test_block_embedded_secret(self):
         patch=PATCH.replace("+x=2","+api_key = 'ABCDEFGHIJKL'")
