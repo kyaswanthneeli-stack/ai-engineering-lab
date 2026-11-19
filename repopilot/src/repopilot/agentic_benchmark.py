@@ -14,6 +14,7 @@ import urllib.request
 from pathlib import Path
 
 from .benchmark_planner import BenchmarkPatch,BenchmarkProposalError
+from .context_select import ranked_source_context
 from .edit_plan import canonical_patch
 from .patches import validate_patch
 from .pr import patch_targets
@@ -137,7 +138,18 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             ". Prefer one finish action using exact old/new snippets. You may use "+
             "read/search tools for additional context, but avoid repeating reads."})
     for index in range(max_steps):
-        if index==inspection_budget and read_files:
+        if index==inspection_budget:
+            if not read_files:
+                # Bad tool paths must not consume every available model call.
+                # Rank and inspect actual existing source, never reference fixes.
+                selected=ranked_source_context(root,issue_text,max_files=3,max_chars=15000)
+                for item in selected:
+                    result=read_python(root,item.path,start=1,count=120)
+                    read_files.add(item.path)
+                    trace.append({"step":index+1,"action":"ranked_preinspect",
+                                  "target":item.path,"result_items":len(result["lines"])})
+            if not read_files:
+                raise AgentToolError("No inspectable Python source for patch proposal")
             # For benchmark tasks without declared targets, choose only
             # source the model actually inspected. Exploration is time-bounded.
             if not required:
@@ -195,7 +207,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             raise AgentToolError("Tool call must be JSON object")
         usage.append(response.get("usage",{}))
         name=action.get("action")
-        if inspection_budget<max_steps and index>=inspection_budget and name!="finish" and read_files:
+        if index>=inspection_budget and name!="finish" and read_files:
             trace.append({"step":index+1,"action":"exploration_rejected_in_final_phase"})
             messages.append({"role":"user","content":
                 "Discovery is finished. The inspected files are above. "
