@@ -12,7 +12,7 @@ permissions:
 jobs:
   real-swebench-attempt:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 50
     defaults:
       run:
         working-directory: repopilot
@@ -49,22 +49,22 @@ jobs:
             sleep $((attempt * 15))
           done
           docker exec repopilot-benchmark-ollama ollama list | grep -F 'qwen2.5-coder:7b'
-      - name: Attempt one pinned real SWE-bench Lite issue (bounded discovery and forced patch agent v7 (7B))
+      - name: Attempt one pinned real SWE-bench Lite issue (bounded discovery and forced patch agent v8 (7B, provider retry))
         continue-on-error: true
         env:
           REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
           REPOPILOT_MODEL: qwen2.5-coder:7b
         run: |
-          python -m repopilot.benchmark_attempt pytest-dev__pytest-11148 --agentic --max-steps 18 \
+          python -m repopilot.benchmark_attempt pytest-dev__pytest-11148 --agentic --max-steps 12 \
             --manifest benchmarks/swebench-lite-12.json \
-            --output .runs/official-attempt-pytest-11148-v7-agentic
+            --output .runs/official-attempt-pytest-11148-v8-agentic
       - name: Report actual outcome without claiming resolution
         if: always()
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          path=Path(".runs/official-attempt-pytest-11148-v7-agentic/attempt.json")
+          path=Path(".runs/official-attempt-pytest-11148-v8-agentic/attempt.json")
           if not path.is_file():
               # Setup failure is explicitly unscored, never a model failure.
               result={"instance_id":"pytest-dev__pytest-11148",
@@ -93,8 +93,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-real-swebench-pytest-11148-v7-unscored
-          path: repopilot/.runs/official-attempt-pytest-11148-v7-agentic/
+          name: repopilot-real-swebench-pytest-11148-v8-unscored
+          path: repopilot/.runs/official-attempt-pytest-11148-v8-agentic/
           if-no-files-found: warn
           retention-days: 30
       - name: Stop local model
