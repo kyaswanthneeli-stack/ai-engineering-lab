@@ -53,26 +53,33 @@ def _safe_python_paths(root:Path,max_files:int):
             yield path,path.relative_to(root).as_posix()
 
 
-def _issue_named_candidates(root:Path,terms:set[str],scan_limit:int):
-    """Cheap filename-only pass beyond the regular AST parsing budget.
+def _issue_named_candidates(root:Path,terms:set[str],scan_limit:int,
+                            basenames:set[str]|None=None):
+    """One bounded path-only pass for issue terms and short file names.
 
-    This reads metadata for at most 20k files, then parses at most 32 strong
-    filename matches. No file content is loaded until the main validator.
+    At most 20k safe regular source paths are considered. The caller reads
+    contents of at most 24 basename hits and 32 scored filename matches.
     """
     expanded={t for t in terms if len(t)>=3 and t not in
               {"fix","bug","the","and","error","wrong","file","python","test"}}
-    if not expanded:
-        return []
+    wanted=basenames or set()
+    if not expanded and not wanted:
+        return [],[]
+    basename_hits=[]
     matches=[]
     budget=min(20000,max(5000,scan_limit*5))
     for path,rel in _safe_python_paths(root,budget):
-        words=_tokens(rel.replace("_"," ").replace("/"," ").replace("-"," "))
-        score=len(expanded & words)
-        if score:
-            matches.append((-score,rel,path))
-            if len(matches)>128:
-                matches=sorted(matches)[:32]
-    return [(p,rel) for _,rel,p in sorted(matches)[:32]]
+        if PurePosixPath(rel).name in wanted and len(basename_hits)<24:
+            basename_hits.append((path,rel))
+        if expanded:
+            words=_tokens(rel.replace("_"," ").replace("/"," ").replace("-"," "))
+            score=len(expanded & words)
+            if score:
+                matches.append((-score,rel,path))
+                if len(matches)>128:
+                    matches=sorted(matches)[:32]
+    return basename_hits,[(p,rel) for _,rel,p in sorted(matches)[:32]]
+
 
 def ranked_source_context(repo:Path,issue:str,*,max_files:int=8,max_chars:int=32000,scan_limit:int=1800)->list[ContextItem]:
     root=repo.resolve(strict=True)
@@ -97,18 +104,7 @@ def ranked_source_context(repo:Path,issue:str,*,max_files:int=8,max_chars:int=32
     # Never allow issue text to escape the workspace or read symlink targets.
     bare_names={PurePosixPath(name).name for name in mentions
                 if PurePosixPath(name).name == name and name.endswith(".py")}
-    nested=[]
-    if bare_names:
-        # Avoid unbounded root.rglob(basename) traversals for malicious issue
-        # text. The same capped filename-only scan used by source ranking
-        # handles basename lookups, without following linked directories.
-        budget=min(20000,max(5000,scan_limit*5))
-        for target,rel in _safe_python_paths(root,budget):
-            if PurePosixPath(rel).name in bare_names:
-                nested.append((target,rel))
-                if len(nested)>=24:
-                    break
-    named=_issue_named_candidates(root,terms,scan_limit)
+    nested,named=_issue_named_candidates(root,terms,scan_limit,bare_names)
     visited=set()
     for path,rel in [*explicit,*nested,*named,*_safe_python_paths(root,scan_limit)]:
         if rel in visited:
