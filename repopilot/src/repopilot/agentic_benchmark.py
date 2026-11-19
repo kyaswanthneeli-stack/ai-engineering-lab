@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import ast
+import os
 import socket
 import subprocess
 import time
@@ -85,7 +86,14 @@ def _provider(url,model,token,messages):
         raise AgentToolError("Invalid model endpoint")
     if parts.scheme=="http" and parts.hostname not in {"localhost","127.0.0.1","::1"}:
         raise AgentToolError("Remote models require HTTPS")
-    data=json.dumps({"model":model,"temperature":0,"max_tokens":2600,
+    # Small CPU-only runners need a smaller generation budget for complex repos.
+    # Bound configuration so workflow input cannot cause unbounded model output.
+    try:
+        token_budget=int(os.getenv("REPOPILOT_MAX_TOKENS","2600"))
+    except ValueError:
+        token_budget=2600
+    token_budget=max(256,min(token_budget,2600))
+    data=json.dumps({"model":model,"temperature":0,"max_tokens":token_budget,
         "stream":False,"messages":messages,
         "response_format":{"type":"json_object"}}).encode("utf-8")
     headers={"Content-Type":"application/json"}
