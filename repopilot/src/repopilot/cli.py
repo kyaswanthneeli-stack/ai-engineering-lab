@@ -14,6 +14,7 @@ from .benchmark import read_and_aggregate
 from .pr import publish_approved_draft
 from .swebench import write_manifest
 from .checkout import pinned_checkout
+from .checkout_scope import resolve_repo_subdir
 from .graph import import_graph
 import tempfile
 
@@ -35,6 +36,7 @@ def main(argv=None):
     repair.add_argument("--output",type=Path,default=Path(".runs/repair-run"))
     pinned=sub.add_parser("run-pinned",help="Checkout exact public GitHub commit and attempt issue locally; no PR published")
     pinned.add_argument("issue_url");pinned.add_argument("commit_sha")
+    pinned.add_argument("--repo-subdir",default="",help="Constrained subfolder inside the pinned checkout")
     pinned.add_argument("--output",type=Path,default=Path(".runs/pinned-issue"))
     e=sub.add_parser("dashboard",help="Render offline evidence from a verification report")
     e.add_argument("report",type=Path)
@@ -74,7 +76,8 @@ def main(argv=None):
             raise SystemExit(1)
     elif args.cmd=="run-pinned":
         with tempfile.TemporaryDirectory(prefix="repopilot-public-") as tmp:
-            repo=pinned_checkout(args.issue_url,args.commit_sha,Path(tmp)/"repo")
+            checkout=pinned_checkout(args.issue_url,args.commit_sha,Path(tmp)/"repo")
+            repo=resolve_repo_subdir(checkout,args.repo_subdir)
             result=run_issue(repo,args.issue_url,args.output)
         print(json.dumps({"outcome":result["outcome"],"output":str(args.output),"pinned_commit":args.commit_sha},indent=2))
         if result["outcome"]!="verified_in_sandbox":
