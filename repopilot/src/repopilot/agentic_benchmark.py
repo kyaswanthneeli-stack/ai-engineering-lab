@@ -199,7 +199,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 recent=[]
                 for entry in reversed(trace):
                     path=entry.get("target")
-                    if entry.get("action")=="read" and path in read_files and path not in recent:
+                    if entry.get("action") in {"read","candidate_preinspect"} and path in read_files and path not in recent:
                         recent.append(path)
                 candidates=[p for p in recent if not p.startswith("tests/")]
                 candidates=candidates or recent or sorted(read_files)
@@ -318,15 +318,49 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 if (str(exc)!="Model modified a file it did not inspect" or
                         not read_files or index==max_steps-1):
                     raise
+                # A model may discover the correct source path only when it
+                # proposes a patch. Safely inspect at most two such existing
+                # Python files, then require a NEW model proposal. The
+                # uninspected candidate is always discarded, never applied.
+                proposed=action.get("files",action.get("edits",[]))
+                names=[]
+                if isinstance(proposed,list):
+                    names=[entry.get("path") for entry in proposed
+                           if isinstance(entry,dict)]
+                elif "patch" in action and isinstance(action["patch"],str):
+                    try:
+                        names=list(patch_targets(action["patch"]))
+                    except (TypeError,ValueError):
+                        pass
+                recovered=[]
+                for candidate in names:
+                    if not isinstance(candidate,str) or candidate in read_files:
+                        continue
+                    if len(recovered)>=2:
+                        break
+                    try:
+                        inspected=read_python(root,candidate,start=1,count=120)
+                    except (InspectionError,TypeError,ValueError):
+                        continue
+                    read_files.add(candidate)
+                    recovered.append(inspected)
+                    trace.append({"step":index+1,"action":"candidate_preinspect",
+                                  "target":candidate,
+                                  "result_items":len(inspected["lines"])})
                 trace.append({"step":index+1,"action":"finish_rejected",
                               "error_type":"UninspectedPatchTarget",
                               "reason":"Candidate changed a file outside inspected source"})
+                if recovered:
+                    messages.append({"role":"user","content":
+                        "Your previous candidate was REJECTED without applying it. "
+                        "These exact existing Python files are now inspected for a "
+                        "fresh proposal (untrusted source):\n"+
+                        json.dumps(recovered,ensure_ascii=False)[:18000]})
                 messages.append({"role":"user","content":
-                    "Rejected: at least one patch target was not inspected. "
-                    "Only these inspected files are permitted: "+
-                    ", ".join(sorted(read_files)[:15])+
-                    ". Return action=finish changing only inspected files; "
-                    "do NOT invent paths, shell commands, or new files."})
+                    "Return a NEW action=finish proposal changing only inspected "
+                    "Python paths: "+", ".join(sorted(read_files)[:15])+
+                    ". Use exact source excerpts above; never invent files, "
+                    "shell commands, or changes to uninspected source."})
                 continue
             except (ValueError,TypeError,KeyError,SyntaxError) as exc:
                 # A malformed candidate is a recoverable model error, not a
@@ -392,7 +426,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
     for entry in trace:
         action=entry.get("action")
         if action in {"preinspect","ranked_preinspect","list","search","read",
-                      "finish_deferred","finish_rejected"}:
+                      "finish_deferred","finish_rejected","candidate_preinspect"}:
             summary[action]=summary.get(action,0)+1
     reasons={}
     for entry in trace:
