@@ -2,7 +2,7 @@
 No pull-request side effects occur here.
 """
 from pathlib import Path
-from dataclasses import asdict
+from dataclasses import replace
 import json
 import os
 import time
@@ -27,6 +27,8 @@ def run_issue(repo:Path,issue_url:str,output:Path,issue_reader=fetch_public_issu
         record("issue_fetched",issue_data["issue_id"])
         spec,meta=model_proposer(repo,issue_data["text"],os.environ.get("REPOPILOT_MODEL",""),os.environ.get("REPOPILOT_BASE_URL",""),os.environ.get("REPOPILOT_API_KEY"))
         record("model_proposal_received",meta.get("model","unspecified"))
+        # Bind proposal to the authenticated issue identifier, not model-authored text.
+        spec=replace(spec,issue_id=issue_data["issue_id"])
         save_proposal(spec,meta,output/"proposal.json")
         proposal_data=json.loads((output/"proposal.json").read_text())
         record("proposal_saved_for_human_review","Generated changes are never pushed automatically")
