@@ -100,7 +100,8 @@ def main(argv=None):
         if not 2<=args.max_steps<=24:
             parser.error("--max-steps must be between 2 and 24")
         from .agentic_benchmark import propose_agentic_benchmark
-        planner=partial(propose_agentic_benchmark,max_steps=args.max_steps)
+        planner=partial(propose_agentic_benchmark,max_steps=args.max_steps,
+                        auto_issue_paths=True)
     else:
         planner=propose_benchmark
     result=attempt_one(args.manifest,args.instance_id,args.output,model_proposer=planner)
