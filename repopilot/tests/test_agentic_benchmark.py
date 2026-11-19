@@ -298,7 +298,7 @@ class AgentTests(unittest.TestCase):
 
     def test_symbol_ranked_source_is_inspected_before_first_model_call(self):
         (self.repo/"billing.py").write_text(
-            "def calculate_invoice_tax(amount):\\n    return amount * 0.2\\n")
+            "def calculate_invoice_tax(amount):\n    return amount * 0.2\n")
         seen=[]
         def client(url,model,token,messages):
             seen.append(list(messages))
