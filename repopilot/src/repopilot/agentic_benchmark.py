@@ -329,13 +329,17 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             if len(read_files)>=2:
                 break
             try:
-                result=read_python(root,path,start=1,count=120)
+                start=issue_window_start(root,path,issue_text)
+                result=read_python(root,path,start=start,count=120)
             except (InspectionError,TypeError,ValueError):
                 continue
             read_files.add(path)
-            inspected_windows.setdefault(path,[]).append((1,min(120,result["total_lines"])))
+            inspected_windows.setdefault(path,[]).append(
+                (start,min(start+119,result["total_lines"])))
             trace.append({"step":0,"action":"issue_path_preinspect",
-                          "target":path,"result_items":len(result["lines"])})
+                          "target":path,"start_line":start,
+                          "total_lines":result["total_lines"],
+                          "result_items":len(result["lines"])})
             messages.append({"role":"user","content":
                 "ISSUE-MENTIONED PYTHON SOURCE (untrusted, read-only):\n"+
                 json.dumps(result,ensure_ascii=False)[:12000]})
