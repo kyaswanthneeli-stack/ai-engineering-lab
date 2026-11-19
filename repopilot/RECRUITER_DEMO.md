@@ -9,7 +9,7 @@ Evidence status: November 19, 2026. This page documents actual completed runs, n
 - **Real Ollama model:** Qwen2.5-Coder 7B generated coordinated edits to `pricing.py` and `checkout.py` for the controlled public [invoice issue #3](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/3).
 - **Actual Docker regression:** baseline exit 0, reproduction-before-fix exit 1, post-patch regression exit 0. The reproduction tests were curated independently; do **not** claim the model created them.
 - **CI evidence:** [successful real inference + Docker + candidate branch](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44540507015).
-- **Actual issue-to-PR:** [draft PR #10](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/10) was opened against main from the verified generated candidate branch. It is **unmerged**, awaiting code review.
+- **Actual issue-to-PR:** [PR #10](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/10) was opened from the verified generated candidate branch and **merged after review corrections**. The original model patch and subsequent validation fixes are separately documented.
 - **Separate earlier seeded issue:** [draft PR #2](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/2) has its own verified Ollama 3B + Docker evidence.
 - **Official real-world benchmark:** the later [pinned 12-task SWE-bench Lite batch](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44547336463) attempted all twelve selected issues and submitted **six model-generated predictions** to the official harness. The harness completed all six, found **one resolved and five unresolved, with zero evaluation errors**. Six tasks timed out without predictions, so the selected-cohort result is **1 of 12** and the submitted-patch resolution rate is **1 of 6**. An artifact-upload filename error occurred only after the evaluator finished; [portable evidence recovery](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44558575315) is underway.
 
@@ -30,7 +30,7 @@ Evidence status: November 19, 2026. This page documents actual completed runs, n
 
 **URL:** https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/recruiter-demo.html
 
-**Description:** Built RepoPilot, a Python issue-to-patch coding agent using Ollama/Qwen, bounded repository inspection, guarded model edits and network-restricted Docker verification. Demonstrated a real Qwen 7B-generated two-file fix with a recorded baseline → failing regression → passing patched suite, and published it as an unmerged draft PR for review. GitHub logs and source are linked. Official SWE-bench Lite evaluation completed on six submitted predictions with one resolved issue (1/6 submitted, 1/12 selected); all evidence and limitations are linked.
+**Description:** Built RepoPilot, a Python issue-to-patch coding agent using Ollama/Qwen, bounded repository inspection, guarded model edits and network-restricted Docker verification. Demonstrated a real Qwen 7B-generated two-file fix with a recorded baseline → failing regression → passing patched suite, and published the initial candidate as a draft PR, then merged the corrected implementation after review and green CI. GitHub logs and source are linked. Official SWE-bench Lite evaluation completed on six submitted predictions with one resolved issue (1/6 submitted, 1/12 selected); all evidence and limitations are linked.
 
 ## Recording checklist
 
