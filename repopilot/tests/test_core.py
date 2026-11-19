@@ -82,9 +82,9 @@ class Tests(unittest.TestCase):
             def runner(work,command,timeout):
                 calls.append(1)
                 outputs=[
-                    "----------------------------------------------------------------------\\nRan 1 test in 0.001s\\n\\nOK\\n",
-                    "FAIL: test_zero (test_reproduction.TestDivide.test_zero)\\n----------------------------------------------------------------------\\nRan 2 tests in 0.001s\\n\\nFAILED (failures=1)\\n",
-                    "----------------------------------------------------------------------\\nRan 2 tests in 0.001s\\n\\nOK\\n"
+                    "----------------------------------------------------------------------\nRan 1 test in 0.001s\n\nOK\n",
+                    "FAIL: test_zero (test_reproduction.TestDivide.test_zero)\n----------------------------------------------------------------------\nRan 2 tests in 0.001s\n\nFAILED (failures=1)\n",
+                    "----------------------------------------------------------------------\nRan 2 tests in 0.001s\n\nOK\n"
                 ]
                 return RunResult(1 if len(calls)==2 else 0,4,outputs[len(calls)-1])
             result=execute(root,IssueSpec.from_dict(RAW),Path(t,"result.json"),runner=runner)
