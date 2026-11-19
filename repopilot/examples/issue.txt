@@ -1,0 +1,1 @@
+The divide(a, b) function incorrectly returns 0 when b is zero. For Python compatibility, dividing by zero must raise ZeroDivisionError. Add a reproduction unittest and create a minimal patch.
