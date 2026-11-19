@@ -1,0 +1,16 @@
+{
+  "issue_id": "REPOPILOT-FIXTURE-002",
+  "summary": "Normalize invoice cents and reject negative prices across pricing and checkout modules",
+  "test_path": "tests/test_reproduction.py",
+  "reproduction_test": "import unittest\nfrom checkout import invoice_total\n\nclass TestInvoiceRegression(unittest.TestCase):\n    def test_rounding(self):\n        self.assertEqual(invoice_total([0.1, 0.2], 0.1), 0.33)\n\n    def test_negative_price_rejected(self):\n        with self.assertRaises(ValueError):\n            invoice_total([10, -5], 0.1)\n",
+  "patch": "diff --git a/pricing.py b/pricing.py\n--- a/pricing.py\n+++ b/pricing.py\n@@ -1,5 +1,7 @@\n def round_money(value):\n     return round(value, 2)\n \n def taxable_subtotal(items):\n-    return sum(items)\n+    if any(price < 0 for price in items):\n+        raise ValueError(\"Negative item price\")\n+    return round_money(sum(items))\ndiff --git a/checkout.py b/checkout.py\n--- a/checkout.py\n+++ b/checkout.py\n@@ -1,6 +1,6 @@\n from pricing import taxable_subtotal, round_money\n \n def invoice_total(items, rate):\n     subtotal = taxable_subtotal(items)\n     tax = round_money(subtotal * rate)\n-    return subtotal + tax\n+    return round_money(subtotal + tax)\n",
+  "test_command": [
+    "python",
+    "-m",
+    "unittest",
+    "discover",
+    "-s",
+    "tests",
+    "-v"
+  ]
+}
