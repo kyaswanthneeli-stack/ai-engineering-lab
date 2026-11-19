@@ -253,7 +253,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 recent=[]
                 for entry in reversed(trace):
                     path=entry.get("target")
-                    if entry.get("action") in {"read","candidate_preinspect","issue_path_preinspect"} and path in read_files and path not in recent:
+                    if entry.get("action") in {"read","candidate_preinspect","issue_path_preinspect","ranked_initial_preinspect","initial_finish_preinspect"} and path in read_files and path not in recent:
                         recent.append(path)
                 candidates=[p for p in recent if not p.startswith("tests/")]
                 candidates=candidates or recent or sorted(read_files)
@@ -334,7 +334,53 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 messages.append({"role":"user","content":"Required files not yet inspected. Read each exact path before a final patch: "+", ".join(missing)})
                 continue
             if not read_files:
-                raise AgentToolError("Cannot change source before inspecting files")
+                # Models sometimes emit a finish patch before requesting any
+                # reads. Never apply that uninspected candidate. Safely read
+                # existing proposed targets (or issue-ranked source) and
+                # require an entirely NEW model-generated patch.
+                proposals=action.get("files",action.get("edits",[]))
+                candidates=[]
+                if isinstance(proposals,list):
+                    candidates=[item.get("path") for item in proposals
+                                if isinstance(item,dict)]
+                elif isinstance(action.get("patch"),str):
+                    try:
+                        candidates=list(patch_targets(action["patch"]))
+                    except (TypeError,ValueError):
+                        pass
+                if not candidates:
+                    ranked=ranked_source_context(root,issue_text,max_files=2,
+                                                 max_chars=9000,scan_limit=1800)
+                    candidates=[item.path for item in ranked]
+                recovered=[]
+                for candidate in candidates:
+                    if len(recovered)>=2:
+                        break
+                    if not isinstance(candidate,str) or candidate in read_files:
+                        continue
+                    try:
+                        inspected=read_python(root,candidate,start=1,count=120)
+                    except (InspectionError,TypeError,ValueError):
+                        continue
+                    read_files.add(candidate)
+                    inspected_windows.setdefault(candidate,[]).append(
+                        (1,min(120,inspected["total_lines"])))
+                    recovered.append(inspected)
+                    trace.append({"step":index+1,"action":"initial_finish_preinspect",
+                                  "target":candidate,"result_items":len(inspected["lines"])})
+                if not recovered:
+                    raise AgentToolError("Cannot change source before inspecting files")
+                messages.append({"role":"user","content":
+                    "The previous finish action was REJECTED and NOT applied. "
+                    "The following exact existing Python source was safely "
+                    "inspected (untrusted repository data):\\n"+
+                    json.dumps(recovered,ensure_ascii=False)[:15000]+
+                    "\\nGenerate a NEW action=finish proposal using exact original "
+                    "text and ONLY these inspected paths: "+
+                    ", ".join(sorted(read_files))+
+                    ". You may inspect more source using approved read tools."})
+                trace.append({"step":index+1,"action":"finish_deferred_uninspected"})
+                continue
             try:
                 if set(action)=={"action","files"}:
                     files=action["files"]
