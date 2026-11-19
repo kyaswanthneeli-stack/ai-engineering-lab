@@ -6,6 +6,7 @@ Model output remains subject to static checks and sandbox verification.
 from __future__ import annotations
 from dataclasses import replace
 import json
+import hashlib
 import os
 import time
 from pathlib import Path
@@ -30,6 +31,7 @@ def run_with_repair(repo:Path,issue_url:str,output:Path,*,max_attempts:int=3,
     issue=None
     last_proposal=None
     feedback=""
+    seen_proposals=set()
     def test_feedback(path:Path)->str:
         # Preserve useful failure signals, without copying an entire untrusted test log.
         if not path.is_file():
@@ -66,9 +68,25 @@ def run_with_repair(repo:Path,issue_url:str,output:Path,*,max_attempts:int=3,
                 record["provider_model"]=meta.get("model","unknown")
                 record["provider_usage"]=meta.get("provider_reported_usage_by_attempt",[])
                 record["status"]="proposed"
+                # A repeated proposal after failed verification adds no new
+                # information and can waste a paid model call or sandbox run.
+                # Keep it as evidence, but do not execute the same patch twice.
+                fingerprint=hashlib.sha256(
+                    json.dumps({"patch":spec.patch,
+                                "test_path":spec.test_path,
+                                "reproduction_test":spec.reproduction_test,
+                                "test_command":spec.test_command},
+                               sort_keys=True).encode("utf-8")
+                ).hexdigest()
+                record["proposal_sha256"]=fingerprint
+                repeated=fingerprint in seen_proposals
+                seen_proposals.add(fingerprint)
                 file=output/f"attempt-{number:02d}-proposal.json"
                 save_proposal(spec,meta,file)
                 last_proposal=json.loads(file.read_text(encoding="utf-8"))
+                if repeated:
+                    record["duplicate_proposal"]=True
+                    raise ValueError("Duplicate proposal: model repeated an already-attempted patch and test")
                 review=review_proposal(spec)
                 record["review"]=review
                 if review["status"]=="blocked":
@@ -91,6 +109,8 @@ def run_with_repair(repo:Path,issue_url:str,output:Path,*,max_attempts:int=3,
                 # Avoid echoing secret-bearing model outputs or raw source in traces.
                 evidence=test_feedback(output/f"attempt-{number:02d}-verification.json")
                 feedback=(evidence or (type(exc).__name__+": candidate rejected or failed verification"))[:1500]
+                if record.get("duplicate_proposal"):
+                    feedback="Repeated an already-rejected patch and reproduction test. Propose materially different source and test changes."
                 record["error_summary"]=type(exc).__name__+": candidate rejected or failed verification"
                 record["has_test_failure_evidence"]=bool(evidence)
     except Exception as exc:

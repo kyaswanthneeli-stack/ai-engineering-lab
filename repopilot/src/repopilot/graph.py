@@ -53,3 +53,39 @@ def import_graph(root:Path,max_files:int=300)->dict:
         "imports":[{"from":src,"to":dst} for src,dst in sorted(edges)],
         "scope":"Static imports only; no runtime call graph or execution."
     }
+
+def dependent_modules(graph:dict, changed_modules:list[str], *, max_depth:int=5)->dict:
+    """Conservative reverse-import impact, never claiming runtime call coverage.
+
+    Return shortest static dependency distances from changed modules.
+    Paths are module names emitted by import_graph(), not arbitrary file paths.
+    """
+    if not isinstance(max_depth,int) or not 1 <= max_depth <= 20:
+        raise ValueError("max_depth must be in 1..20")
+    known=set(graph["modules"])
+    if not isinstance(changed_modules,list) or not changed_modules or any(
+            not isinstance(name,str) or name not in known for name in changed_modules):
+        raise ValueError("All changed modules must exist in the static graph")
+    reverse={m:set() for m in known}
+    for edge in graph["imports"]:
+        src,dst=edge["from"],edge["to"]
+        if src in known and dst in known:
+            reverse[dst].add(src)
+    levels={name:0 for name in changed_modules}
+    frontier=set(changed_modules)
+    for distance in range(1,max_depth+1):
+        next_frontier=set()
+        for module in frontier:
+            for dependent in reverse[module]:
+                if dependent not in levels:
+                    levels[dependent]=distance
+                    next_frontier.add(dependent)
+        frontier=next_frontier
+        if not frontier:
+            break
+    return {"changed":sorted(set(changed_modules)),
+            "dependents":[{"module":name,"distance":levels[name]}
+                          for name in sorted(levels,key=lambda n:(levels[n],n))
+                          if levels[name]>0],
+            "max_depth":max_depth,
+            "scope":"Static reverse-import candidates only; no execution or runtime call graph."}
