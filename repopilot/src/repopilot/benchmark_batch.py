@@ -16,11 +16,67 @@ import time
 from .swebench_export import load_manifest
 
 
+_RETRYABLE_STATUSES = frozenset({
+    "model_timeout", "provider_unavailable", "failed_model_attempt",
+    "attempt_failed_without_evidence", "execution_failed",
+    "invalid_model_prediction", "missing_model_prediction", "setup_failed",
+})
+
+
+def retryable_task_ids(manifest_tasks: list[dict], previous: Path) -> list[str]:
+    """Select only unsubmitted failures from a bounded previous run summary.
+
+    This does not treat a proposed patch as solved. It merely avoids wasting
+    model calls on already exported predictions, which should instead be
+    independently evaluated. Source issue text and model output are never
+    loaded from the previous artifact.
+    """
+    if not previous.is_file() or previous.stat().st_size > 1_000_000:
+        raise ValueError("Previous bounded batch summary is missing or too large")
+    try:
+        data=json.loads(previous.read_text(encoding="utf-8"))
+    except (ValueError,UnicodeError) as exc:
+        raise ValueError("Previous batch summary is invalid JSON") from exc
+    manifest_ids={task["instance_id"] for task in manifest_tasks}
+    if (not isinstance(data,dict) or
+            data.get("pinned_manifest_tasks")!=len(manifest_tasks) or
+            data.get("officially_evaluated") is not False or
+            not isinstance(data.get("tasks"),list)):
+        raise ValueError("Retry source must be an unscored batch with original manifest")
+    previous_tasks=data["tasks"]
+    rows={}
+    for record in previous_tasks:
+        if (not isinstance(record,dict) or
+                not isinstance(record.get("instance_id"),str) or
+                not isinstance(record.get("status"),str) or
+                record["instance_id"] not in manifest_ids or
+                record["instance_id"] in rows):
+            raise ValueError("Retry source contains unknown or duplicate instances")
+        rows[record["instance_id"]]=record["status"]
+    if (not rows or data.get("selected_tasks")!=len(rows) or
+            data.get("model_predictions")!=sum(
+                status=="model_patch_proposed" for status in rows.values())):
+        raise ValueError("Retry source has inconsistent attempt counts")
+    missing=data.get("missing_predictions")
+    if missing!=len(rows)-data["model_predictions"]:
+        raise ValueError("Retry source has inconsistent missing predictions")
+    result=[task["instance_id"] for task in manifest_tasks
+            if rows.get(task["instance_id"]) in _RETRYABLE_STATUSES]
+    if not result:
+        raise ValueError("No retryable unsubmitted tasks in previous batch")
+    return result
+
+
 def collect(manifest: Path, output: Path, *, per_task_timeout: int = 240,
-            max_steps: int = 10, instance_ids: list[str] | None = None) -> dict:
+            max_steps: int = 10, instance_ids: list[str] | None = None,
+            retry_from: Path | None = None) -> dict:
     if not 30 <= per_task_timeout <= 900 or not 2 <= max_steps <= 24:
         raise ValueError("Timeout or agent steps outside safe bounds")
     manifest_tasks = load_manifest(manifest)  # Original 10-20 task safety gate stays intact.
+    if retry_from is not None and instance_ids is not None:
+        raise ValueError("Use either explicit instance IDs or previous failed attempts")
+    if retry_from is not None:
+        instance_ids=retryable_task_ids(manifest_tasks,retry_from)
     tasks = manifest_tasks
     if instance_ids is not None:
         allowed = {task["instance_id"] for task in manifest_tasks}
@@ -102,6 +158,7 @@ def collect(manifest: Path, output: Path, *, per_task_timeout: int = 240,
     summary = {"dataset": "princeton-nlp/SWE-bench_Lite",
                "pinned_manifest_tasks": len(manifest_tasks),
                "selected_tasks": len(tasks),
+               "retry_only_unsubmitted_failures": retry_from is not None,
                "model_predictions": len(predictions),
                "missing_predictions": len(tasks)-len(predictions),
                "attempt_status_counts": status_counts,
@@ -127,10 +184,13 @@ def main(argv=None):
     parser.add_argument("--max-steps", type=int, default=10)
     parser.add_argument("--instance-ids", nargs="+",
                         help="Optional unique subset of the original pinned manifest")
+    parser.add_argument("--retry-from", type=Path,
+                        help="A previous unscored summary.json: retry only missing/failed patches")
     args = parser.parse_args(argv)
     summary = collect(args.manifest, args.output,
                       per_task_timeout=args.per_task_timeout,
-                      max_steps=args.max_steps, instance_ids=args.instance_ids)
+                      max_steps=args.max_steps, instance_ids=args.instance_ids,
+                      retry_from=args.retry_from)
     print(json.dumps({k: v for k, v in summary.items() if k != "tasks"}, indent=2))
 
 
