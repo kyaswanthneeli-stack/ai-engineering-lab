@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import json
 import ast
+import socket
 import subprocess
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -88,13 +91,45 @@ def _provider(url,model,token,messages):
     headers={"Content-Type":"application/json"}
     if token:
         headers["Authorization"]="Bearer "+token
-    try:
-        with urllib.request.build_opener(_NoRedirect()).open(
-            urllib.request.Request(url.rstrip("/")+"/chat/completions",
-                                   data=data,method="POST",headers=headers),timeout=95) as response:
-            return json.loads(response.read(1_000_001))
-    except Exception as exc:
-        raise AgentToolError("Model call failed without producing a response") from exc
+    request=urllib.request.Request(url.rstrip("/")+"/chat/completions",
+                                   data=data,method="POST",headers=headers)
+    # Two bounded attempts recover from transient Ollama warm-up and gateway
+    # failures. Never log a response body, full URL, or Authorization header.
+    for attempt in range(2):
+        try:
+            with urllib.request.build_opener(_NoRedirect()).open(
+                    request,timeout=120) as response:
+                payload=response.read(1_000_001)
+                if len(payload)>1_000_000:
+                    raise AgentToolError("Model response exceeded size limit")
+                try:
+                    result=json.loads(payload)
+                except (UnicodeDecodeError,ValueError) as exc:
+                    raise AgentToolError("Model response contained invalid JSON") from exc
+                if (not isinstance(result,dict) or
+                    not isinstance(result.get("choices"),list) or
+                    not result["choices"] or
+                    not isinstance(result["choices"][0],dict) or
+                    not isinstance(result["choices"][0].get("message"),dict) or
+                    not isinstance(result["choices"][0]["message"].get("content"),str)):
+                    raise AgentToolError("Model response missing choices/message/content")
+                return result
+        except urllib.error.HTTPError as exc:
+            category="HTTP "+str(exc.code)
+            retry=exc.code in {408,429,500,502,503,504}
+        except (TimeoutError,socket.timeout) as exc:
+            category="timeout"
+            retry=True
+        except urllib.error.URLError as exc:
+            category="connection failure"
+            retry=True
+        except AgentToolError:
+            raise  # Invalid JSON or shape is a model protocol error, not a timeout.
+        if not retry or attempt==1:
+            raise AgentToolError("Model provider "+category+
+                                 " after "+str(attempt+1)+" attempt(s)") from exc
+        time.sleep(2)
+    raise AgentToolError("Model provider exhausted retry budget")
 
 
 def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:str|None=None,
