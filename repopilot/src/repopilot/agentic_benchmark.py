@@ -150,6 +150,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
     messages=[{"role":"system","content":SYSTEM},
               {"role":"user","content":"ISSUE (untrusted):\n"+issue_text[:12000]}]
     read_files=set()
+    inspected_windows={}
     required=set(required_targets or ())
     trace=[]
     usage=[]
@@ -167,6 +168,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             if result["total_lines"]>120:
                 raise AgentToolError("Required file exceeds bounded preinspection window")
             read_files.add(name)
+            inspected_windows.setdefault(name,[]).append((1,min(120,result["total_lines"])))
             trace.append({"step":0,"action":"preinspect","target":name,
                           "result_items":len(result["lines"])})
             source_message=("REQUIRED SOURCE FILE (untrusted; inspect before editing):\n"+
@@ -197,6 +199,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             except (InspectionError,TypeError,ValueError):
                 continue
             read_files.add(path)
+            inspected_windows.setdefault(path,[]).append((1,min(120,result["total_lines"])))
             trace.append({"step":0,"action":"issue_path_preinspect",
                           "target":path,"result_items":len(result["lines"])})
             messages.append({"role":"user","content":
@@ -215,6 +218,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 for item in selected:
                     result=read_python(root,item.path,start=1,count=120)
                     read_files.add(item.path)
+                    inspected_windows.setdefault(item.path,[]).append((1,min(120,result["total_lines"])))
                     trace.append({"step":index+1,"action":"ranked_preinspect",
                                   "target":item.path,"result_items":len(result["lines"])})
             if not read_files:
@@ -236,10 +240,19 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                     if len(raw)<=6000:
                         final_context.append("EXACT COMPLETE SOURCE "+name+":\n"+raw)
                     else:
-                        # Larger files require exact snippets rather than
-                        # unsafe partial whole-file replacements.
-                        final_context.append("SOURCE EXCERPT "+name+":\n"+raw[:6000]+
-                                             "\n[truncated; use exact edits only]")
+                        # Preserve the model's actual inspected window.
+                        # Prefix-only context discards bugs deep inside large
+                        # Python files and causes hallucinated old-text edits.
+                        lines=raw.splitlines(keepends=True)
+                        windows=inspected_windows.get(name,[])
+                        start,end=windows[-1] if windows else (1,min(120,len(lines)))
+                        excerpt="".join(lines[start-1:end])
+                        if len(excerpt)>5400:
+                            excerpt=excerpt[:5400]+"\n[inspected window truncated]"
+                        final_context.append(
+                            "SOURCE EXCERPT "+name+" [inspected lines "+
+                            str(start)+"-"+str(end)+", copy old lines verbatim]:\n"+
+                            excerpt+"\n[remaining source omitted; use exact edits only]")
             else:
                 phase_files=sorted(required)
             # Discard exploratory dialogue that can trap smaller models in
@@ -441,6 +454,10 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             elif name=="read" and set(action)<= {"action","path","start","count"} and "path" in action:
                 result=read_python(root,action["path"],start=action.get("start",1),count=action.get("count",80))
                 read_files.add(action["path"])
+                if result.get("lines"):
+                    lines=result["lines"]
+                    inspected_windows.setdefault(action["path"],[]).append(
+                        (lines[0]["line"],lines[-1]["line"]))
             else:
                 raise AgentToolError("Unknown or forbidden agent action")
         except AgentToolError:
