@@ -8,7 +8,7 @@ from repopilot.spec import IssueSpec
 from repopilot.pr import publish_approved_draft,PublishError,patch_targets
 
 PATCH="diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x = 1\n+x = 2\n"
-SPEC=IssueSpec.from_dict({"issue_id":"issue-2","summary":"demo","test_path":"tests/test_reproduction.py","reproduction_test":"import unittest\n","patch":PATCH,"test_command":["python","-m","unittest","discover","-s","tests","-v"]})
+SPEC=IssueSpec.from_dict({"issue_id":"issue-2","summary":"demo","test_path":"tests/test_reproduction.py","reproduction_test":"import unittest\nclass TestBug(unittest.TestCase):\n def test_bug(self):\n  self.assertEqual(1,1)\n","patch":PATCH,"test_command":["python","-m","unittest","discover","-s","tests","-v"]})
 
 class PipelineTests(unittest.TestCase):
     def test_pipeline_success_with_mock_model_and_verifier(self):
