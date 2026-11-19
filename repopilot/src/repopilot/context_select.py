@@ -113,6 +113,71 @@ def ranked_source_context(repo:Path,issue:str,*,max_files:int=8,max_chars:int=32
         selected.append(ContextItem(rel,score,symbols[:80],chunk))
     return selected
 
+
+_TRACEBACK_LINE = re.compile(
+    r"(?P<path>[A-Za-z0-9_./-]+\.py)[\"']?\s*(?::|,\s*line\s+)(?P<line>\d+)",
+    re.IGNORECASE,
+)
+
+
+def issue_window_start(repo: Path, relative_path: str, issue: str, *,
+                       count: int = 120) -> int:
+    """Choose a bounded read window inside an already selected Python file.
+
+    A traceback line takes precedence; otherwise use AST function/class
+    symbols mentioned in the issue. The fallback is line one. No target
+    code is executed and this never expands the editable-file allowlist.
+    """
+    root = repo.resolve(strict=True)
+    path = PurePosixPath(relative_path) if isinstance(relative_path, str) else None
+    if (not root.is_dir() or path is None or path.is_absolute() or
+            ".." in path.parts or "\\" in relative_path or
+            not relative_path.endswith(".py") or
+            not isinstance(count, int) or not 1 <= count <= 120):
+        raise ValueError("Unsafe issue window")
+    target = root.joinpath(*path.parts)
+    if (target.is_symlink() or not target.is_file() or
+            not target.resolve().is_relative_to(root) or
+            target.stat().st_size > 120_000):
+        raise ValueError("Issue window target is not a safe Python file")
+    source = target.read_text(encoding="utf-8")
+    lines = source.splitlines()
+    if len(lines) <= count:
+        return 1
+    max_start = len(lines) - count + 1
+
+    # A traceback's original file and line is more useful than a top-of-file
+    # excerpt, but a line in some other file cannot redirect inspection.
+    basename = path.name
+    for match in _TRACEBACK_LINE.finditer(issue[:12000]):
+        mentioned = match.group("path")
+        if (mentioned == relative_path or
+                mentioned.endswith("/" + relative_path) or
+                mentioned == basename):
+            line_no = int(match.group("line"))
+            if 1 <= line_no <= len(lines):
+                return min(max(1, line_no - 12), max_start)
+
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return 1
+    raw_issue = issue[:12000].lower()
+    terms = _tokens(raw_issue.replace("_", " "))
+    names = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+    best_score, best_line = 0, 1
+    for node in ast.walk(tree):
+        if not isinstance(node, names):
+            continue
+        symbol = node.name.lower()
+        overlap = terms & _tokens(symbol.replace("_", " "))
+        score = (150 if len(symbol) >= 5 and symbol in raw_issue else 0)
+        score += 12 * len(overlap)
+        if score > best_score:
+            best_score, best_line = score, node.lineno
+    return min(max(1, best_line - 12), max_start) if best_score else 1
+
+
 def describe_context(items:list[ContextItem])->str:
     return "\n".join(
         f"FILE {item.path} [rank_score={item.score}; symbols={', '.join(item.symbols[:25])}]\n"
