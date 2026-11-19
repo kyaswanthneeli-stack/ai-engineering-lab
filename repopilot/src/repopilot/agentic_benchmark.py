@@ -128,7 +128,8 @@ def _local_ollama_chat(url,model,messages,token_budget):
             category="timeout"
             retry=True
         except urllib.error.URLError as exc:
-            category="connection failure"
+            category=("timeout" if isinstance(exc.reason,
+                (TimeoutError,socket.timeout)) else "connection failure")
             retry=True
         if not retry or attempt==attempts-1:
             raise AgentToolError(
