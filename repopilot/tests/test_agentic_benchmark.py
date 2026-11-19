@@ -4,7 +4,7 @@ import unittest
 import urllib.error
 from unittest.mock import patch
 from pathlib import Path
-from repopilot.agentic_benchmark import propose_agentic_benchmark,AgentToolError,_provider,_safe_repair_instruction,_safe_candidate_feedback
+from repopilot.agentic_benchmark import propose_agentic_benchmark,AgentToolError,_provider,_read_native_ollama_stream,_safe_repair_instruction,_safe_candidate_feedback
 
 
 class AgentTests(unittest.TestCase):
@@ -225,6 +225,15 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(result["choices"][0]["message"]["content"],
                          '{"action":"list","prefix":""}')
         self.assertEqual(result["usage"]["completion_tokens"],7)
+
+    def test_native_stream_late_complete_chunk_fails_closed_on_wall_deadline(self):
+        class Response:
+            def readline(self,n):
+                return b'{"message":{"content":"{}"},"done":true}\n'
+        with patch("repopilot.agentic_benchmark.time.monotonic",
+                   side_effect=[5,65]):
+            with self.assertRaisesRegex(AgentToolError,"wall-clock budget"):
+                _read_native_ollama_stream(Response(),started=0,max_seconds=60)
 
     def test_native_stream_incomplete_response_must_not_return_patch(self):
         class Response:
