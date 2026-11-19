@@ -197,6 +197,28 @@ def _provider(url,model,token,messages):
     raise AgentToolError("Model provider exhausted retry budget")
 
 
+def _parse_model_action(content):
+    """Accept a JSON object or a single fenced JSON object, never source code.
+
+    Invalid text is not persisted in the audit trace or echoed in errors.
+    The agent still validates every requested tool and source-edit path.
+    """
+    if not isinstance(content,str) or len(content)>100000:
+        raise AgentToolError("Invalid model response")
+    raw=content.strip()
+    lines=raw.splitlines()
+    if (len(lines)>=3 and lines[0].strip().lower() in {"```","```json"} and
+            lines[-1].strip()=="```"):
+        raw="\n".join(lines[1:-1]).strip()
+    try:
+        value=json.loads(raw)
+    except (TypeError,ValueError) as exc:
+        raise AgentToolError("Invalid model tool-call JSON") from exc
+    if not isinstance(value,dict):
+        raise AgentToolError("Tool call must be JSON object")
+    return value
+
+
 def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:str|None=None,
                               client=None,max_steps:int=8,required_targets:set[str]|None=None,
                               auto_issue_paths:bool=False)->tuple[BenchmarkPatch,dict]:
@@ -369,16 +391,26 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             trace.append({"step":index+1,"action":"final_phase_started"})
         response=(client(url,model,token,messages) if client is not None
                   else _provider(url,model,token,messages))
+        usage.append(response.get("usage",{}))
         try:
             content=response["choices"][0]["message"]["content"]
-            if not isinstance(content,str) or len(content)>100000:
-                raise AgentToolError("Invalid model response")
-            action=json.loads(content)
-        except (KeyError,IndexError,TypeError,ValueError) as exc:
-            raise AgentToolError("Invalid model tool-call JSON") from exc
-        if not isinstance(action,dict):
-            raise AgentToolError("Tool call must be JSON object")
-        usage.append(response.get("usage",{}))
+            action=_parse_model_action(content)
+        except (AgentToolError,KeyError,IndexError,TypeError,ValueError):
+            # A small local model can produce a truncated or fenced response.
+            # Reject that response, ask for a NEW valid action, and charge
+            # the correction against the existing bounded model-step budget.
+            # Do not log, trust, execute, or reuse any malformed response.
+            trace.append({"step":index+1,"action":"invalid_json_rejected"})
+            if index==max_steps-1:
+                raise AgentToolError("Invalid model tool-call JSON after step budget")
+            suffix=("Use action=finish with validated inspected paths." if
+                    index>=inspection_budget and read_files else
+                    "Use action=list, search, read, or finish as appropriate.")
+            messages.append({"role":"user","content":
+                "Your previous response was rejected because it was not one "
+                "valid JSON object. Return exactly one JSON object without "
+                "Markdown, backticks, commentary, or extra tokens. "+suffix})
+            continue
         name=action.get("action")
         if index>=inspection_budget and name!="finish" and read_files:
             trace.append({"step":index+1,"action":"exploration_rejected_in_final_phase"})
