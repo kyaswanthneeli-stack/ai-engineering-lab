@@ -6,11 +6,11 @@ RepoPilot is an independent Python engineering project exploring issue-to-patch 
 
 | Capability | Current implementation | Publicly demonstrated |
 |---|---|---|
-| Python AST indexing | Built | Yes, GitHub Actions |
+| Python AST indexing and issue-aware bounded context | Built | Ranked context and safety unit tests in GitHub Actions; model used a simpler context in the prior verified seeded run |
 | Model proposal over OpenAI-compatible API | Built | Real Ollama Qwen2.5-coder:3b produced a fix and regression test for seeded issue #1; [verified CI run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44482479486) |
-| Public GitHub issue retrieval | Built | Unit tested with mock HTTP |
+| Public GitHub issue retrieval and opt-in pinned clone | Built | URL parsing and Git checkout command tests in CI; new combined command needs a live model run |
 | Issue → proposal → restricted Docker verification | Built | Real model-generated fix passed baseline/reproduction/patched Docker sequence for one seeded integration-test issue; separate reference-patch verification also passes |
-| Offline dashboard and execution-event report | Built | [Actual Ollama model run](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/model-run.html) and separate [reference patch dashboard](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/review-dashboard.html) |
+| Static pre-execution review and Docker verification | Built | Static review unit tested; still requires human judgment on real patches |\n| Offline dashboard and execution-event report | Built | [Actual Ollama model run](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/model-run.html) and separate [reference patch dashboard](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/review-dashboard.html) |
 | Approval-gated draft PR via GitHub API | Built | CLI external API publisher has mock tests; actual [open, unmerged draft PR #2](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/2) was created via connected GitHub for the model-generated seeded fix; CI passed |
 | 12 SWE-bench Lite task preparation and result import | Built | Manifest, prediction export and official-result parser added; **0 official issues evaluated** |
 | SWE-bench model issue resolution rate | Not measured | **None** |
@@ -31,7 +31,7 @@ RepoPilot is an independent Python engineering project exploring issue-to-patch 
 - Validates the proposed test path and patch path; no arbitrary shell command is accepted from a model.
 - Requires a failing reproduction test **before** applying the patch, then a passing test suite **after** applying it.
 - Uses an isolated temporary copy and a restricted Docker container with network disabled.
-- Produces a local report. The issue-run command does not publish a PR automatically; the separate draft-PR command requires explicit approval. A real model was called in the linked seeded integration run, but unattended access requires separate provider configuration.
+- Produces a local report. The issue-run command does not publish a PR automatically; the separate draft-PR command requires explicit approval. A real model was called in the linked seeded integration run, but further attempts require provider configuration.\n- Provides optional pinned GitHub checkout and ranked source-context selection, with pre-execution review of proposed patch and regression test. These newer features are CI-tested but have not yet passed a new live-model benchmark.
 - A GitHub Actions workflow runs unit tests and proves a real sample reproduction fails before the patch and succeeds afterward inside restricted Docker.
 
 [View RepoPilot CI and Docker verification](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/workflows/repopilot.yml)
@@ -61,6 +61,12 @@ python -m repopilot.cli benchmark .runs/verification.json --dataset "reference-p
 # Run against a public issue URL that applies to the exact local repository version:
 # python -m repopilot.cli run /path/to/local/repository https://github.com/OWNER/REPO/issues/NUMBER --output .runs/issue-001
 
+
+# Optional: let RepoPilot clone the exact upstream revision itself.
+# This retrieves public source; it never merges a PR automatically.
+# python -m repopilot.cli run-pinned https://github.com/OWNER/REPO/issues/NUMBER \\
+#   FULL_40_CHARACTER_PINNED_COMMIT_SHA --output .runs/pinned-issue-001
+
 # Optional: draft PR only AFTER personally inspecting proposal, Docker evidence,
 # changed files and confirming the issue matches the target repo.
 # export GITHUB_TOKEN=<fine-grained-token-with-contents-and-PR-write-permissions>
@@ -77,7 +83,7 @@ For remote providers, set `REPOPILOT_BASE_URL`, `REPOPILOT_MODEL`, and `REPOPILO
 
 Repository data and issue text are untrusted. Generated patches are never automatically approved. Docker provides defense in depth, not hardened hostile-code isolation. Run verification only on disposable worker machines, without host credentials or Docker socket mounts. Network is disabled within the container; image is pre-pulled. Container timeouts may require manual worker disposal if daemon cleanup fails.
 
-There is **no automatic repository cloning**. GitHub issues can be read via the public REST API. The draft PR CLI publisher's external API route remains mocked in tests. Separately, the authenticated GitHub connector created [real draft PR #2](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/2), CI passed, and it remains unmerged. Neither a SWE-bench resolution score nor model-derived cost or token savings are claimed.
+Opt-in pinned public GitHub repository checkout is implemented. There is **no arbitrary-revision automatic cloning** and no unattended merging. GitHub issues can be read via the public REST API. The draft PR CLI publisher's external API route remains mocked in tests. Separately, the authenticated GitHub connector created [real draft PR #2](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/2), CI passed, and it remains unmerged. Neither a SWE-bench resolution score nor model-derived cost or token savings are claimed.
 
 ## Benchmark policy
 
