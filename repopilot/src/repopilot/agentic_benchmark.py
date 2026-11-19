@@ -125,6 +125,9 @@ def _local_ollama_chat(url,model,messages,token_budget):
         (parts.scheme,parts.netloc,"/api/chat","",""))
     body=json.dumps({
         "model":model,"stream":False,"format":"json",
+        # Long-running pinned benchmark cohorts should not repeatedly evict
+        # the same local model between tasks. Still bounded and loopback-only.
+        "keep_alive":"20m",
         "options":{"temperature":0,"num_predict":token_budget},
         "messages":messages,
     }).encode("utf-8")
