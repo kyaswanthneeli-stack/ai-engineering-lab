@@ -44,8 +44,9 @@ jobs:
           REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
           REPOPILOT_MODEL: qwen2.5-coder:3b
           REPOPILOT_DEBUG_CANDIDATE: '1' # Public synthetic fixture only; do not use for private repos
+          REPOPILOT_CHECKOUT_SHA: ${{ github.sha }}
         run: |
-          python -m repopilot.cli run fixtures/calculator-buggy https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/1 --output .runs/ollama-issue-1
+          python -m repopilot.cli run-pinned https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/1 "$REPOPILOT_CHECKOUT_SHA" --repo-subdir repopilot/fixtures/calculator-buggy --output .runs/ollama-issue-1
       - name: Print verifiable attempt status
         if: always()
         run: |
