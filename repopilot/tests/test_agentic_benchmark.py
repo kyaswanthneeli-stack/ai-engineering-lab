@@ -154,7 +154,7 @@ class AgentTests(unittest.TestCase):
             with self.subTest(value=value), patch.dict(
                     "os.environ",{"REPOPILOT_PROVIDER_TIMEOUT_SECONDS":value}), patch(
                     "repopilot.agentic_benchmark.urllib.request.build_opener") as opener:
-                with self.assertRaisesRegex(AgentToolError,"provider timeout"):
+                with self.assertRaisesRegex(AgentToolError,"[Pp]rovider timeout"):
                     _provider("https://example.com/v1","mock",None,[])
                 opener.assert_not_called()
 
