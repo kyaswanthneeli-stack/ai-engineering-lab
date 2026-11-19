@@ -34,20 +34,18 @@ class PatchNormalizationTests(unittest.TestCase):
             with self.assertRaises(PatchRepairError):
                 reconstruct_single_hunk(root,forged)
 
-    def test_reject_disconnected_deleted_lines(self):
+    def test_preserve_context_between_separated_changes(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d)
-            root.joinpath("calculator.py").write_text(
-                "first = 1\\nintermediate = 2\\nlast = 3\\n")
-            malformed=("diff --git a/calculator.py b/calculator.py\\n"
-                       "--- a/calculator.py\\n+++ b/calculator.py\\n"
-                       "@@ -1,3 +1,3 @@\\n-first = 1\\n"
-                       " intermediate = 2\\n-last = 3\\n"
-                       "+first = 10\\n+last = 30\\n")
-            corrected=malformed.replace("\\n","\n")
-            patch=reconstruct_single_hunk(root,corrected)
+            source="first = 1\nintermediate = 2\nlast = 3\n"
+            root.joinpath("calculator.py").write_text(source)
+            malformed=("diff --git a/calculator.py b/calculator.py\n"
+                       "--- a/calculator.py\n+++ b/calculator.py\n"
+                       "@@ -1,4 +1,4 @@\n-first = 1\n"
+                       " intermediate = 2\n-last = 3\n"
+                       "+first = 10\n+last = 30\n")
+            patch=reconstruct_single_hunk(root,malformed)
             self.assertIn("intermediate = 2",patch)
-            self.assertEqual(root.joinpath("calculator.py").read_text(),
-                             "first = 1\\nintermediate = 2\\nlast = 3\\n".replace("\\n","\n"))
+            self.assertEqual(root.joinpath("calculator.py").read_text(),source)
 
 if __name__=="__main__":unittest.main()
