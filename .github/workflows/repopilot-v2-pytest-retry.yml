@@ -25,6 +25,10 @@ jobs:
         run: |
           python -m pip install -e .
           python -m pip install 'datasets>=3,<5'
+      - name: Validate current branch regression suite before real-model run
+        run: |
+          python -m unittest discover -s tests -q
+          python -m compileall -q src/repopilot
       - name: Verify Pytest task belongs to immutable original 12-task manifest
         run: |
           python - <<'PY'
@@ -83,6 +87,24 @@ jobs:
             --output .runs/v2-pytest-retry-attempts \
             --per-task-timeout 900 \
             --max-steps 10
+      - name: Classify generated prediction or failure without calling it resolved
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path(".runs/v2-pytest-retry-attempts/attempts/pytest-dev__pytest-11148/attempt.json")
+          if p.is_file():
+              r=json.loads(p.read_text())
+              print("Task:",r.get("instance_id"))
+              print("Status:",r.get("status"))
+              print("Error class:",r.get("error_type"))
+              print("Failure category:",r.get("failure_category"))
+              print("Agent steps:",r.get("agent_steps"))
+              print("Patch submitted:",(p.parent/"unreviewed-prediction.json").is_file())
+          else:
+              print("No task attempt file, see batch summary or timeout reason")
+          PY
       - name: Check prediction provenance and separate unsubmitted attempts
         id: prediction_gate
         run: |
