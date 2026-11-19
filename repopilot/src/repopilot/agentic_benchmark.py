@@ -108,13 +108,12 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             # endless read/search loops; all required source remains visible.
             # This is still model-generated code, not a reference patch.
             messages=[{"role":"system","content":
-                ("You are in FINAL PATCH MODE. Return ONLY a JSON object "
+                "You are in FINAL PATCH MODE. Return ONLY a JSON object "
                 "with action=finish and files: [{path, content}], where content "
-                "is the COMPLETE corrected Python source for each required file. ")
-                Do not call list, search or read. The provided files were 
-                "already inspected. Every old snippet must match verbatim "
-                "in the corresponding file exactly once. Change every "
-                "required file. Never invent files or claim tests passed."},
+                "is the COMPLETE corrected Python source for each required file. "
+                "Do not call list, search or read. The provided files were "
+                "already inspected. Preserve imports and existing functions. "
+                "Change every required file. Never invent files or claim tests passed."},
                 {"role":"user","content":
                 "ISSUE (untrusted):\n"+issue_text[:12000]+"\n\n"+
                 "\n\n".join(final_context)+
