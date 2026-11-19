@@ -1,0 +1,36 @@
+{
+  "issue_id": "kyaswanthneeli-stack/ai-engineering-lab#1",
+  "issue_url": "https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/1",
+  "workflow_url": "https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44482479486",
+  "source": "GitHub Actions artifact repopilot-ollama-issue-1-attempt, run 44482479486",
+  "fixture_scope": "deliberately seeded calculator bug",
+  "outcome": "verified_in_sandbox",
+  "model_generated_proposal": true,
+  "model": "qwen2.5-coder:3b",
+  "proposal_attempts": 1,
+  "patch_format_normalized": true,
+  "model_usage": {
+    "prompt_tokens": 588,
+    "completion_tokens": 220,
+    "total_tokens": 808
+  },
+  "elapsed_ms": 35043,
+  "baseline": {
+    "exit_code": 0,
+    "elapsed_ms": 372,
+    "tests": 1
+  },
+  "before": {
+    "exit_code": 1,
+    "elapsed_ms": 356,
+    "tests": 2,
+    "failure": "AssertionError: ZeroDivisionError not raised"
+  },
+  "after": {
+    "exit_code": 0,
+    "elapsed_ms": 362,
+    "tests": 2
+  },
+  "draft_pr_created_at_verification": false,
+  "notice": "A real local Ollama coding model solved one seeded integration test issue; not an SWE-bench task or general success-rate claim."
+}
