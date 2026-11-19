@@ -39,6 +39,20 @@ class Tests(unittest.TestCase):
             spec,meta=propose(Path(t),"fix bug","local","http://127.0.0.1:11434/v1",client=lambda *_:obj)
             self.assertEqual(spec.summary,"divide by zero")
             self.assertEqual(meta["provider_reported_usage_by_attempt"][0]["total_tokens"],5)
+    def test_lossless_nested_diff_is_accepted(self):
+        with tempfile.TemporaryDirectory() as t:
+            Path(t,"calculator.py").write_text("def divide(a, b):\\n    if b == 0:\\n        return 0  # BUG: should raise ZeroDivisionError\\n    return a / b\\n".replace("\\n","\n"))
+            body={**RAW,"patch":{"unified_diff":PATCH}}
+            result={"choices":[{"message":{"content":json.dumps(body)}}]}
+            spec,_=propose(Path(t),"fix divide bug","local","http://127.0.0.1:11434/v1",client=lambda *_:result)
+            self.assertEqual(spec.patch,PATCH)
+    def test_reject_arbitrary_patch_object(self):
+        with tempfile.TemporaryDirectory() as t:
+            Path(t,"calculator.py").write_text("def divide(a, b):\n    if b == 0:\n        return 0  # BUG: should raise ZeroDivisionError\n    return a / b\n")
+            body={**RAW,"patch":{"files":[{"name":"calculator.py","code":"return 4"}]}}
+            result={"choices":[{"message":{"content":json.dumps(body)}}]}
+            with self.assertRaises(ProposalError):
+                propose(Path(t),"fix divide bug","local","http://127.0.0.1:11434/v1",client=lambda *_:result)
     def test_verify_mock(self):
         with tempfile.TemporaryDirectory() as t:
             root=Path(t,"repo");root.mkdir()
