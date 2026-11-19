@@ -49,23 +49,24 @@ jobs:
             sleep $((attempt * 15))
           done
           docker exec repopilot-benchmark-ollama ollama list | grep -F 'qwen2.5-coder:3b'
-      - name: Attempt one pinned real SWE-bench Lite issue (bounded discovery and symbol-ranked and exact inspected-window patch prompt v11)
+      - name: Attempt one pinned real SWE-bench Lite issue (bounded discovery and symbol-ranked and exact inspected-window patch prompt v12 with safe first-target inspection)
         continue-on-error: true
         env:
           REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
           REPOPILOT_MODEL: qwen2.5-coder:3b
-          REPOPILOT_MAX_TOKENS: '950'
+          REPOPILOT_MAX_TOKENS: '1200'
         run: |
-          python -m repopilot.benchmark_attempt pytest-dev__pytest-11148 --agentic --max-steps 10 \
+          curl -fsS "${REPOPILOT_BASE_URL}/models" >/dev/null
+          python -m repopilot.benchmark_attempt pytest-dev__pytest-11148 --agentic --max-steps 12 \
             --manifest benchmarks/swebench-lite-12.json \
-            --output .runs/official-attempt-pytest-11148-v11-agentic
+            --output .runs/official-attempt-pytest-11148-v12-agentic
       - name: Report actual outcome without claiming resolution
         if: always()
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          path=Path(".runs/official-attempt-pytest-11148-v11-agentic/attempt.json")
+          path=Path(".runs/official-attempt-pytest-11148-v12-agentic/attempt.json")
           if not path.is_file():
               # Setup failure is explicitly unscored, never a model failure.
               result={"instance_id":"pytest-dev__pytest-11148",
@@ -94,8 +95,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-real-swebench-pytest-11148-v11-unscored
-          path: repopilot/.runs/official-attempt-pytest-11148-v11-agentic/
+          name: repopilot-real-swebench-pytest-11148-v12-unscored
+          path: repopilot/.runs/official-attempt-pytest-11148-v12-agentic/
           if-no-files-found: warn
           retention-days: 30
       - name: Stop local model
