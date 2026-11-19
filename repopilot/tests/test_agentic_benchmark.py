@@ -103,6 +103,51 @@ class AgentTests(unittest.TestCase):
                 self.repo,"fix","mock","http://127.0.0.1:11434/v1",
                 client=self.sequence([response]),max_steps=2)
 
+
+    def test_local_ollama_native_fallback_after_compatible_api_404(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def read(self,n):
+                return json.dumps({
+                    "message":{"content":'{"action":"list","prefix":""}'},
+                    "eval_count":12}).encode()
+        class Opener:
+            def __init__(self): self.urls=[]
+            def open(self,request,**kwargs):
+                self.urls.append(request.full_url)
+                if request.full_url.endswith("/v1/chat/completions"):
+                    raise urllib.error.HTTPError(
+                        request.full_url,404,"not found",None,None)
+                self.assert_native(request)
+                return Response()
+            def assert_native(self,request):
+                assert request.full_url.endswith("/api/chat")
+        opener=Opener()
+        with patch("repopilot.agentic_benchmark.urllib.request.build_opener",
+                   return_value=opener):
+            result=_provider("http://127.0.0.1:11434/v1",
+                             "qwen2.5-coder:3b",None,[])
+        self.assertEqual(len(opener.urls),2)
+        self.assertEqual(result["choices"][0]["message"]["content"],
+                         '{"action":"list","prefix":""}')
+        self.assertEqual(result["usage"]["completion_tokens"],12)
+
+    def test_404_on_non_ollama_endpoint_does_not_leak_source_to_fallback(self):
+        class Opener:
+            calls=0
+            def open(self,request,**kwargs):
+                self.calls+=1
+                raise urllib.error.HTTPError(
+                    request.full_url,404,"not found",None,None)
+        opener=Opener()
+        with patch("repopilot.agentic_benchmark.urllib.request.build_opener",
+                   return_value=opener):
+            with self.assertRaisesRegex(AgentToolError,"HTTP 404"):
+                _provider("https://example.com/v1","mock","SECRET",[
+                    {"role":"user","content":"source code"}])
+        self.assertEqual(opener.calls,1)
+
     def test_read_two_modules_then_emit_valid_multi_file_patch(self):
         steps=[
             {"action":"list","prefix":""},
