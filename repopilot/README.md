@@ -7,15 +7,22 @@ RepoPilot is an independent Python engineering project exploring issue-to-patch 
 | Capability | Current implementation | Publicly demonstrated |
 |---|---|---|
 | Python AST indexing | Built | Yes, GitHub Actions |
-| Model proposal over OpenAI-compatible API | Built | Mocked transport only; no real LLM solution claimed |
+| Model proposal over OpenAI-compatible API | Built | Real Ollama Qwen2.5-coder:3b produced a fix and regression test for seeded issue #1; [verified CI run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44482479486) |
 | Public GitHub issue retrieval | Built | Unit tested with mock HTTP |
-| Issue → proposal → restricted Docker verification | Built | Pipeline tested with mocks; **reference-patch** Docker run verified |
-| Offline dashboard and execution-event report | Built | CI-generated HTML artifact from reference fixture |
-| Approval-gated draft PR via GitHub API | Built | Mock/security tests; **no real PR published** |
-| 12 public SWE-bench Lite task selection | Built | Selector unit-tested; live dataset not fetched in CI |
+| Issue → proposal → restricted Docker verification | Built | Real model-generated fix passed baseline/reproduction/patched Docker sequence for one seeded integration-test issue; separate reference-patch verification also passes |
+| Offline dashboard and execution-event report | Built | [Actual Ollama model run](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/model-run.html) and separate [reference patch dashboard](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/review-dashboard.html) |
+| Approval-gated draft PR via GitHub API | Built | CLI external API publisher has mock tests; actual [open, unmerged draft PR #2](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/2) was created via connected GitHub for the model-generated seeded fix; CI passed |
+| 12 public SWE-bench Lite task selection | Built | Official dataset used in [successful CI job](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44481209110), [manifest committed](benchmarks/swebench-lite-12.json); all unattempted |
 | SWE-bench model issue resolution rate | Not measured | **None** |
 
 [Open the recruiter-facing explanation](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/) · [View CI and downloadable run artifacts](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/workflows/repopilot.yml)
+
+## Verified model milestone — November 19, 2026
+
+- [Live Ollama/Qwen 3B verification](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44482479486) fetched [seeded issue #1](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/1), generated a reproduction test and minimal source fix, and proved clean baseline → failing reproduction → passing patched tests in network-restricted Docker.
+- [Live model evidence dashboard](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/model-run.html) records the actual run: **35.043 s** end-to-end, **808 provider-reported tokens**. Unambiguous diff formatting was normalized; the model's source-code change was preserved.
+- [Draft PR #2](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/2) contains the model-generated fix and regression test. It was opened using connected GitHub access, its CI passed, and it remains **unmerged**.
+- This single seeded issue is a controlled integration exercise, **not** an official SWE-bench attempt or generalized agent benchmark.
 
 ## Current scope
 
@@ -70,7 +77,7 @@ For remote providers, set `REPOPILOT_BASE_URL`, `REPOPILOT_MODEL`, and `REPOPILO
 
 Repository data and issue text are untrusted. Generated patches are never automatically approved. Docker provides defense in depth, not hardened hostile-code isolation. Run verification only on disposable worker machines, without host credentials or Docker socket mounts. Network is disabled within the container; image is pre-pulled. Container timeouts may require manual worker disposal if daemon cleanup fails.
 
-There is **no automatic repository cloning**. GitHub issues can be read via the public REST API. Draft PR publication is implemented behind explicit review and approval, but has **not** been exercised against a real remote repository. Neither a SWE-bench resolution score nor model-derived cost or token savings are claimed.
+There is **no automatic repository cloning**. GitHub issues can be read via the public REST API. The draft PR CLI publisher's external API route remains mocked in tests. Separately, the authenticated GitHub connector created [real draft PR #2](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/2), CI passed, and it remains unmerged. Neither a SWE-bench resolution score nor model-derived cost or token savings are claimed.
 
 ## Benchmark policy
 
@@ -86,4 +93,4 @@ Before publishing a draft PR, verify the GitHub issue, compare the exact local s
 
 GitHub Actions produces an artifact named `repopilot-verification-fixture` containing an offline HTML dashboard, verification JSON and an explicitly labeled reference-fixture benchmark report. A real model response or PR appears only after an independently verifiable run.
 
-This project is deliberately distinct from the existing portfolio's browser simulations. Real provider inference, Docker verification, and issue benchmarks must be demonstrated and measured before being advertised as completed features.
+This project is deliberately distinct from the existing portfolio's browser simulations. Real provider inference and Docker verification have now been demonstrated for **one seeded integration issue only**. Independent SWE-bench issue resolution and success rates are not measured.
