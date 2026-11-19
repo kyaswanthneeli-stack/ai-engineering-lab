@@ -193,7 +193,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 targets=patch_targets(patch)
             except AgentToolError:
                 raise
-            except (ValueError,TypeError,KeyError) as exc:
+            except (ValueError,TypeError,KeyError,SyntaxError) as exc:
                 # A malformed candidate is a recoverable model error, not a
                 # reason to spend the entire run on a new model process.
                 trace.append({"step":index+1,"action":"finish_rejected",
