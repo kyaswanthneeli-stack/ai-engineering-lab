@@ -19,6 +19,7 @@ import tempfile
 import time
 from .checkout import pinned_checkout
 from .benchmark_planner import propose_benchmark
+from .agentic_benchmark import ProviderTransportError
 from .swebench_export import load_manifest
 
 REPO=re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -98,7 +99,18 @@ def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
         (output/"unreviewed-prediction.json").write_text(
             json.dumps(submission,indent=2)+"\n",encoding="utf-8")
     except Exception as exc:
-        report["status"]="failed_model_attempt" if report["status"]=="attempted" else "setup_failed"
+        # A provider outage/timeout is not evidence that model reasoning or
+        # a generated patch failed. Keep that distinct from a rejected patch
+        # and from failure to load the pinned dataset or source checkout.
+        if report["status"]=="attempted" and isinstance(exc,ProviderTransportError):
+            report["status"]="provider_unavailable"
+            report["failure_category"]="model_transport"
+        elif report["status"]=="attempted":
+            report["status"]="failed_model_attempt"
+            report["failure_category"]="model_or_validation"
+        else:
+            report["status"]="setup_failed"
+            report["failure_category"]="setup"
         report["error_type"]=type(exc).__name__
         report["error"]=str(exc)[:350]
     report["elapsed_ms"]=round((time.monotonic()-started)*1000)
