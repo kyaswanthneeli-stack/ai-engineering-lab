@@ -8,6 +8,8 @@ import urllib.parse
 from .context import index_python
 from .patches import validate_patch
 from .spec import IssueSpec
+from dataclasses import replace
+from .patch_repair import reconstruct_single_hunk,PatchRepairError
 
 class ProposalError(ValueError):
     pass
@@ -29,7 +31,7 @@ All values must be JSON-compatible; escape newlines inside string values. No Mar
 Do not claim the test ran. Do not invent file names. Make the smallest useful change.
 The patch must apply to the supplied ORIGINAL file, before introducing the reproduction test."""
 
-def _parse_candidate(result:dict,known_files:list[str],repo:Path) -> IssueSpec:
+def _parse_candidate(result:dict,known_files:list[str],repo:Path) -> tuple[IssueSpec,bool]:
     raw=result["choices"][0]["message"]["content"]
     if not isinstance(raw,str) or len(raw)>120000:
         raise ValueError("Model response is not a bounded text object")
@@ -57,9 +59,18 @@ def _parse_candidate(result:dict,known_files:list[str],repo:Path) -> IssueSpec:
     if any(path not in known_files for path in patch_targets(spec.patch)):
         raise ValueError("patch references a file not included in the context")
     check=subprocess.run(["git","apply","--check","-"],input=spec.patch,text=True,cwd=repo,capture_output=True,timeout=8)
+    normalized=False
     if check.returncode!=0:
-        raise ValueError("Patch does not apply to original source. Copy the exact original lines including comments; fix hunk positions.")
-    return spec
+        try:
+            canonical=reconstruct_single_hunk(repo,spec.patch)
+        except (PatchRepairError,ValueError) as exc:
+            raise ValueError("Patch does not apply and cannot be safely normalized: "+str(exc)[:150]) from exc
+        second=subprocess.run(["git","apply","--check","-"],input=canonical,text=True,cwd=repo,capture_output=True,timeout=8)
+        if second.returncode!=0:
+            raise ValueError("Normalized patch still does not apply")
+        spec=replace(spec,patch=canonical)
+        normalized=True
+    return spec,normalized
 
 def propose(repo:Path,issue_text:str,model:str,url:str,token:str|None=None,client=None)->tuple[IssueSpec,dict]:
     if not issue_text.strip() or len(issue_text)>12000 or not model or len(model)>100:
@@ -108,8 +119,8 @@ def propose(repo:Path,issue_text:str,model:str,url:str,token:str|None=None,clien
             if not isinstance(result,dict):
                 raise ValueError("Provider response is not JSON object")
             provider_usage.append(result.get("usage",{}))
-            spec=_parse_candidate(result,names,repo)
-            return spec,{"model":model,"context_files":names,"status":"unverified_proposal","provider_reported_usage_by_attempt":provider_usage,"proposal_attempts":attempt}
+            spec,normalized=_parse_candidate(result,names,repo)
+            return spec,{"model":model,"context_files":names,"status":"unverified_proposal","provider_reported_usage_by_attempt":provider_usage,"proposal_attempts":attempt,"patch_format_normalized":normalized}
         except (KeyError,TypeError,ValueError,IndexError) as exc:
             last_error=str(exc)[:250] or type(exc).__name__
             if os.getenv("REPOPILOT_DEBUG_CANDIDATE")=="1":
