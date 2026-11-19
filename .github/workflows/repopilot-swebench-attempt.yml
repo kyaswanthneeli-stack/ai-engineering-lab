@@ -33,8 +33,23 @@ jobs:
             sleep 2
           done
           curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
-          docker exec repopilot-benchmark-ollama ollama pull qwen2.5-coder:7b
-      - name: Attempt one pinned real SWE-bench Lite issue (bounded discovery and forced patch agent v6 (7B))
+          # Ollama model registry sometimes returns transient 503/connection
+          # timeouts. Retry the download; never treat a failed model setup as
+          # a failed or solved benchmark task.
+          for attempt in 1 2 3 4; do
+            echo "Ollama model download attempt ${attempt}/4"
+            if docker exec repopilot-benchmark-ollama ollama pull qwen2.5-coder:7b; then
+              echo "Ollama model download completed"
+              break
+            fi
+            if [ "$attempt" -eq 4 ]; then
+              echo "::error::Ollama model download unavailable after four attempts"
+              exit 1
+            fi
+            sleep $((attempt * 15))
+          done
+          docker exec repopilot-benchmark-ollama ollama list | grep -F 'qwen2.5-coder:7b'
+      - name: Attempt one pinned real SWE-bench Lite issue (bounded discovery and forced patch agent v7 (7B))
         continue-on-error: true
         env:
           REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
@@ -42,17 +57,27 @@ jobs:
         run: |
           python -m repopilot.benchmark_attempt pytest-dev__pytest-11148 --agentic --max-steps 18 \
             --manifest benchmarks/swebench-lite-12.json \
-            --output .runs/official-attempt-pytest-11148-v6-agentic
+            --output .runs/official-attempt-pytest-11148-v7-agentic
       - name: Report actual outcome without claiming resolution
         if: always()
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          path=Path(".runs/official-attempt-pytest-11148-v6-agentic/attempt.json")
+          path=Path(".runs/official-attempt-pytest-11148-v7-agentic/attempt.json")
           if not path.is_file():
-              raise SystemExit("Infrastructure/setup failure: no attempt report was created")
-          result=json.loads(path.read_text())
+              # Setup failure is explicitly unscored, never a model failure.
+              result={"instance_id":"pytest-dev__pytest-11148",
+                      "status":"setup_failed",
+                      "error_type":"InfrastructureOrModelDownloadFailure",
+                      "elapsed_ms":None,
+                      "officially_evaluated":False,
+                      "officially_resolved":None,
+                      "model_generated":False}
+              path.parent.mkdir(parents=True,exist_ok=True)
+              path.write_text(json.dumps(result,indent=2)+"\\n")
+          else:
+              result=json.loads(path.read_text())
           print("REAL SWE-BENCH TASK:",result["instance_id"])
           print("MODEL ATTEMPT:",result["status"])
           print("TIME MS:",result["elapsed_ms"])
@@ -68,8 +93,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-real-swebench-pytest-11148-v6-unscored
-          path: repopilot/.runs/official-attempt-pytest-11148-v6-agentic/
+          name: repopilot-real-swebench-pytest-11148-v7-unscored
+          path: repopilot/.runs/official-attempt-pytest-11148-v7-agentic/
           if-no-files-found: warn
           retention-days: 30
       - name: Stop local model
