@@ -91,11 +91,23 @@ def collect(manifest: Path, output: Path, *, per_task_timeout: int = 240,
             json.dumps(records, indent=2) + "\n")
     (output / "predictions.jsonl").write_text(
         "".join(json.dumps(x, ensure_ascii=False)+"\n" for x in predictions))
+    # Failure taxonomy uses the actual per-task attempt records and never
+    # invents official score outcomes. It is safe to publish even if no patch
+    # was generated; issue text and model response content are omitted.
+    status_counts = {}
+    for record in records:
+        key=record["status"]
+        status_counts[key]=status_counts.get(key,0)+1
+    status_counts=dict(sorted(status_counts.items()))
     summary = {"dataset": "princeton-nlp/SWE-bench_Lite",
                "pinned_manifest_tasks": len(manifest_tasks),
                "selected_tasks": len(tasks),
                "model_predictions": len(predictions),
                "missing_predictions": len(tasks)-len(predictions),
+               "attempt_status_counts": status_counts,
+               "timeout_without_patch": status_counts.get("model_timeout",0),
+               "provider_unavailable_without_patch": status_counts.get("provider_unavailable",0),
+               "failed_model_attempt_without_patch": status_counts.get("failed_model_attempt",0),
                "officially_evaluated": False,
                "officially_resolved": None,
                "status": ("predictions_ready_unscored" if predictions else
