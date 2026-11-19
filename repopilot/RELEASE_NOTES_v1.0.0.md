@@ -21,7 +21,7 @@ A pinned cohort of **12** official SWE-bench Lite issues was attempted with loca
 - **5 unresolved**, **0 harness errors**
 - **1/6 evaluated submissions (16.7%)**; **1/12 selected tasks (8.3%)**. These denominators are different and neither is a full SWE-bench Lite leaderboard score.
 
-The actual [model predictions](benchmarks/official-predictions-2026-11-19.jsonl), [official results JSON](benchmarks/official-score-2026-11-19.json), [case study](benchmarks/SYMPY_14774_CASE_STUDY.md), and [evaluation provenance](benchmarks/OFFICIAL_EVALUATION_2026-11-19.md) are committed and checksum-tested in CI. [Original evaluation](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44547336463) and [successful evidence recovery](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44558575315) remain publicly auditable.
+The actual [model predictions](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/blob/main/repopilot/benchmarks/official-predictions-2026-11-19.jsonl), [official results JSON](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/blob/main/repopilot/benchmarks/official-score-2026-11-19.json), [case study](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/blob/main/repopilot/benchmarks/SYMPY_14774_CASE_STUDY.md), and [evaluation provenance](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/blob/main/repopilot/benchmarks/OFFICIAL_EVALUATION_2026-11-19.md) are committed and checksum-tested in CI. [Original evaluation](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44547336463) and [successful evidence recovery](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44558575315) remain publicly auditable.
 
 ## Try it locally
 
@@ -35,13 +35,14 @@ python -m unittest discover -s tests -v
 
 # Re-run the deterministic fixture verification in a disposable Docker environment:
 docker pull python:3.12-alpine
+mkdir -p .runs
 python -m repopilot.cli verify fixtures/calculator-buggy examples/issue.json \
   --output .runs/verification-v1.json
 python -m repopilot.cli dashboard .runs/verification-v1.json \
   --output .runs/dashboard-v1.html
 ```
 
-The fixture verification is a **reference-patch demonstration**, not a fresh LLM result. See [README.md](README.md) for real model configuration and the separate pinned-clone workflow.
+The fixture verification is a **reference-patch demonstration**, not a fresh LLM result. See [README.md](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/blob/main/repopilot/README.md) for real model configuration and the separate pinned-clone workflow.
 
 ## Limitations and safety boundaries
 
@@ -49,6 +50,6 @@ The fixture verification is a **reference-patch demonstration**, not a fresh LLM
 - Docker network/process/resource controls are defense in depth, **not** a hardened untrusted-code security boundary; use disposable workers without sensitive credentials.
 - Generated proposals require review. No unattended production deployment or automatic code merging.
 - This release does not claim 12/12 benchmark success, lower costs, measured commercial performance, or production-grade autonomous reliability.
-- Open [recruiter walkthrough](recruiter-demo.html) for the actual model and Docker evidence.
+- Open [recruiter walkthrough](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/blob/main/repopilot/recruiter-demo.html) for the actual model and Docker evidence.
 
 **Forward plan:** v2 work on a **separate** development branch, aiming for better large-repository context, stronger test generation, safer retries, and more officially scored tasks. None of those features are claimed as completed in v1.
