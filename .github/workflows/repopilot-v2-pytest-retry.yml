@@ -1,4 +1,4 @@
-name: RepoPilot v2 recover failed Pytest SWE-bench task
+name: RepoPilot v2 verify Pytest patch recovery with official evaluator
 
 on:
   push:
@@ -73,7 +73,7 @@ jobs:
           REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
           REPOPILOT_MODEL: qwen2.5-coder:3b
           REPOPILOT_OLLAMA_NATIVE: '1'
-          REPOPILOT_MAX_TOKENS: '900'
+          REPOPILOT_MAX_TOKENS: '1200'
           REPOPILOT_NATIVE_RETRIES: '2'
           REPOPILOT_NATIVE_TIMEOUT: '180'
         run: |
@@ -82,7 +82,7 @@ jobs:
             --instance-ids pytest-dev__pytest-11148 \
             --output .runs/v2-pytest-retry-attempts \
             --per-task-timeout 900 \
-            --max-steps 8
+            --max-steps 10
       - name: Check prediction provenance and separate unsubmitted attempts
         id: prediction_gate
         run: |
@@ -174,3 +174,24 @@ jobs:
       - name: Stop local model
         if: always()
         run: docker rm -f repopilot-v2-benchmark-model || true
+      - name: Mark Pytest recovery successful only if independent harness resolved it
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path(".runs/v2-pytest-retry-evidence")
+          summary_path=root/"summary.json"
+          if not summary_path.is_file():
+              raise SystemExit("No model-attempt evidence. Official recovery unverified.")
+          attempt=json.loads(summary_path.read_text())
+          if attempt.get("model_predictions")!=1:
+              raise SystemExit("Pytest unresolved: the model produced no valid patch (see uploaded evidence).")
+          results_path=root/"official-results.json"
+          if not results_path.is_file():
+              raise SystemExit("Pytest unverified: official evaluator result missing.")
+          result=json.loads(results_path.read_text())
+          if "pytest-dev__pytest-11148" not in result.get("resolved_ids",[]):
+              raise SystemExit("Pytest unresolved in independent SWE-bench evaluator.")
+          print("Pytest officially resolved; model patch and evaluator artifacts preserved.")
+          PY
