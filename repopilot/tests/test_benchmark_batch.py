@@ -209,6 +209,54 @@ class BenchmarkBatchTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"No retryable"):
             retryable_task_ids(self.tasks,previous)
 
+    def test_timeout_captures_safe_last_source_stage_without_fake_prediction(self):
+        def fake_run(command,**kwargs):
+            output=Path(command[command.index("--output")+1])
+            output.mkdir(parents=True)
+            output.joinpath("stage.json").write_text(json.dumps({
+                "instance_id":command[3],
+                "last_completed_stage":"pinned_checkout_complete",
+                "stage_elapsed_ms":12345,
+                "officially_evaluated":False,
+                "officially_resolved":None}))
+            raise subprocess.TimeoutExpired(command,30)
+        with patch("repopilot.benchmark_batch.load_manifest",
+                   return_value=self.tasks),patch(
+                       "repopilot.benchmark_batch.subprocess.run",
+                       side_effect=fake_run):
+            result=collect(self.manifest,self.root/"stage-timeouts")
+        self.assertEqual(result["timeout_without_patch"],12)
+        self.assertEqual(result["model_predictions"],0)
+        self.assertEqual(result["missing_predictions"],12)
+        self.assertEqual(result["timeout_last_completed_stage_counts"],
+                         {"pinned_checkout_complete":12})
+        self.assertEqual(result["tasks"][0]["stage_elapsed_ms"],12345)
+        self.assertEqual(result["tasks"][0]["last_completed_stage"],
+                         "pinned_checkout_complete")
+        self.assertFalse(result["officially_evaluated"])
+
+    def test_bogus_or_mismatched_stage_file_is_ignored(self):
+        from repopilot.benchmark_batch import _read_stage
+        path=self.root/"suspect"
+        path.mkdir()
+        stage=path/"stage.json"
+        for data in ({"instance_id":"different",
+                      "last_completed_stage":"pinned_checkout_complete",
+                      "stage_elapsed_ms":123,
+                      "officially_evaluated":False},
+                     {"instance_id":"sample__project-0",
+                      "last_completed_stage":"arbitrary_untrusted_status",
+                      "stage_elapsed_ms":3,
+                      "officially_evaluated":False},
+                     {"instance_id":"sample__project-0",
+                      "last_completed_stage":"dataset_verified",
+                      "stage_elapsed_ms":-1,
+                      "officially_evaluated":False}):
+            stage.write_text(json.dumps(data))
+            self.assertEqual(_read_stage(path,"sample__project-0"),{})
+        stage.write_text("{broken")
+        self.assertEqual(_read_stage(path,"sample__project-0"),{})
+
     def test_timeout_is_unscored_and_does_not_create_prediction(self):
         with patch("repopilot.benchmark_batch.load_manifest",
                    return_value=self.tasks), patch(
