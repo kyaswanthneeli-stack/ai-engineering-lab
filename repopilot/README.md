@@ -121,7 +121,9 @@ python -m repopilot.cli benchmark .runs/verification.json --dataset "reference-p
 # python -m repopilot.cli select-swebench --limit 12 --seed 73 --output .runs/swebench-manifest.json
 ```
 
-For remote providers, set `REPOPILOT_BASE_URL`, `REPOPILOT_MODEL`, and `REPOPILOT_API_KEY` via environment variables. Never commit keys. **Only connect to trusted model endpoints**.
+For remote providers, set `REPOPILOT_BASE_URL`, `REPOPILOT_MODEL`, and `REPOPILOT_API_KEY` via environment variables.
+
+**Bounded model calls:** set `REPOPILOT_PROVIDER_TIMEOUT_SECONDS` to an integer from `10` to `120` (default `120`). The value caps each native Ollama or OpenAI-compatible HTTP request, not the entire agent run; timed-out attempts remain failures, never successes. For a **local loopback Ollama** endpoint (`http://127.0.0.1:11434/v1`) without API tokens, `REPOPILOT_OLLAMA_NATIVE=1` opts into Ollama's native JSON API to avoid compatibility-mode stalls. The real single-task SWE-bench attempt workflow opts into native mode and a 75-second request cap, but this is **not** evidence of higher official resolution accuracy. Never commit keys. **Only connect to trusted model endpoints**.
 
 ## Threat model and limits
 
