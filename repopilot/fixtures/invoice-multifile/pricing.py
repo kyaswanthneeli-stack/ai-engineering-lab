@@ -2,4 +2,6 @@ def round_money(value):
     return round(value, 2)
 
 def taxable_subtotal(items):
-    return sum(items)
+    if any(item < 0 for item in items):
+        raise ValueError('Negative item prices are not allowed')
+    return round(sum(items), 2)
