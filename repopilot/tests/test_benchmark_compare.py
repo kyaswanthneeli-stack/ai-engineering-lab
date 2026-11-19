@@ -26,10 +26,10 @@ class BenchmarkComparisonTests(unittest.TestCase):
         self.results(self.candidate_results,[self.ids[1]],[self.ids[0]],[])
 
     def predictions(self,path,ids):
-        path.write_text("".join(json.dumps({
-            "instance_id":item,"model_name_or_path":"fake-test-model",
-            "model_patch":"diff --git a/x.py b/x.py\\n"})+"\\n"
-            for item in ids).replace("\\\\n","\\n"))
+        rows=[{"instance_id":item,
+               "model_name_or_path":"fake-test-model",
+               "model_patch":"diff --git a/x.py b/x.py\n"} for item in ids]
+        path.write_text("".join(json.dumps(row)+"\n" for row in rows))
 
     def results(self,path,resolved,unresolved,errors):
         path.write_text(json.dumps({
