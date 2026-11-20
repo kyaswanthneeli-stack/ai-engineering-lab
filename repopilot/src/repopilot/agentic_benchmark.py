@@ -43,6 +43,11 @@ class AgentToolError(BenchmarkProposalError):
     pass
 
 
+class TransientOllamaError(AgentToolError):
+    """Retryable failure of the explicitly approved local Ollama endpoint."""
+    pass
+
+
 def _safe_candidate_feedback(exc:Exception)->str:
     """Keep validation diagnostics useful without echoing model/source text."""
     if isinstance(exc,SyntaxError):
@@ -123,9 +128,10 @@ def _local_ollama_chat(url,model,messages,token_budget,request_timeout_seconds=N
                 request,timeout=timeout) as response:
             payload=response.read(1_000_001)
     except urllib.error.HTTPError as exc:
-        raise AgentToolError("Local Ollama native API HTTP "+str(exc.code)) from exc
+        error=TransientOllamaError if exc.code in {408,429,500,502,503,504} else AgentToolError
+        raise error("Local Ollama native API HTTP "+str(exc.code)) from exc
     except (TimeoutError,socket.timeout,urllib.error.URLError) as exc:
-        raise AgentToolError("Local Ollama native chat failed or timed out") from exc
+        raise TransientOllamaError("Local Ollama native chat failed or timed out") from exc
     if len(payload)>1_000_000:
         raise AgentToolError("Local Ollama native response exceeded size limit")
     try:
@@ -171,14 +177,33 @@ def _provider(url,model,token,messages,*,request_timeout_seconds=None):
     if os.getenv("REPOPILOT_OLLAMA_NATIVE","").strip()=="1":
         if token:
             raise AgentToolError("Native local Ollama mode does not use API tokens")
-        if provider_deadline is None:
-            return _local_ollama_chat(url,model,messages,token_budget)
-        remaining=provider_deadline-time.monotonic()
-        if remaining<=0:
-            raise AgentToolError("Remaining agent model deadline expired")
-        return _local_ollama_chat(
-            url,model,messages,token_budget,
-            request_timeout_seconds=min(request_timeout,remaining))
+        # The native endpoint previously gave up on the first transient network
+        # error. Retry at most once, without changing the approved localhost
+        # destination or exceeding the shared whole-agent deadline. Protocol
+        # and client errors are not retried; they need a real correction.
+        for attempt in range(2):
+            if provider_deadline is None:
+                timeout=None
+            else:
+                remaining=provider_deadline-time.monotonic()
+                if remaining<=0:
+                    raise AgentToolError("Remaining agent model deadline expired")
+                timeout=min(request_timeout,remaining)
+            try:
+                if timeout is None:
+                    return _local_ollama_chat(url,model,messages,token_budget)
+                return _local_ollama_chat(
+                    url,model,messages,token_budget,
+                    request_timeout_seconds=timeout)
+            except TransientOllamaError:
+                if attempt==1:
+                    raise
+                if (provider_deadline is not None and
+                        provider_deadline-time.monotonic()<=3):
+                    raise AgentToolError(
+                        "Remaining agent model deadline expired before native retry")
+                time.sleep(2)
+        raise AgentToolError("Local Ollama retry budget exhausted")
     data=json.dumps({"model":model,"temperature":0,"max_tokens":token_budget,
         "stream":False,"messages":messages,
         "response_format":{"type":"json_object"}}).encode("utf-8")
