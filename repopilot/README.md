@@ -4,6 +4,8 @@
 
 **For Upwork clients:** [Portfolio-ready project case study, deliverables and demonstration script](UPWORK_PORTFOLIO.md). This document distinguishes verified results from experimental capabilities and includes copy suitable for an Upwork portfolio item.
 
+**RepoPilot v2.0 portfolio handoff:** [Verified v2.0 release notes](RELEASE_NOTES_v2.0.0.md) summarize the merged implementation, **183 CI tests passed, 82% coverage**, official Nov 20 **1/6 submitted and 1/12 selected** benchmark score, and limits. Formal GitHub version tagging remains separate.
+
 ## Current implementation status (verify before citing)
 
 | Capability | Current implementation | Publicly demonstrated |
