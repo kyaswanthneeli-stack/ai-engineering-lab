@@ -1,7 +1,8 @@
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
-from repopilot.context_select import ranked_source_context,describe_context
+from repopilot.context_select import ranked_source_context,describe_context,_bounded_python_walk
 
 class ContextSelectionTests(unittest.TestCase):
     def setUp(self):
@@ -53,5 +54,44 @@ class ContextSelectionTests(unittest.TestCase):
     def test_rejects_unbounded_requested_context(self):
         with self.assertRaises(ValueError):
             ranked_source_context(self.root,"tax",max_chars=1000000)
+
+    def test_source_index_avoids_unbounded_recursive_glob(self):
+        # Old Path.rglob enumerated the whole repository before the limit.
+        with patch.object(Path, "rglob", side_effect=AssertionError("unbounded glob")):
+            items = ranked_source_context(self.root, "invoice tax error",
+                                          scan_limit=1, max_files=1)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].path, "billing.py")
+
+    def test_explicit_issue_path_bypasses_partial_large_repo_index(self):
+        package = self.root / "deep" / "package"
+        package.mkdir(parents=True)
+        (package / "critical.py").write_text(
+            "def fix_critical():\n    return True\n")
+        for n in range(45):
+            (self.root / f"a_noise_{n:02}.py").write_text(
+                "def unrelated_name(): return False\n")
+        items = ranked_source_context(
+            self.root, "Fix deep/package/critical.py in the traceback",
+            scan_limit=1, max_files=1)
+        self.assertEqual(items[0].path, "deep/package/critical.py")
+
+    def test_entry_budget_limits_directory_enumeration(self):
+        root = self.root / "huge"
+        (root / "a").mkdir(parents=True)
+        (root / "b").mkdir()
+        (root / "a" / "first.py").write_text("def first(): return 1\n")
+        (root / "b" / "second.py").write_text("def second(): return 2\n")
+        # Exactly the two top-level entries fit; nested files are not read.
+        self.assertEqual(list(_bounded_python_walk(root, entry_limit=2)), [])
+        self.assertEqual(
+            {rel for _, rel in _bounded_python_walk(root, entry_limit=10)},
+            {"a/first.py", "b/second.py"})
+
+    def test_scan_limit_must_be_bounded(self):
+        for value in (0, 20001):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                ranked_source_context(self.root, "tax", scan_limit=value)
+
 if __name__=="__main__":
     unittest.main()
