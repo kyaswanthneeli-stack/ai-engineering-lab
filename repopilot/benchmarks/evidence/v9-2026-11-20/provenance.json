@@ -1,0 +1,17 @@
+{
+  "github_run_url": "https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44776554310",
+  "commit_sha": "5ffdcd5695fc2df32fef40d0e388a04798f4dee7",
+  "harness_run_id": "repopilot-12-qwen3b-v9",
+  "model": "qwen2.5-coder:3b",
+  "dataset": "princeton-nlp/SWE-bench_Lite",
+  "selected": 12,
+  "submitted": 6,
+  "evaluated": 6,
+  "resolved": 1,
+  "sha256": {
+    "manifest": "1e2f90672055036e11c0bbe4c533e4382fd451a4b021ab7901a3a2881aeed48c",
+    "model_predictions": "d78ca82a30158e00857bcf37264bcbd44ea5f920512b319171852620a9bb7ca2",
+    "official_results": "948131c480512b96d92ec9bd6db4694cf2c40aa58a20e1cf39e32e7cf58137d7",
+    "validated_summary": "9133fdd95e27e03e7b75f73660a38fe2b643f5a3b04720085c533f7c14d6183e"
+  }
+}

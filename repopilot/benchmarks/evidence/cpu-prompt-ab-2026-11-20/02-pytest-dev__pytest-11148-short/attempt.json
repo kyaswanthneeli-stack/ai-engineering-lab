@@ -1,0 +1,53 @@
+{
+  "instance_id": "pytest-dev__pytest-11148",
+  "repo": "pytest-dev/pytest",
+  "base_commit": "2f7415cfbc4b6ca62f9013f1abd27136f46b9653",
+  "status": "model_patch_proposed",
+  "officially_evaluated": false,
+  "officially_resolved": null,
+  "is_reference_patch": false,
+  "issue_context_limit_chars": 2500,
+  "issue_context_chars": 2500,
+  "issue_context_trimmed": true,
+  "model": "qwen2.5-coder:3b",
+  "agent_steps": 1,
+  "inspected_files": [
+    "src/_pytest/config/__init__.py",
+    "src/_pytest/python.py"
+  ],
+  "tool_trace": [
+    {
+      "step": 0,
+      "action": "ranked_initial_preinspect",
+      "target": "src/_pytest/python.py",
+      "rank_score": 120,
+      "result_items": 120
+    },
+    {
+      "step": 0,
+      "action": "ranked_initial_preinspect",
+      "target": "src/_pytest/config/__init__.py",
+      "rank_score": 108,
+      "result_items": 120
+    },
+    {
+      "step": 1,
+      "action": "candidate_smoke",
+      "status": "inconclusive",
+      "reason": "baseline_did_not_pass"
+    }
+  ],
+  "provider_usage": [
+    {
+      "prompt_tokens": 2736,
+      "completion_tokens": 45
+    }
+  ],
+  "candidate_smoke": {
+    "status": "inconclusive",
+    "probe": "module_import",
+    "reason": "baseline_did_not_pass"
+  },
+  "model_generated": true,
+  "elapsed_ms": 79227
+}

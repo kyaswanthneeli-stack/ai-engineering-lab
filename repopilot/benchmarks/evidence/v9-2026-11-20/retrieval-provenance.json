@@ -1,0 +1,23 @@
+{
+  "run_url": "https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44776554310",
+  "source_commit": "5ffdcd5695fc2df32fef40d0e388a04798f4dee7",
+  "downloaded_archive_sha256_verified": true,
+  "archives": [
+    {
+      "artifact_id": 14655031088,
+      "sha256": "2c9053d751d0f98af1346e70a62b54f4568c93d4c49602d30c9b6ddb0a46ca10"
+    },
+    {
+      "artifact_id": 14652074777,
+      "sha256": "eb588ec1e46eeef6e5c999eb7f8a5d11fcaf9bd4e3819347bc24ff530c811bbf"
+    }
+  ],
+  "files_sha256": {
+    "attempt-records.json": "441fc9c6689fe1b091fd91cdffe7e5ea503697f2557293a59facc17b09cfc1cf",
+    "official-evaluation-result.json": "948131c480512b96d92ec9bd6db4694cf2c40aa58a20e1cf39e32e7cf58137d7",
+    "official-summary.json": "9133fdd95e27e03e7b75f73660a38fe2b643f5a3b04720085c533f7c14d6183e",
+    "provenance.json": "11c82b2af4dba5374555d21a8e9e1dd15531771394b45f0a7fa3930e715ceab9",
+    "real-model-predictions.jsonl": "d78ca82a30158e00857bcf37264bcbd44ea5f920512b319171852620a9bb7ca2"
+  },
+  "notes": "Original JSON and JSONL copied byte-for-byte, except v9 attempt-records.json which aggregates the twelve original attempt.json objects without altering fields. Historical model proposals remain unreviewed. Checksums are integrity evidence, not proof of semantic correctness."
+}

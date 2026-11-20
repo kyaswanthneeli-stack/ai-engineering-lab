@@ -1,0 +1,21 @@
+{
+  "run_url": "https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44786475242",
+  "source_commit": "42a7302fa71c56406323d7445264149c933b5d06",
+  "downloaded_archive_sha256_verified": true,
+  "archives": [
+    {
+      "artifact_id": 14655127992,
+      "sha256": "6c75dad04f74c32d1031d0af54b2c8e5791a43937b282d17529f3ef8759f9e50"
+    }
+  ],
+  "files_sha256": {
+    "01-django__django-12113-default/attempt.json": "0d6678bae9266c376ebbabf3f16ba5b471602edc0185d25ee1496e4b81f8d72f",
+    "01-django__django-12113-default/unreviewed-prediction.json": "a7237cef8a62ad75c1ba3fcf439967666cd5d03e4f5c8a6b847a8e1203c6f9f3",
+    "02-pytest-dev__pytest-11148-short/attempt.json": "622d47d9514f4858b26c468b7ddff2ead6de686a18f1ed6cd71987a908e5752a",
+    "02-pytest-dev__pytest-11148-short/unreviewed-prediction.json": "5f5b96ca069695c82ac175cc0a24c452ee631d83935d3e16f03b5eec80c9ecfa",
+    "03-django__django-12113-short/attempt.json": "02f969d2c29bf429ae87c26d963e571d810a068980b4cfddb3c7e93a5e54beaf",
+    "04-pytest-dev__pytest-11148-default/attempt.json": "14b9be59e8846d80e5c42af60ee0484d87f363fd3e69bf354c88b7b5ee24499b",
+    "comparison.json": "522852f318ea56b5fb75aae3b51c72b87ae03717c60e7dcd4636dadb5216c174"
+  },
+  "notes": "Original JSON and JSONL copied byte-for-byte, except v9 attempt-records.json which aggregates the twelve original attempt.json objects without altering fields. Historical model proposals remain unreviewed. Checksums are integrity evidence, not proof of semantic correctness."
+}
