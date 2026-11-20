@@ -98,7 +98,8 @@ def _import_probe(targets: list[str], *, root: Path | None = None) -> tuple[str,
     origins = []
     for original_path in targets[:2]:
         path = original_path
-        if (os.getenv("REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP", "0").strip() == "1"
+        if ((os.getenv("REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP", "0").strip() == "1"
+                or native_runtime.selected(targets))
                 and root is not None and path.startswith(("src/", "lib/"))
                 and not (root / path.split("/", 1)[0] / "__init__.py").exists()):
             path = path.split("/", 1)[1]
@@ -316,6 +317,7 @@ def smoke_candidate(repo: Path, patch: str, issue: str, *,
                                                        evidence=diagnostics)
             remaining = timeout - (time.monotonic() - started)
             if alternate_kind == "source_doctest" and remaining >= 12:
+                diagnostics["behavior_bootstrap_profile"] = profile
                 code, cleanup_failure = _run_docker(
                     root, setup + alternate, overlay=None, targets=targets,
                     timeout=min(5, remaining / 2), diagnostics=diagnostics,

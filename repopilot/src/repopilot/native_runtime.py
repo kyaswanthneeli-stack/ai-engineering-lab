@@ -45,7 +45,7 @@ def prefix(repo: Path, targets: list[str]) -> str:
         "import subprocess as _sp, hashlib as _hash, importlib.util as _iu, sys as _sys\n"
         "from pathlib import Path as _Path\n"
         "try:\n"
-        "    _diff = _sp.run(['git','-c','safe.directory=/testbed','-C','/testbed',"
+        "    _diff = _sp.run(['git','-c','safe.directory=/testbed','-c','core.fileMode=false','-C','/testbed',"
         "'diff','--quiet'," + repr(MATPLOTLIB_BASE) +
         ",'--','lib/matplotlib','src','extern'], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL, timeout=3)\n"
         "    if _diff.returncode != 0: raise SystemExit(78)\n"
