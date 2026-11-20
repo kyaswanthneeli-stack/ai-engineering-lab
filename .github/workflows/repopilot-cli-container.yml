@@ -5,16 +5,9 @@ on:
     paths:
       - 'repopilot/**'
       - '.github/workflows/repopilot-cli-container.yml'
-  push:
-    branches:
-      - main
-    paths:
-      - 'repopilot/src/**'
-      - 'repopilot/container/**'
-      - 'repopilot/pyproject.toml'
-      - 'repopilot/SECURITY.md'
-      - 'repopilot/docs/**'
-      - '.github/workflows/repopilot-cli-container.yml'
+  # v2.2.0rc1 was released successfully from commit 37d35b4f498d;
+  # never auto-republish this immutable prerelease on later docs/code pushes.
+  # Future versions get a new versioned release workflow.
   workflow_dispatch:
 
 permissions:
