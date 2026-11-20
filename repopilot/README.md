@@ -2,6 +2,8 @@
 
 **RepoPilot v1.0.0** is an independent Python issue-to-patch engineering prototype. The source is inspectable, with explicit trust boundaries and tests. See [v1.0.0 release notes](RELEASE_NOTES_v1.0.0.md), the [interactive demo](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/recruiter-demo.html), and the [official benchmark evidence](benchmarks/OFFICIAL_EVALUATION_2026-11-19.md). It is a validated portfolio release, not a production autonomous code-repair service.
 
+**For Upwork clients:** [Portfolio-ready project case study, deliverables and demonstration script](UPWORK_PORTFOLIO.md). This document distinguishes verified results from experimental capabilities and includes copy suitable for an Upwork portfolio item.
+
 ## Current implementation status (verify before citing)
 
 | Capability | Current implementation | Publicly demonstrated |
