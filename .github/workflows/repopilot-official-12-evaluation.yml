@@ -207,7 +207,7 @@ jobs:
                          for name,path in files.items()},
           }
           Path('.runs/official-evidence/provenance.json').write_text(
-              json.dumps(provenance,indent=2)+'\\n', encoding='utf-8')
+              json.dumps(provenance,indent=2)+'\n', encoding='utf-8')
           print('OFFICIAL RESOLVED:', summary['resolved'])
           print('OFFICIAL SUBMITTED:', summary['submitted'])
           print('SELECTED COHORT:', summary['selected'])
