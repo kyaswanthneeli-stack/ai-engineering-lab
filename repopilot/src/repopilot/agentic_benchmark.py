@@ -82,6 +82,18 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 
+def _provider_timeout_seconds() -> int:
+    """Bound each provider request; reject invalid settings before network I/O."""
+    raw=os.getenv("REPOPILOT_PROVIDER_TIMEOUT_SECONDS","120")
+    try:
+        seconds=int(raw)
+    except (TypeError,ValueError) as exc:
+        raise AgentToolError("Invalid provider timeout setting") from exc
+    if not 10<=seconds<=120:
+        raise AgentToolError("Provider timeout must be between 10 and 120 seconds")
+    return seconds
+
+
 def _local_ollama_chat(url,model,messages,token_budget):
     """Fallback only for a local Ollama /v1 endpoint returning HTTP 404.
 
@@ -105,7 +117,7 @@ def _local_ollama_chat(url,model,messages,token_budget):
         headers={"Content-Type":"application/json"})
     try:
         with urllib.request.build_opener(_NoRedirect()).open(
-                request,timeout=120) as response:
+                request,timeout=_provider_timeout_seconds()) as response:
             payload=response.read(1_000_001)
     except urllib.error.HTTPError as exc:
         raise AgentToolError("Local Ollama native API HTTP "+str(exc.code)) from exc
@@ -131,6 +143,7 @@ def _provider(url,model,token,messages):
         raise AgentToolError("Invalid model endpoint")
     if parts.scheme=="http" and parts.hostname not in {"localhost","127.0.0.1","::1"}:
         raise AgentToolError("Remote models require HTTPS")
+    request_timeout=_provider_timeout_seconds()
     # Small CPU-only runners need a smaller generation budget for complex repos.
     # Bound configuration so workflow input cannot cause unbounded model output.
     try:
@@ -159,7 +172,7 @@ def _provider(url,model,token,messages):
     for attempt in range(2):
         try:
             with urllib.request.build_opener(_NoRedirect()).open(
-                    request,timeout=120) as response:
+                    request,timeout=request_timeout) as response:
                 payload=response.read(1_000_001)
                 if len(payload)>1_000_000:
                     raise AgentToolError("Model response exceeded size limit")

@@ -111,6 +111,53 @@ class AgentTests(unittest.TestCase):
                 client=client,max_steps=3,required_targets={"pricing.py"})
         self.assertEqual(len(calls),3)
 
+    def test_provider_timeout_override_applies_to_compatible_api(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def read(self,n): return b'{"choices":[{"message":{"content":"{}"}}]}'
+        class Opener:
+            def __init__(self): self.timeouts=[]
+            def open(self,request,*,timeout):
+                self.timeouts.append(timeout)
+                return Response()
+        opener=Opener()
+        with patch.dict("os.environ",{"REPOPILOT_PROVIDER_TIMEOUT_SECONDS":"45"}), patch(
+              "repopilot.agentic_benchmark.urllib.request.build_opener",
+              return_value=opener):
+            result=_provider("https://example.com/v1","mock",None,[])
+        self.assertEqual(opener.timeouts,[45])
+        self.assertEqual(result["choices"][0]["message"]["content"],"{}")
+
+    def test_provider_timeout_override_applies_to_local_native_api(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def read(self,n): return b'{"message":{"content":"{}"}}'
+        class Opener:
+            def __init__(self): self.timeouts=[]
+            def open(self,request,*,timeout):
+                self.timeouts.append(timeout)
+                return Response()
+        opener=Opener()
+        with patch.dict("os.environ",{
+              "REPOPILOT_OLLAMA_NATIVE":"1",
+              "REPOPILOT_PROVIDER_TIMEOUT_SECONDS":"30"}), patch(
+              "repopilot.agentic_benchmark.urllib.request.build_opener",
+              return_value=opener):
+            result=_provider("http://127.0.0.1:11434/v1","mock",None,[])
+        self.assertEqual(opener.timeouts,[30])
+        self.assertEqual(result["choices"][0]["message"]["content"],"{}")
+
+    def test_provider_timeout_invalid_values_fail_before_network(self):
+        for value in ("0","9","121","bad","1.5",""):
+            with self.subTest(value=value), patch.dict(
+                    "os.environ",{"REPOPILOT_PROVIDER_TIMEOUT_SECONDS":value}), patch(
+                    "repopilot.agentic_benchmark.urllib.request.build_opener") as opener:
+                with self.assertRaisesRegex(AgentToolError,"[Pp]rovider timeout"):
+                    _provider("https://example.com/v1","mock",None,[])
+                opener.assert_not_called()
+
     def test_provider_transient_503_retries_then_returns_response(self):
         class Response:
             def __enter__(self): return self
