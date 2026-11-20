@@ -338,7 +338,8 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(result.patch.count("diff --git"),2)
         self.assertEqual(meta["agent_steps"],5)
         self.assertEqual(meta["inspected_files"],["checkout.py","pricing.py"])
-        self.assertEqual(len(meta["tool_trace"]),4)
+        self.assertEqual(len(meta["tool_trace"]),5)
+        self.assertEqual(meta["candidate_quality"]["status"],"changed_or_unknown")
     def test_defers_early_finish_until_all_required_files_changed(self):
         steps=[
             {"action":"read","path":"pricing.py"},
@@ -372,7 +373,8 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(patch.patch.count("diff --git"),2)
         self.assertEqual(meta["agent_steps"],1)
         self.assertEqual([x["action"] for x in meta["tool_trace"]],
-                         ["preinspect","preinspect","final_phase_started"])
+                         ["preinspect","preinspect","final_phase_started",
+                          "candidate_quality"])
         self.assertTrue(any("EXACT COMPLETE SOURCE" in m["content"] for m in captured))
 
     def test_malformed_finish_gets_bounded_correction(self):

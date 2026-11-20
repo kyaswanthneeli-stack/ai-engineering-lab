@@ -1,0 +1,71 @@
+name: RepoPilot four-case v9 smoke diagnosis
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/repopilot-v9-smoke-diagnostics.yml'
+      - 'repopilot/ci/replay_v9_smoke.py'
+      - 'repopilot/src/repopilot/candidate_smoke.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: repopilot-v9-smoke-diagnosis
+  cancel-in-progress: false
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    defaults:
+      run:
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install trusted diagnostic code and dataset reader
+        run: python -m pip install -e . 'datasets>=3.0,<5.0'
+      - name: Download exact official v9 evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: repopilot-12-official-harness-v9
+          run-id: 44776554310
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: repopilot/.runs/v9-replay-original
+      - name: Build unchanged trusted offline dependency runtime
+        run: docker build --pull -t repopilot-candidate-deps:py310 -f ci/Dockerfile.candidate-smoke ci
+      - name: Replay same three failed baselines and control before and after import setup
+        env:
+          REPOPILOT_CANDIDATE_SMOKE_IMAGE: repopilot-candidate-deps:py310
+        run: |
+          REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP=0 python ci/replay_v9_smoke.py \
+            --evidence .runs/v9-replay-original \
+            --output .runs/v9-smoke-diagnostics/before \
+            --label before-runtime-fix
+          REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP=1 python ci/replay_v9_smoke.py \
+            --evidence .runs/v9-replay-original \
+            --output .runs/v9-smoke-diagnostics/after \
+            --label after-import-setup
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('.runs/v9-smoke-diagnostics')
+          before=json.loads((root/'before/summary.json').read_text())
+          after=json.loads((root/'after/summary.json').read_text())
+          assert before['selected_tasks']==after['selected_tasks']
+          for a,b in zip(before['records'],after['records']):
+              assert a['base_commit']==b['base_commit']
+              assert a['original_prediction_sha256']==b['original_prediction_sha256']
+          print('USABLE BASELINES BEFORE:',before['usable_smoke_baselines'])
+          print('USABLE BASELINES AFTER:',after['usable_smoke_baselines'])
+          print('NO MODEL CALLS OR OFFICIAL RESOLUTION CLAIM')
+          PY
+      - name: Preserve sanitized replay diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-v9-four-case-smoke-diagnostics
+          path: repopilot/.runs/v9-smoke-diagnostics/
+          if-no-files-found: warn
+          retention-days: 30

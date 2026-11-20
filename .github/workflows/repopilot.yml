@@ -102,6 +102,68 @@ jobs:
               assert file.read_text()==original
               print('PASS: trusted offline dependencies enable real baseline-pass/candidate-fail check')
           PY
+      - name: Verify sanitized baseline diagnosis in real offline Docker
+        env:
+          REPOPILOT_CANDIDATE_SMOKE_IMAGE: repopilot-candidate-deps:py310
+        run: |
+          python - <<'PY'
+          import json
+          import tempfile
+          from pathlib import Path
+          from repopilot.candidate_smoke import smoke_candidate
+          from repopilot.candidate_quality import review_quote_only_patch
+          with tempfile.TemporaryDirectory(prefix='repopilot-diagnostics-') as td:
+              root=Path(td)/'repo'
+              root.mkdir(mode=0o755)
+              source='import repopilot_missing_dependency_fixture\nvalue = 1\n'
+              (root/'fixture.py').write_text(source)
+              patch=('diff --git a/fixture.py b/fixture.py\n'
+                     '--- a/fixture.py\n+++ b/fixture.py\n'
+                     '@@ -1,2 +1,2 @@\n'
+                     ' import repopilot_missing_dependency_fixture\n'
+                     '-value = 1\n+value = 2\n')
+              result=smoke_candidate(root,patch,'Fix fixture value',timeout=22)
+              assert result['status']=='inconclusive', result
+              assert result['baseline_failure_category']=='import_error', result
+              assert 'repopilot_missing_dependency_fixture' not in json.dumps(result)
+              assert (root/'fixture.py').read_text()==source
+              (root/'fixture.py').write_text('value = "pytest"\n')
+              quote_patch=('diff --git a/fixture.py b/fixture.py\n'
+                           '--- a/fixture.py\n+++ b/fixture.py\n'
+                           '@@ -1 +1 @@\n-value = "pytest"\n'
+                           "+value = 'pytest'\n")
+              assert review_quote_only_patch(root,quote_patch)['status']=='quote_only'
+              print('PASS: actual offline import failure diagnosed without raw stderr; quote-only proposal detected')
+          PY
+      - name: Verify opt-in historical import setup in real offline Docker
+        env:
+          REPOPILOT_CANDIDATE_SMOKE_IMAGE: repopilot-candidate-deps:py310
+        run: |
+          python - <<'PY'
+          import os,tempfile
+          from pathlib import Path
+          from repopilot.candidate_smoke import smoke_candidate
+          with tempfile.TemporaryDirectory(prefix='repopilot-legacy-import-') as td:
+              root=Path(td)/'repo'
+              (root/'sympy').mkdir(parents=True,mode=0o755)
+              (root/'sympy/__init__.py').write_text('')
+              source='from collections import Mapping\nvalue = 1\n'
+              (root/'sympy/fixture.py').write_text(source)
+              patch=('diff --git a/sympy/fixture.py b/sympy/fixture.py\n'
+                     '--- a/sympy/fixture.py\n+++ b/sympy/fixture.py\n'
+                     '@@ -1,2 +1,2 @@\n from collections import Mapping\n'
+                     '-value = 1\n+raise RuntimeError("candidate import regression")\n')
+              os.environ['REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP']='0'
+              before=smoke_candidate(root,patch,'Import check',timeout=25)
+              assert before['status']=='inconclusive',before
+              assert before['baseline_failure_category']=='legacy_collections_api',before
+              os.environ['REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP']='1'
+              after=smoke_candidate(root,patch,'Import check',timeout=25)
+              assert after['status']=='regression',after
+              assert after['baseline_exit_code']==0,after
+              assert (root/'sympy/fixture.py').read_text()==source
+              print('PASS: historical import setup enables pristine baseline and detects actual candidate regression')
+          PY
       - name: Verify issue reproduction fallback in real offline Docker
         env:
           REPOPILOT_CANDIDATE_SMOKE_IMAGE: repopilot-candidate-deps:py310

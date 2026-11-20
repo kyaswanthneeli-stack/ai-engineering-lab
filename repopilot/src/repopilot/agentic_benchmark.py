@@ -21,6 +21,7 @@ from pathlib import Path
 from .benchmark_planner import BenchmarkPatch,BenchmarkProposalError
 from .context_select import ranked_source_context,is_test_path,is_test_infrastructure_issue
 from .candidate_smoke import smoke_candidate
+from .candidate_quality import review_quote_only_patch
 from .edit_plan import canonical_patch
 from .patches import validate_patch
 from .pr import patch_targets
@@ -904,6 +905,23 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                     "text supplied in read output and submit corrected edits JSON."})
                 continue
             smoke_report=None
+            quality_report=review_quote_only_patch(root,patch)
+            trace.append({"step":index+1,"action":"candidate_quality",
+                          **quality_report})
+            if (quality_report["status"]=="quote_only" and
+                    os.getenv("REPOPILOT_REJECT_QUOTE_ONLY","1").strip()!="0"):
+                last_candidate_reason=("Your candidate changed only literal spelling "
+                    "with equal values and otherwise unchanged Python tokens. "
+                    "Provide a NEW behavioral fix in inspected source; quote-only "
+                    "edits are insufficient for this repair task.")
+                trace.append({"step":index+1,"action":"finish_rejected",
+                              "error_type":"QuoteOnlyProposal",
+                              "reason":"quote_only_proposal"})
+                if index==max_steps-1:
+                    raise AgentToolError(
+                        "Quote-only proposal rejected after step budget")
+                messages.append({"role":"user","content":last_candidate_reason})
+                continue
             if os.getenv("REPOPILOT_CANDIDATE_SMOKE","").strip()=="1":
                 # No Docker execution occurs in the host model process: the
                 # validator runs issue examples or import probes only inside
@@ -945,6 +963,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 "provider_reported_usage_by_attempt":usage,
                 "agent_steps":index+1,"inspected_files":sorted(read_files),
                 "tool_trace":trace,"officially_evaluated":False,
+                "candidate_quality":quality_report,
                 "candidate_smoke":smoke_report
             }
         try:

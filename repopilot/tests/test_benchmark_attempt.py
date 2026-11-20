@@ -115,6 +115,10 @@ class AttemptsTests(unittest.TestCase):
             result,meta=self.proposed()
             return result,{**meta,"agent_steps":4,
                            "inspected_files":["main.py"],
+                           "candidate_quality":{"status":"changed_or_unknown",
+                                                "reason":"tokens_or_positions_differ"},
+                           "candidate_smoke":{"status":"inconclusive",
+                                              "baseline_failure_category":"import_error"},
                            "tool_trace":[{"step":1,"action":"read"}]}
         output=self.root/"traced"
         result=attempt_one(self.manifest,INSTANCE,output,
@@ -123,6 +127,9 @@ class AttemptsTests(unittest.TestCase):
         self.assertEqual(result["agent_steps"],4)
         self.assertEqual(result["inspected_files"],["main.py"])
         self.assertEqual(result["tool_trace"][0]["action"],"read")
+        saved=json.loads((output/"attempt.json").read_text())
+        self.assertEqual(saved["candidate_quality"]["status"],"changed_or_unknown")
+        self.assertEqual(saved["candidate_smoke"]["baseline_failure_category"],"import_error")
 
     def test_failed_model_attempt_is_not_a_success(self):
         output=self.root/"fail"
