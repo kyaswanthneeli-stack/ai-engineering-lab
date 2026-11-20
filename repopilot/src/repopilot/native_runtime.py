@@ -1,7 +1,7 @@
 """Explicit digest-pinned Matplotlib native support for one verified checkout.
 
 Python source always comes from the read-only pinned /workspace checkout.
-Only native/built assets may fall back to the official instance image. No target
+Native extensions and generated version metadata may fall back to the official instance image. No target
 build/install scripts run on the host, and no model-supplied image is accepted.
 """
 from __future__ import annotations
@@ -100,6 +100,14 @@ def prefix(repo: Path, targets: list[str]) -> str:
         "submodule_search_locations=['/workspace/lib/matplotlib'])\n"
         "_mpl = _iu.module_from_spec(_spec)\n"
         "_sys.modules['matplotlib'] = _mpl\n"
+        "# setuptools_scm writes this module when building the pinned instance.\n"
+        "if not _Path('/workspace/lib/matplotlib/_version.py').exists():\n"
+        "    _version_path = _Path('/testbed/lib/matplotlib/_version.py')\n"
+        "    if _version_path.resolve() != _version_path or not _version_path.is_file(): raise SystemExit(78)\n"
+        "    _vspec = _iu.spec_from_file_location('matplotlib._version', _version_path)\n"
+        "    _version = _iu.module_from_spec(_vspec)\n"
+        "    _vspec.loader.exec_module(_version)\n"
+        "    _sys.modules['matplotlib._version'] = _mpl._version = _version\n"
         "_spec.loader.exec_module(_mpl)\n"
         "assert _Path(_mpl.__file__).resolve() == _Path('/workspace/lib/matplotlib/__init__.py')\n"
     )
