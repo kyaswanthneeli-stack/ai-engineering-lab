@@ -20,6 +20,7 @@ from pathlib import Path
 
 from .benchmark_planner import BenchmarkPatch,BenchmarkProposalError
 from .context_select import ranked_source_context,is_test_path,is_test_infrastructure_issue
+from .candidate_smoke import smoke_candidate
 from .edit_plan import canonical_patch
 from .patches import validate_patch
 from .pr import patch_targets
@@ -902,11 +903,49 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                     "Patch did not apply to the unchanged source. Use exact source "+
                     "text supplied in read output and submit corrected edits JSON."})
                 continue
+            smoke_report=None
+            if os.getenv("REPOPILOT_CANDIDATE_SMOKE","").strip()=="1":
+                # No Docker execution occurs in the host model process: the
+                # validator runs issue examples or import probes only inside
+                # the same resource-restricted, offline sandbox as tests.
+                # Reserve the agent's absolute deadline for reporting.
+                remaining=(budget_seconds-(time.monotonic()-started_at)-2
+                           if budget_seconds else 20)
+                if remaining<12:
+                    smoke_report={"status":"skipped","reason":"agent_deadline"}
+                else:
+                    try:
+                        smoke_report=smoke_candidate(
+                            root,patch,issue_text,timeout=min(18,int(remaining)))
+                    except Exception:
+                        # Missing dependencies or Docker/environment errors do
+                        # not become false evidence that the patch passed.
+                        smoke_report={"status":"inconclusive",
+                                      "reason":"validator_unavailable"}
+                trace.append({"step":index+1,"action":"candidate_smoke",
+                              "status":smoke_report["status"],
+                              "reason":smoke_report.get("reason","")})
+                if smoke_report["status"]=="regression":
+                    # Apply-check is not behavioral validation. A test that
+                    # passes before the edit and breaks after is strong enough
+                    # to reject this candidate without claiming any solve.
+                    if index==max_steps-1:
+                        raise AgentToolError(
+                            "Candidate introduced a sandbox smoke regression")
+                    messages.append({"role":"user","content":
+                        "Your candidate was REJECTED before submission: a "
+                        "bounded Docker smoke probe passed on the original "
+                        "source but failed with your patch. Keep the existing "
+                        "public behavior and provide a NEW corrected finish "
+                        "action using the inspected implementation files. "
+                        "Do not claim tests passed."})
+                    continue
             return BenchmarkPatch(patch),{
                 "model":model,"status":"model_patch_proposed_unverified",
                 "provider_reported_usage_by_attempt":usage,
                 "agent_steps":index+1,"inspected_files":sorted(read_files),
-                "tool_trace":trace,"officially_evaluated":False
+                "tool_trace":trace,"officially_evaluated":False,
+                "candidate_smoke":smoke_report
             }
         try:
             if name=="list" and set(action)<= {"action","prefix"}:
