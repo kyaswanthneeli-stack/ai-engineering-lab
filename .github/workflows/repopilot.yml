@@ -102,6 +102,39 @@ jobs:
               assert file.read_text()==original
               print('PASS: trusted offline dependencies enable real baseline-pass/candidate-fail check')
           PY
+      - name: Verify sanitized baseline diagnosis in real offline Docker
+        env:
+          REPOPILOT_CANDIDATE_SMOKE_IMAGE: repopilot-candidate-deps:py310
+        run: |
+          python - <<'PY'
+          import json
+          import tempfile
+          from pathlib import Path
+          from repopilot.candidate_smoke import smoke_candidate
+          from repopilot.candidate_quality import review_quote_only_patch
+          with tempfile.TemporaryDirectory(prefix='repopilot-diagnostics-') as td:
+              root=Path(td)/'repo'
+              root.mkdir(mode=0o755)
+              source='import repopilot_missing_dependency_fixture\nvalue = 1\n'
+              (root/'fixture.py').write_text(source)
+              patch=('diff --git a/fixture.py b/fixture.py\n'
+                     '--- a/fixture.py\n+++ b/fixture.py\n'
+                     '@@ -1,2 +1,2 @@\n'
+                     ' import repopilot_missing_dependency_fixture\n'
+                     '-value = 1\n+value = 2\n')
+              result=smoke_candidate(root,patch,'Fix fixture value',timeout=22)
+              assert result['status']=='inconclusive', result
+              assert result['baseline_failure_category']=='import_error', result
+              assert 'repopilot_missing_dependency_fixture' not in json.dumps(result)
+              assert (root/'fixture.py').read_text()==source
+              (root/'fixture.py').write_text('value = "pytest"\n')
+              quote_patch=('diff --git a/fixture.py b/fixture.py\n'
+                           '--- a/fixture.py\n+++ b/fixture.py\n'
+                           '@@ -1 +1 @@\n-value = "pytest"\n'
+                           "+value = 'pytest'\n")
+              assert review_quote_only_patch(root,quote_patch)['status']=='quote_only'
+              print('PASS: actual offline import failure diagnosed without raw stderr; quote-only proposal detected')
+          PY
       - name: Verify issue reproduction fallback in real offline Docker
         env:
           REPOPILOT_CANDIDATE_SMOKE_IMAGE: repopilot-candidate-deps:py310

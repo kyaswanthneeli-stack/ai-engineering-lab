@@ -68,10 +68,56 @@ def _reproducer(issue: str, targets: list[str]) -> tuple[str, str]:
         "module_import")
 
 
+def _failure_category(code: int, stderr_tail: str) -> str | None:
+    """Best-effort observed category, never retain exception text or paths.
+
+    Untrusted code can spoof stderr. Categories are diagnostic hints only;
+    they never turn a failing baseline into a pass or establish root cause.
+    """
+    if code == 0:
+        return None
+    if code in (125, 126, 127):
+        return "container_runtime_error"
+    if code < 0 or code >= 128:
+        return "resource_or_signal_exit"
+    lines = stderr_tail[-4096:].splitlines()
+    last = next((line for line in reversed(lines) if line.strip()), "")
+    exception = last.split(":", 1)[0].strip()
+    return {
+        "ModuleNotFoundError": "import_error",
+        "ImportError": "import_error",
+        "django.core.exceptions.ImproperlyConfigured": "configuration_error",
+        "ImproperlyConfigured": "configuration_error",
+        "SyntaxError": "syntax_error",
+        "IndentationError": "syntax_error",
+        "TabError": "syntax_error",
+        "AssertionError": "assertion_failed",
+        "PermissionError": "permission_error",
+        "FileNotFoundError": "file_not_found",
+    }.get(exception, "nonzero_exit")
+
+
 def _run_docker(repo: Path, script: str, *, overlay: Path | None,
-                targets: list[str], timeout: float) -> tuple[int | None, bool]:
+                targets: list[str], timeout: float,
+                diagnostics: dict | None = None,
+                phase: str = "baseline") -> tuple[int | None, bool]:
     """Run a fixed Python command with no host credentials, network or writes."""
     container = "repopilot-smoke-" + uuid.uuid4().hex[:16]
+    if phase not in {"baseline", "fallback_baseline", "candidate"}:
+        raise ValueError("Invalid smoke phase")
+    def record(code, category):
+        if diagnostics is not None:
+            diagnostics[phase + "_exit_code"] = code
+            diagnostics[phase + "_failure_category"] = category
+    def cleanup_failed():
+        try:
+            cleanup = subprocess.run(
+                ["docker", "rm", "-f", container],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=6, check=False)
+            return cleanup.returncode != 0
+        except (OSError, subprocess.TimeoutExpired):
+            return True
     args = [
         "docker", "run", "--name", container, "--rm", "--pull=never",
         "--network=none", "--cap-drop=ALL",
@@ -92,20 +138,29 @@ def _run_docker(repo: Path, script: str, *, overlay: Path | None,
         raise ValueError("Unapproved candidate smoke runtime image")
     args.extend(["-w", "/workspace", image, "python", "-c", script])
     try:
-        result = subprocess.run(
-            args, capture_output=True, text=True, check=False,
-            timeout=timeout)
-        # Do not retain untrusted source, traceback or issue contents.
+        # Discard stdout; inspect only the final 4 KiB of temporary stderr.
+        # Never put raw traceback, source, missing module names or issue text
+        # into the persistent report, provider feedback or model context.
+        with tempfile.TemporaryFile() as errors:
+            result = subprocess.run(
+                args, stdout=subprocess.DEVNULL, stderr=errors, check=False,
+                timeout=timeout)
+            size = errors.seek(0, os.SEEK_END)
+            errors.seek(max(0, size - 4096))
+            category = _failure_category(
+                result.returncode, errors.read(4096).decode("utf-8", "replace"))
+        record(result.returncode, category)
+        if result.returncode < 0 or result.returncode >= 128:
+            return None, cleanup_failed()
+        if result.returncode in (125, 126, 127):
+            # A Docker/client failure cannot prove a code regression.
+            return None, False
         return result.returncode, False
     except subprocess.TimeoutExpired:
-        try:
-            cleanup = subprocess.run(
-                ["docker", "rm", "-f", container],
-                capture_output=True, timeout=6, check=False)
-            return None, cleanup.returncode != 0
-        except (OSError, subprocess.TimeoutExpired):
-            return None, True
+        record(None, "probe_timeout")
+        return None, cleanup_failed()
     except OSError:
+        record(None, "docker_unavailable")
         return None, False
 
 
@@ -123,7 +178,6 @@ def smoke_candidate(repo: Path, patch: str, issue: str, *,
     started = time.monotonic()
     if _approved_image() is None:
         return {"status": "skipped", "reason": "unapproved_runtime_image"}
-    result = {"status": "inconclusive", "probe": "none"}
     if shutil.which("docker") is None:
         return {"status": "skipped", "reason": "docker_unavailable"}
     root = repo.resolve(strict=True)
@@ -143,7 +197,10 @@ def smoke_candidate(repo: Path, patch: str, issue: str, *,
     script, kind = _reproducer(issue, targets)
     if not script:
         return {"status": "skipped", "reason": "no_probe"}
-    result["probe"] = kind
+    diagnostics = {}
+    def report(status, probe, reason):
+        return {"status": status, "probe": probe, "reason": reason,
+                **diagnostics}
     with tempfile.TemporaryDirectory(prefix="repopilot-candidate-") as tmp:
         staging = Path(tmp) / "overlay"
         staging.mkdir()
@@ -164,13 +221,12 @@ def smoke_candidate(repo: Path, patch: str, issue: str, *,
                     "reason": "deadline"}
         before, unsafe_cleanup = _run_docker(
             root, script, overlay=None, targets=targets,
-            timeout=min(7, remaining / 2))
+            timeout=min(7, remaining / 2), diagnostics=diagnostics,
+            phase="baseline")
         if unsafe_cleanup:
-            return {"status": "inconclusive", "probe": kind,
-                    "reason": "container_cleanup_unconfirmed"}
+            return report("inconclusive", kind, "container_cleanup_unconfirmed")
         if before is None:
-            return {"status": "inconclusive", "probe": kind,
-                    "reason": "baseline_unavailable"}
+            return report("inconclusive", kind, "baseline_unavailable")
         if before != 0 and kind == "issue_python_example":
             # Public issue examples often *demonstrate* the existing bug,
             # so failing on original source is expected. The candidate
@@ -182,36 +238,31 @@ def smoke_candidate(repo: Path, patch: str, issue: str, *,
             if fallback_kind == "module_import" and remaining >= 9:
                 fallback_before, cleanup_failure = _run_docker(
                     root, fallback_script, overlay=None, targets=targets,
-                    timeout=min(5, remaining / 2))
+                    timeout=min(5, remaining / 2), diagnostics=diagnostics,
+                    phase="fallback_baseline")
                 if cleanup_failure:
-                    return {"status": "inconclusive", "probe": kind,
-                            "reason": "container_cleanup_unconfirmed"}
+                    return report("inconclusive", kind, "container_cleanup_unconfirmed")
                 if fallback_before == 0:
                     script = fallback_script
                     kind = "module_import_fallback"
                     before = 0
                 else:
-                    return {"status": "inconclusive", "probe": kind,
-                            "reason": "baseline_did_not_pass"}
+                    return report("inconclusive", kind, "baseline_did_not_pass")
             else:
-                return {"status": "inconclusive", "probe": kind,
-                        "reason": "baseline_did_not_pass"}
+                return report("inconclusive", kind, "baseline_did_not_pass")
         if before != 0:
             # A failed original-code import is not evidence the proposed
             # candidate is broken. Do not upgrade to a false pass.
-            return {"status": "inconclusive", "probe": kind,
-                    "reason": "baseline_did_not_pass"}
+            return report("inconclusive", kind, "baseline_did_not_pass")
         remaining = timeout - (time.monotonic() - started)
         if remaining < 3:
-            return {"status": "skipped", "probe": kind, "reason": "deadline"}
+            return report("skipped", kind, "deadline")
         after, unsafe_cleanup = _run_docker(
             root, script, overlay=staging, targets=targets,
-            timeout=min(7, remaining))
+            timeout=min(7, remaining), diagnostics=diagnostics,
+            phase="candidate")
         if unsafe_cleanup or after is None:
-            return {"status": "inconclusive", "probe": kind,
-                    "reason": "candidate_or_cleanup_unavailable"}
+            return report("inconclusive", kind, "candidate_or_cleanup_unavailable")
         if after != 0:
-            return {"status": "regression", "probe": kind,
-                    "reason": "baseline_passed_candidate_failed"}
-        return {"status": "no_regression_observed", "probe": kind,
-                "reason": "limited_probe_only"}
+            return report("regression", kind, "baseline_passed_candidate_failed")
+        return report("no_regression_observed", kind, "limited_probe_only")

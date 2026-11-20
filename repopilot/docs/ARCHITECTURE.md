@@ -61,3 +61,35 @@ sandbox isolation beyond a shared Docker daemon, secrets management,
 disaster recovery, security scanning, service observability and reliable
 performance on a larger independent benchmark. Do not advertise these
 as features of the current release candidate.
+
+## Candidate quality and smoke diagnosis
+
+The bounded benchmark agent checks every accepted finish schema (exact edits,
+complete files or unified diff) in a private data-only overlay before submission.
+It rejects an edit when ordinary string/bytes literal values, every other Python
+token and token positions are equal across all affected files. This catches the
+observed quote-only pytest proposal. Correction uses the existing model-step and
+wall-clock budgets; repeated quote-only proposals fail without a submission.
+Original source is never modified or imported by this static check.
+
+This is a narrow repair heuristic, not a general proof of behavioral equivalence
+or correctness. Changes to values, comments, directives, line positions or other
+tokens are not rejected by it. Source reflection can depend on exact spelling;
+an operator can set `REPOPILOT_REJECT_QUOTE_ONLY=0` for that use case. Unsupported
+syntax, unsafe paths and unavailable analysis receive `unavailable`, not a pass.
+Attempt records preserve `candidate_quality` independently of official scoring.
+
+Smoke reports now include separate baseline, fallback-baseline and candidate
+exit codes and fixed failure categories. Stdout is discarded; only the last
+4 KiB of temporary stderr is inspected and the temporary file is discarded.
+No traceback, exception message, missing module name or source path is retained
+in reports or model feedback. Categories are observed hints from untrusted
+stderr, not authenticated root-cause evidence, and do not turn a failure into a
+pass. Docker launch/client failures, resource/signal exits, timeouts and uncertain
+cleanup stay inconclusive. A normal failing Python probe after the same original
+probe passes can still establish a limited regression signal.
+
+Real restricted-Docker CI verifies an import-failing baseline yields sanitized
+`import_error` evidence. These checks do not change the verified official
+SWE-bench result of **1/12 selected tasks resolved**; another controlled experiment
+and official harness run are required before claiming an accuracy improvement.
