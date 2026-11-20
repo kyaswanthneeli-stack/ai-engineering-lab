@@ -2,8 +2,11 @@
 import argparse
 from pathlib import Path
 import subprocess
+import tempfile
 
-from repopilot.native_runtime import MATPLOTLIB_IMAGE, NATIVE_PYTHON, source_guard
+from repopilot.checkout import pinned_checkout
+
+from repopilot.native_runtime import MATPLOTLIB_IMAGE, NATIVE_PYTHON, MATPLOTLIB_BASE, prefix, source_guard
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--output', type=Path, required=True)
@@ -27,3 +30,21 @@ command = [
 ]
 with args.output.open('w') as output:
     subprocess.run(command, stdout=output, timeout=60, check=True)
+
+# Exercise the same unmodified workspace source loader used in replay. This
+# trusted preflight preserves the import traceback before candidate execution.
+with tempfile.TemporaryDirectory() as tmp:
+    repo = pinned_checkout("https://github.com/matplotlib/matplotlib/issues/1",
+                           MATPLOTLIB_BASE, Path(tmp) / "repo")
+    workspace_check = prefix(repo, ["lib/matplotlib/colors.py"]) + (
+        "import matplotlib.colors\n"
+        "from matplotlib.backends.backend_agg import FigureCanvasAgg\n"
+        "from matplotlib.figure import Figure\n"
+        "FigureCanvasAgg(Figure(figsize=(1, 1))).draw()\n"
+    )
+    workspace_command = command[:command.index('-w')] + [
+        '-v', f'{repo}:/workspace:ro', '-w', '/workspace',
+        '-e', 'MATPLOTLIBRC=/testbed/lib/matplotlib/mpl-data',
+        '--entrypoint', NATIVE_PYTHON, MATPLOTLIB_IMAGE, '-c', workspace_check,
+    ]
+    subprocess.run(workspace_command, timeout=60, check=True)
