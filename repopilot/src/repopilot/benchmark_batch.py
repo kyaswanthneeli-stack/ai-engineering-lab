@@ -41,7 +41,17 @@ def collect(manifest: Path, output: Path, *, per_task_timeout: int = 240,
                 report = {"status": "attempt_failed_without_evidence",
                           "error_type": "MissingAttemptRecord"}
             else:
-                report = json.loads((task_output / "attempt.json").read_text())
+                try:
+                    report = json.loads(
+                        (task_output / "attempt.json").read_text(encoding="utf-8"))
+                    if (not isinstance(report, dict) or
+                        not isinstance(report.get("status"), str)):
+                        raise ValueError("Invalid attempt record shape")
+                except (OSError, ValueError, UnicodeError):
+                    # A corrupt individual task must not prevent later tasks
+                    # from running or discard the whole cohort's evidence.
+                    report = {"status": "invalid_attempt_record",
+                              "error_type": "MalformedAttemptRecord"}
         except subprocess.TimeoutExpired:
             report = {"status": "model_timeout",
                       "error_type": "BoundedTaskTimeout"}
@@ -57,7 +67,13 @@ def collect(manifest: Path, output: Path, *, per_task_timeout: int = 240,
         if report.get("status") == "model_patch_proposed":
             file = task_output / "unreviewed-prediction.json"
             if file.is_file():
-                proposal = json.loads(file.read_text())
+                try:
+                    proposal = json.loads(file.read_text(encoding="utf-8"))
+                    if not isinstance(proposal, dict):
+                        raise ValueError("Invalid prediction record shape")
+                except (OSError, ValueError, UnicodeError):
+                    proposal = {}
+                    record["error_type"] = "MalformedPredictionEvidence"
                 patch = proposal.get("model_patch")
                 model = proposal.get("model_name_or_path")
                 if (proposal.get("instance_id") == instance_id and

@@ -1,9 +1,8 @@
 name: RepoPilot official 12-task SWE-bench evaluation
 
 on:
-  push:
-    paths:
-      - 'repopilot/src/repopilot/benchmark_batch.py'
+  # Manual-only: a full 12-task CPU model + official Docker evaluation
+  # must not start unexpectedly on every normal commit.
   workflow_dispatch:
 
 concurrency:
