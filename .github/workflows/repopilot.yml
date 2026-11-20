@@ -73,6 +73,31 @@ jobs:
         run: cd examples/calculator && python -m unittest discover -s tests -v
       - name: Prepare pinned Docker test image
         run: docker pull python:3.12-alpine
+      - name: Verify candidate smoke regression gate with actual restricted Docker
+        run: |
+          python - <<'PY'
+          import os
+          import tempfile
+          from pathlib import Path
+          from repopilot.candidate_smoke import smoke_candidate
+
+          with tempfile.TemporaryDirectory(prefix='repopilot-ci-smoke-') as td:
+              root=Path(td)/'repo'
+              root.mkdir(mode=0o755)
+              source=root/'pricing.py'
+              source.write_text('def price(x):\n    return x + 1\n')
+              patch=('diff --git a/pricing.py b/pricing.py\n'
+                     '--- a/pricing.py\n+++ b/pricing.py\n'
+                     '@@ -1,2 +1,2 @@\n'
+                     ' def price(x):\n'
+                     '-    return x + 1\n'
+                     '+    raise RuntimeError("regression")\n')
+              issue='Bug reproduction:\n```python\nfrom pricing import price\nassert price(3)==4\n```'
+              result=smoke_candidate(root,patch,issue,timeout=22)
+              assert result['status']=='regression', result
+              assert source.read_text()=='def price(x):\n    return x + 1\n'
+              print('PASS: actual networkless Docker catches baseline-pass/patch-fail without touching original')
+          PY
       - name: Verify sample issue in restricted Docker container
         run: python -m repopilot.cli verify fixtures/calculator-buggy examples/issue.json --output .runs/sample-verification.json
       - name: Verify multi-file invoice issue in restricted Docker
