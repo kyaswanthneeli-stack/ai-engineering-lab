@@ -68,6 +68,61 @@ class BenchmarkBatchTests(unittest.TestCase):
             with self.subTest(setting=setting):
                 self.assertIn(setting,content)
 
+    def test_corrupt_attempt_record_does_not_stop_later_predictions(self):
+        def fake_run(command, **kwargs):
+            identifier = command[3]
+            output = Path(command[command.index("--output")+1])
+            output.mkdir(parents=True)
+            if identifier.endswith("-0"):
+                (output / "attempt.json").write_text("{broken")
+            elif identifier.endswith("-1"):
+                (output / "attempt.json").write_text(
+                    json.dumps({"status": "model_patch_proposed"}))
+                (output / "unreviewed-prediction.json").write_text(json.dumps({
+                    "instance_id": identifier,
+                    "base_commit": "a" * 40,
+                    "generated_by_model": True,
+                    "model_name_or_path": "test-model",
+                    "model_patch": "diff --git a/x.py b/x.py\\n@@ -1 +1 @@\\n-a\\n+b\\n",
+                }))
+            else:
+                (output / "attempt.json").write_text(
+                    json.dumps({"status": "failed_model_attempt"}))
+        with patch("repopilot.benchmark_batch.load_manifest",
+                   return_value=self.tasks), patch(
+                       "repopilot.benchmark_batch.subprocess.run",
+                       side_effect=fake_run):
+            result = collect(self.manifest, self.root / "output")
+        self.assertEqual(result["model_predictions"], 1)
+        self.assertEqual(result["tasks"][0]["status"], "invalid_attempt_record")
+        self.assertEqual(result["tasks"][0]["error_type"], "MalformedAttemptRecord")
+        self.assertTrue(result["tasks"][1]["prediction_exported"])
+        self.assertTrue((self.root / "output/summary.json").is_file())
+
+    def test_malformed_prediction_evidence_is_a_recorded_failure(self):
+        def fake_run(command, **kwargs):
+            identifier = command[3]
+            output = Path(command[command.index("--output")+1])
+            output.mkdir(parents=True)
+            (output / "attempt.json").write_text(json.dumps({
+                "status": "model_patch_proposed" if identifier.endswith(("-0", "-1"))
+                          else "failed_model_attempt"}))
+            if identifier.endswith("-0"):
+                (output / "unreviewed-prediction.json").write_text("{broken")
+            elif identifier.endswith("-1"):
+                (output / "unreviewed-prediction.json").write_text("[]")
+        with patch("repopilot.benchmark_batch.load_manifest",
+                   return_value=self.tasks), patch(
+                       "repopilot.benchmark_batch.subprocess.run",
+                       side_effect=fake_run):
+            result = collect(self.manifest, self.root / "output")
+        self.assertEqual(result["model_predictions"], 0)
+        self.assertEqual(result["missing_predictions"], 12)
+        for record in result["tasks"][:2]:
+            self.assertEqual(record["status"], "invalid_model_prediction")
+            self.assertEqual(record["error_type"], "MalformedPredictionEvidence")
+        self.assertTrue((self.root / "output/summary.json").is_file())
+
     def test_timeout_is_unscored_and_does_not_create_prediction(self):
         with patch("repopilot.benchmark_batch.load_manifest",
                    return_value=self.tasks), patch(
