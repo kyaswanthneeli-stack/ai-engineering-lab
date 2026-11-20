@@ -32,6 +32,9 @@ def run_with_repair(repo:Path,issue_url:str,output:Path,*,max_attempts:int=3,
     last_proposal=None
     feedback=""
     seen_proposals=set()
+    # A changed reproduction test cannot make an already-failed source patch new.
+    # Only track patches that actually reached the sandbox verifier.
+    verified_attempt_patches=set()
     def test_feedback(path:Path)->str:
         # Preserve useful failure signals, without copying an entire untrusted test log.
         if not path.is_file():
@@ -79,6 +82,8 @@ def run_with_repair(repo:Path,issue_url:str,output:Path,*,max_attempts:int=3,
                                sort_keys=True).encode("utf-8")
                 ).hexdigest()
                 record["proposal_sha256"]=fingerprint
+                patch_sha256=hashlib.sha256(spec.patch.encode("utf-8")).hexdigest()
+                record["patch_sha256"]=patch_sha256
                 repeated=fingerprint in seen_proposals
                 seen_proposals.add(fingerprint)
                 file=output/f"attempt-{number:02d}-proposal.json"
@@ -87,10 +92,14 @@ def run_with_repair(repo:Path,issue_url:str,output:Path,*,max_attempts:int=3,
                 if repeated:
                     record["duplicate_proposal"]=True
                     raise ValueError("Duplicate proposal: model repeated an already-attempted patch and test")
+                if patch_sha256 in verified_attempt_patches:
+                    record["duplicate_failed_patch"]=True
+                    raise ValueError("Source patch already failed sandbox verification")
                 review=review_proposal(spec)
                 record["review"]=review
                 if review["status"]=="blocked":
                     raise ValueError("Proposed test or patch failed static review")
+                verified_attempt_patches.add(patch_sha256)
                 verification=verifier(repo,spec,output/f"attempt-{number:02d}-verification.json")
                 if (verification.get("outcome")!="verified_in_sandbox" or
                     verification.get("baseline",{}).get("exit_code")!=0 or
@@ -109,7 +118,9 @@ def run_with_repair(repo:Path,issue_url:str,output:Path,*,max_attempts:int=3,
                 # Avoid echoing secret-bearing model outputs or raw source in traces.
                 evidence=test_feedback(output/f"attempt-{number:02d}-verification.json")
                 feedback=(evidence or (type(exc).__name__+": candidate rejected or failed verification"))[:1500]
-                if record.get("duplicate_proposal"):
+                if record.get("duplicate_failed_patch"):
+                    feedback="The same source patch already failed sandbox verification. Change the source fix, not only the reproduction test."
+                elif record.get("duplicate_proposal"):
                     feedback="Repeated an already-rejected patch and reproduction test. Propose materially different source and test changes."
                 record["error_summary"]=type(exc).__name__+": candidate rejected or failed verification"
                 record["has_test_failure_evidence"]=bool(evidence)

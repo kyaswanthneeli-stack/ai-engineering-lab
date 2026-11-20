@@ -104,6 +104,36 @@ class RepairTests(unittest.TestCase):
             self.assertTrue((out/"attempt-03-proposal.json").exists())
             self.assertIn("materially different",prompts[2])
 
+    def test_changed_test_cannot_reverify_same_failed_patch(self):
+        with tempfile.TemporaryDirectory() as td:
+            calls=[]
+            prompts=[]
+            def model(repo,prompt,*args):
+                prompts.append(prompt)
+                candidate=spec()
+                if len(prompts)>1:
+                    candidate=replace(
+                        candidate,
+                        reproduction_test=candidate.reproduction_test+
+                            f"# alternate reproduction details {len(prompts)}\\n")
+                return candidate,{"model":"mock"}
+            def verifier(repo,proposal,path):
+                calls.append(proposal.patch)
+                raise RuntimeError("simulated sandbox failure")
+            out=Path(td)/"run"
+            report=run_with_repair(
+                Path(td),"https://github.com/example/repo/issues/1",out,
+                max_attempts=3,issue_reader=issue,
+                model_proposer=model,verifier=verifier)
+            self.assertEqual(report["outcome"],"failed")
+            self.assertEqual(len(report["attempts"]),3)
+            self.assertEqual(len(calls),1)
+            self.assertTrue(report["attempts"][1]["duplicate_failed_patch"])
+            self.assertTrue(report["attempts"][2]["duplicate_failed_patch"])
+            self.assertFalse(report["attempts"][1].get("duplicate_proposal",False))
+            self.assertIn("Change the source fix",prompts[2])
+            self.assertTrue((out/"attempt-03-proposal.json").exists())
+
     def test_invalid_attempt_count(self):
         with self.assertRaises(ValueError):
             run_with_repair(Path("."),"x",Path("x"),max_attempts=4)
