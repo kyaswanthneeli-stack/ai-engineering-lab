@@ -17,6 +17,31 @@ _SKIP = {".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_
 _WORD = re.compile(r"[A-Za-z][A-Za-z0-9_]{2,}")
 
 
+def is_test_path(name: str) -> bool:
+    """Recognize tests at any nesting depth, not only top-level tests/."""
+    parts = PurePosixPath(name).parts
+    filename = parts[-1] if parts else ""
+    return (
+        any(part in {"test", "tests"} for part in parts[:-1]) or
+        filename.startswith("test_") or filename.endswith("_test.py") or
+        filename in {"conftest.py", "runtests.py"}
+    )
+
+
+def is_test_infrastructure_issue(issue: str) -> bool:
+    """Narrow opt-out for requests to repair testing machinery itself.
+
+    A traceback mentioning a test file is not sufficient to make the issue
+    test-focused: real regressions often reproduce through a test.
+    """
+    return bool(re.search(
+        r"\b(?:test\s+(?:runner|discovery|collection|infrastructure|"
+        r"configuration|fixtures?|harness)|(?:fix|repair|update|correct)"
+        r"\s+(?:the\s+)?(?:broken\s+)?tests?\b|broken\s+tests?\b|"
+        r"conftest\s+configuration)\b",
+        issue[:12000], flags=re.IGNORECASE))
+
+
 @dataclass(frozen=True)
 class ContextItem:
     path: str
@@ -149,6 +174,7 @@ def ranked_source_context(repo: Path, issue: str, *, max_files: int = 8,
             not 300 <= max_chars <= 100000 or not 1 <= scan_limit <= 20000):
         raise ValueError("Invalid context request")
     terms = _tokens(issue[:12000])
+    test_infrastructure = is_test_infrastructure_issue(issue)
     candidates = []
     for path, rel in _candidate_paths(root, issue, scan_limit):
         try:
@@ -167,11 +193,19 @@ def ranked_source_context(repo: Path, issue: str, *, max_files: int = 8,
         symbol_score = 8 * len(terms & symbol_terms)
         body_score = min(8, len(terms & _tokens(source[:15000])))
         score = path_score + symbol_score + body_score
-        candidates.append((score, rel, source, symbols))
-    candidates.sort(key=lambda x: (-x[0], x[1]))
+        # A matching test assertion can repeat every issue term and outrank
+        # the actual implementation. Prefer implementation files with a real
+        # path/symbol overlap, but retain strongly related test files as
+        # fallback and preserve explicit test-harness maintenance requests.
+        implementation_match = (
+            not test_infrastructure and not is_test_path(rel) and
+            path_score + symbol_score > 0)
+        priority = 0 if implementation_match else 1
+        candidates.append((priority, score, rel, source, symbols))
+    candidates.sort(key=lambda x: (x[0], -x[1], x[2]))
     selected = []
     remaining = max_chars
-    for score, rel, source, symbols in candidates:
+    for _, score, rel, source, symbols in candidates:
         if len(selected) >= max_files or remaining < 300:
             break
         max_per_file = min(9000, remaining)
