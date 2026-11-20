@@ -107,6 +107,16 @@ class ContextSelectionTests(unittest.TestCase):
                 self.assertLessEqual(len(selected[0].text), budget)
                 self.assertIn("context truncated", selected[0].text)
 
+
+    def test_untrusted_issue_path_disallows_symlinked_parent(self):
+        module = self.root / "actual"
+        module.mkdir()
+        (module / "secret.py").write_text("def secret_value(): return True\n")
+        (self.root / "alias").symlink_to(module, target_is_directory=True)
+        items = ranked_source_context(
+            self.root, "Please fix alias/secret.py", max_files=20)
+        self.assertNotIn("alias/secret.py", [item.path for item in items])
+
     def test_untrusted_explicit_issue_path_cannot_enter_excluded_directories(self):
         for name in (".venv", ".git", "node_modules", ".runs", "build"):
             directory = self.root / name
