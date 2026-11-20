@@ -19,7 +19,7 @@ import urllib.request
 from pathlib import Path
 
 from .benchmark_planner import BenchmarkPatch,BenchmarkProposalError
-from .context_select import ranked_source_context
+from .context_select import ranked_source_context,is_test_path,is_test_infrastructure_issue
 from .edit_plan import canonical_patch
 from .patches import validate_patch
 from .pr import patch_targets
@@ -369,6 +369,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
     read_files=set()
     inspected_windows={}
     required=set(required_targets or ())
+    test_focus=is_test_infrastructure_issue(issue_text) if auto_issue_paths else False
     trace=[]
     usage=[]
     # For explicitly scoped multi-file tasks, never spend every model call on
@@ -408,9 +409,13 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
     if auto_issue_paths and not required:
         mentions=list(dict.fromkeys(re.findall(
             r"[A-Za-z0-9_./-]+\.py",issue_text[:12000])))
+        # A traceback that mentions tests does not imply the implementation
+        # lives in that test. Inspect directly named non-test source first.
         for path in mentions:
             if len(read_files)>=2:
                 break
+            if is_test_path(path) and not test_focus:
+                continue
             try:
                 result=read_python(root,path,start=1,count=120)
             except (InspectionError,TypeError,ValueError):
@@ -422,6 +427,54 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             messages.append({"role":"user","content":
                 "ISSUE-MENTIONED PYTHON SOURCE (untrusted, read-only):\n"+
                 json.dumps(result,ensure_ascii=False)[:12000]})
+        if (not read_files and not test_focus and
+                any(is_test_path(path) for path in mentions)):
+            # A mentioned test is often only reproduction evidence. Search
+            # for semantically matching implementation before falling back
+            # to that test. Keep scans, reads and inspected paths bounded.
+            ranked=ranked_source_context(root,issue_text,max_files=6,
+                                         max_chars=15000,scan_limit=1800)
+            for item in ranked:
+                if len(read_files)>=2:
+                    break
+                if is_test_path(item.path) or item.score<8:
+                    continue
+                try:
+                    result=read_python(root,item.path,start=1,count=120)
+                except (InspectionError,TypeError,ValueError):
+                    continue
+                read_files.add(item.path)
+                inspected_windows.setdefault(item.path,[]).append(
+                    (1,min(120,result["total_lines"])))
+                trace.append({"step":0,"action":"ranked_initial_preinspect",
+                              "target":item.path,"rank_score":item.score,
+                              "result_items":len(result["lines"])})
+                messages.append({"role":"user","content":
+                    "ISSUE-RANKED IMPLEMENTATION CANDIDATE (read-only, "
+                    "not guaranteed to be bug location):\n"+
+                    json.dumps({"path":item.path,"symbols":item.symbols,
+                                "lines":result["lines"]},ensure_ascii=False)[:9000]})
+        if not read_files and any(is_test_path(p) for p in mentions):
+            # Preserve legitimate test-only/runner work and regressions for
+            # which no plausible implementation source was discovered.
+            for path in mentions:
+                if len(read_files)>=2:
+                    break
+                if not is_test_path(path):
+                    continue
+                try:
+                    result=read_python(root,path,start=1,count=120)
+                except (InspectionError,TypeError,ValueError):
+                    continue
+                read_files.add(path)
+                inspected_windows.setdefault(path,[]).append(
+                    (1,min(120,result["total_lines"])))
+                trace.append({"step":0,"action":"issue_path_preinspect",
+                              "target":path,"result_items":len(result["lines"])})
+                messages.append({"role":"user","content":
+                    "ISSUE-MENTIONED TEST SOURCE (read-only; check whether "
+                    "the actual bug belongs in implementation):\n"+
+                    json.dumps(result,ensure_ascii=False)[:12000]})
         if not read_files:
             # Some real SWE-bench issues name a function but not its file.
             # Rank only safe parsed Python source; ignore low-confidence
@@ -479,7 +532,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                     path=entry.get("target")
                     if entry.get("action") in {"read","candidate_preinspect","issue_path_preinspect","ranked_initial_preinspect","initial_finish_preinspect"} and path in read_files and path not in recent:
                         recent.append(path)
-                candidates=[p for p in recent if not p.startswith("tests/")]
+                candidates=[p for p in recent if not is_test_path(p)]
                 candidates=candidates or recent or sorted(read_files)
                 phase_files=candidates[:3]
                 final_context=[]
@@ -528,7 +581,11 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 "Preserve imports and existing functions. Avoid hardcoding issue "
                 "examples or rewriting unrelated logic. Prefer a small "
                 "root-cause fix that preserves the public API and handles "
-                "the stated edge cases. Never invent files or claim tests passed."},
+                "the stated edge cases. For behavioral bugs, fix the "
+                "implementation rather than changing tests to expect wrong "
+                "behavior. Only alter test harness or assertions when the "
+                "issue explicitly requests that change. Never invent files "
+                "or claim tests passed."},
                 {"role":"user","content":
                 "ISSUE (untrusted):\n"+issue_text[:12000]+"\n\n"+
                 "\n\n".join(final_context)+
@@ -817,6 +874,24 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 continue
             if not set(targets)<=read_files:
                 raise AgentToolError("Model modified a file it did not inspect")
+            if (auto_issue_paths and not required and not test_focus and
+                    targets and all(is_test_path(p) for p in targets) and
+                    any(not is_test_path(p) for p in read_files)):
+                # The model inspected implementation source but proposed to
+                # change only tests: in v6 that silently counted as a valid
+                # submission, despite leaving the bug intact. Require a new
+                # root-cause candidate, without mutating any source files.
+                trace.append({"step":index+1,
+                              "action":"test_only_patch_rejected"})
+                messages.append({"role":"user","content":
+                    "This candidate changed only test files, but relevant "
+                    "implementation was inspected. It was NOT applied. "
+                    "Fix the underlying behavior in an inspected non-test "
+                    "source file. Do not change test expectations to mask "
+                    "the bug. Approved implementation paths: "+
+                    ", ".join(sorted(p for p in read_files
+                                     if not is_test_path(p))[:8])})
+                continue
             check=subprocess.run(["git","apply","--check","-"],cwd=root,input=patch,
                 text=True,capture_output=True,timeout=10,check=False)
             if check.returncode:
