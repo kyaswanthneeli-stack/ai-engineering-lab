@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-_SKIP = {".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache"}
+_SKIP = {".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache", ".runs", ".pytest_cache", ".ruff_cache", "dist", "build"}
 _WORD = re.compile(r"[A-Za-z][A-Za-z0-9_]{2,}")
 
 
@@ -104,6 +104,7 @@ def _candidate_paths(root: Path, issue: str, scan_limit: int):
             basenames.add(name)
         target = root / name
         if (not name.startswith("/") and ".." not in PurePosixPath(name).parts and
+                not any(part in _SKIP for part in PurePosixPath(name).parts) and
                 not target.is_symlink() and target.is_file() and
                 target.resolve().is_relative_to(root) and
                 target.stat().st_size <= 100_000):
@@ -163,9 +164,12 @@ def ranked_source_context(repo: Path, issue: str, *, max_files: int = 8,
         if len(selected) >= max_files or remaining < 300:
             break
         max_per_file = min(9000, remaining)
-        chunk = source[:max_per_file]
-        if len(source) > len(chunk):
-            chunk += "\n# [RepoPilot context truncated; do not assume missing lines]\n"
+        marker = "\n# [RepoPilot context truncated; do not assume missing lines]\n"
+        if len(source) > max_per_file:
+            # The warning counts against the prompt budget too.
+            chunk = source[:max_per_file - len(marker)] + marker
+        else:
+            chunk = source
         remaining -= len(chunk)
         selected.append(ContextItem(rel, score, symbols[:80], chunk))
     return selected
