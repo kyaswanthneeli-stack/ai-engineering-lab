@@ -1,13 +1,14 @@
 # AI Engineering Lab
 
-Two independent portfolio tools by **Neeli Yaswanth Kumar** for inspecting the quality and behavior of AI-adjacent application workflows.
+Three independent portfolio engineering tools by **Neeli Yaswanth Kumar**, including a supervised AI coding agent and two browser-based evaluation/workflow demos.
 
+- **RepoPilot** is a human-supervised Python issue-to-patch agent with restricted Docker verification, a reviewed draft-PR workflow, and a deployable read-only CLI container. [Release v2.2.0rc1](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.2.0rc1) · [Verified release evidence](repopilot/docs/RELEASE_EVIDENCE_v2.2.0rc1.md) · [Live walkthrough](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/recruiter-demo.html). Its selected official SWE-bench Lite score is **1/12 resolved (8.3%)**; this is not a fully autonomous production service.
 - **EvalBench** compares saved answer sets using transparent lexical metrics and required-phrase checks.
 - **TraceFlow** exposes a simulated asynchronous tool workflow, including retries, call budgets, cancellation and missing evidence.
 
-These are new portfolio demonstrations. They are not company systems, model benchmarks or production deployments. Neither demo calls an LLM.
+EvalBench and TraceFlow are browser-only portfolio demonstrations with synthetic data; neither demo calls an LLM. RepoPilot is a separate Python package that can call a configured model on a trusted operator host, with explicit human approval before draft PR publication. It is a tested supervised coding prototype, not an enterprise SaaS.
 
-## Open the demos
+## Open the demos and RepoPilot release
 
 [Engineering Lab](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/) · [EvalBench](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/evalbench.html) · [TraceFlow](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/traceflow.html)
 
