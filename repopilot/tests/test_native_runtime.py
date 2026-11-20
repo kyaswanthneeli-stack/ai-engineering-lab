@@ -1,5 +1,6 @@
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -67,3 +68,26 @@ class NativeRuntimeTests(unittest.TestCase):
                 targets=self.targets,timeout=7,diagnostics=diagnostics,phase='candidate')
         self.assertEqual(result,(None,False))
         self.assertEqual(diagnostics['candidate_failure_category'],'runtime_provenance_unavailable')
+
+    def test_source_guard_accepts_committed_exec_bit_changes_but_rejects_content_changes(self):
+        def git(*args):
+            return subprocess.check_output(['git','-C',str(self.root),*args],stderr=subprocess.DEVNULL).decode().strip()
+        git('init','--quiet')
+        git('config','user.name','Runtime fixture')
+        git('config','user.email','fixture@example.invalid')
+        git('config','commit.gpgsign','false')
+        git('add','.')
+        git('commit','--quiet','-m','original')
+        base=git('rev-parse','HEAD')
+        path=self.root/'lib/matplotlib/colors.py'
+        path.chmod(0o755)
+        git('add','.')
+        git('commit','--quiet','-m','image executable modes')
+        with patch.object(native_runtime,'MATPLOTLIB_BASE',base):
+            code=native_runtime.source_guard().replace("'/testbed'",repr(str(self.root)))
+        self.assertEqual(subprocess.run([sys.executable,'-c',code]).returncode,0)
+        path.write_text('value = 2\n')
+        self.assertEqual(subprocess.run([sys.executable,'-c',code]).returncode,78)
+        git('add','.')
+        git('commit','--quiet','-m','changed contents')
+        self.assertEqual(subprocess.run([sys.executable,'-c',code]).returncode,78)

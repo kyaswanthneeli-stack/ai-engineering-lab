@@ -23,6 +23,44 @@ def selected(targets: list[str]) -> bool:
             and bool(targets) and all(path.startswith("lib/matplotlib/") for path in targets))
 
 
+def source_guard(*, report: bool = False) -> str:
+    """Compare tracked blob identities, permitting only executable-bit changes.
+
+    Docker preparation can commit chmod changes. core.fileMode alone cannot
+    ignore modes already stored in commits, so compare blob IDs and file kinds
+    directly. Still reject source additions/deletions, changed bytes, symlink
+    conversions and dirty tracked source in the image's working tree.
+    """
+    code = (
+        "import subprocess as _sp, json as _json\n"
+        "def _git(*args):\n"
+        "    return _sp.run(['git','-c','safe.directory=/testbed','-c','core.fileMode=false','-C','/testbed',*args], "
+        "stdout=_sp.PIPE, stderr=_sp.DEVNULL, timeout=3, check=True).stdout\n"
+        "def _tree(ref):\n"
+        "    result = {}\n"
+        "    for entry in _git('ls-tree','-r','-z',ref,'--','lib/matplotlib','src','extern').split(b'\\0'):\n"
+        "        if not entry: continue\n"
+        "        meta, name = entry.split(b'\\t',1)\n"
+        "        mode, kind, blob = meta.split()\n"
+        "        result[name] = (int(mode,8) & 0o170000, kind, blob)\n"
+        "    return result\n"
+        "try:\n"
+        "    _head = _git('rev-parse','HEAD').decode().strip()\n"
+        "    _base_tree = _tree(" + repr(MATPLOTLIB_BASE) + ")\n"
+        "    _head_tree = _tree('HEAD')\n"
+        "    _source_match = bool(_base_tree) and _base_tree == _head_tree\n"
+        "    _git('diff','--quiet','HEAD','--','lib/matplotlib','src','extern')\n"
+    )
+    if report:
+        code += ("    print(_json.dumps({'expected_base':" + repr(MATPLOTLIB_BASE) +
+                 ",'image_head':_head,'source_blob_identities_match':_source_match,"
+                 "'checked_source_files':len(_base_tree)}),flush=True)\n")
+    return code + (
+        "    if not _source_match: raise SystemExit(78)\n"
+        "except (OSError, ValueError, _sp.SubprocessError): raise SystemExit(78)\n"
+    )
+
+
 def prefix(repo: Path, targets: list[str]) -> str:
     """Validate native-image source alignment before loading workspace Python.
 
@@ -41,17 +79,13 @@ def prefix(repo: Path, targets: list[str]) -> str:
                 or not path.is_file() or path.stat().st_size > 100_000):
             raise ValueError("Unsafe native runtime target")
         expected[name] = hashlib.sha256(path.read_bytes()).hexdigest()
-    return (
-        "import subprocess as _sp, hashlib as _hash, importlib.util as _iu, sys as _sys\n"
+    return source_guard() + (
+        "import hashlib as _hash, importlib.util as _iu, sys as _sys\n"
         "from pathlib import Path as _Path\n"
         "try:\n"
-        "    _diff = _sp.run(['git','-c','safe.directory=/testbed','-c','core.fileMode=false','-C','/testbed',"
-        "'diff','--quiet'," + repr(MATPLOTLIB_BASE) +
-        ",'--','lib/matplotlib','src','extern'], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL, timeout=3)\n"
-        "    if _diff.returncode != 0: raise SystemExit(78)\n"
         "    for _name, _digest in " + repr(expected) + ".items():\n"
         "        if _hash.sha256((_Path('/testbed')/_name).read_bytes()).hexdigest() != _digest: raise SystemExit(78)\n"
-        "except (OSError, _sp.TimeoutExpired): raise SystemExit(78)\n"
+        "except OSError: raise SystemExit(78)\n"
         "_spec = _iu.spec_from_file_location('matplotlib','/workspace/lib/matplotlib/__init__.py',"
         "submodule_search_locations=['/workspace/lib/matplotlib','/testbed/lib/matplotlib'])\n"
         "_mpl = _iu.module_from_spec(_spec)\n"

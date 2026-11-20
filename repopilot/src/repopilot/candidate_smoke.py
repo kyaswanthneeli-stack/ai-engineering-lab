@@ -275,6 +275,8 @@ def smoke_candidate(repo: Path, patch: str, issue: str, *,
     if not script:
         return {"status": "skipped", "reason": "no_probe"}
     setup, profile = _bootstrap(targets)
+    probe_cap = 12 if native_runtime.selected(targets) else 7
+    fallback_cap = 8 if native_runtime.selected(targets) else 5
     diagnostics["baseline_bootstrap_profile"] = profile if kind in {"module_import", "source_doctest"} else "none"
     # Import setup is never prepended to public issue examples, which may
     # intentionally configure their own runtime. It applies only to our
@@ -304,7 +306,7 @@ def smoke_candidate(repo: Path, patch: str, issue: str, *,
                     "reason": "deadline"}
         before, unsafe_cleanup = _run_docker(
             root, script, overlay=None, targets=targets,
-            timeout=min(7, remaining / 2), diagnostics=diagnostics,
+            timeout=min(probe_cap, remaining / 2), diagnostics=diagnostics,
             phase="baseline")
         if unsafe_cleanup:
             return report("inconclusive", kind, "container_cleanup_unconfirmed")
@@ -320,7 +322,7 @@ def smoke_candidate(repo: Path, patch: str, issue: str, *,
                 diagnostics["behavior_bootstrap_profile"] = profile
                 code, cleanup_failure = _run_docker(
                     root, setup + alternate, overlay=None, targets=targets,
-                    timeout=min(5, remaining / 2), diagnostics=diagnostics,
+                    timeout=min(fallback_cap, remaining / 2), diagnostics=diagnostics,
                     phase="behavior_baseline")
                 if cleanup_failure:
                     return report("inconclusive", kind, "container_cleanup_unconfirmed")
@@ -339,7 +341,7 @@ def smoke_candidate(repo: Path, patch: str, issue: str, *,
                 diagnostics["fallback_bootstrap_profile"] = profile
                 fallback_before, cleanup_failure = _run_docker(
                     root, fallback_script, overlay=None, targets=targets,
-                    timeout=min(5, remaining / 2), diagnostics=diagnostics,
+                    timeout=min(fallback_cap, remaining / 2), diagnostics=diagnostics,
                     phase="fallback_baseline")
                 if cleanup_failure:
                     return report("inconclusive", kind, "container_cleanup_unconfirmed")
@@ -360,7 +362,7 @@ def smoke_candidate(repo: Path, patch: str, issue: str, *,
             return report("skipped", kind, "deadline")
         after, unsafe_cleanup = _run_docker(
             root, script, overlay=staging, targets=targets,
-            timeout=min(7, remaining), diagnostics=diagnostics,
+            timeout=min(probe_cap, remaining), diagnostics=diagnostics,
             phase="candidate")
         if unsafe_cleanup or after is None:
             return report("inconclusive", kind, "candidate_or_cleanup_unavailable")
