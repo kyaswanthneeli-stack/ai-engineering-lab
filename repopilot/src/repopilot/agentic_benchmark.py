@@ -224,6 +224,17 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                               auto_issue_paths:bool=False)->tuple[BenchmarkPatch,dict]:
     if not model or not url or not issue_text.strip() or not 2<=max_steps<=24:
         raise AgentToolError("Model, issue and bounded step count required")
+    # An optional whole-agent wall-clock budget prevents another model request
+    # after the run is already overdue. In-flight HTTP calls retain their own
+    # separately bounded provider timeouts.
+    raw_budget=os.getenv("REPOPILOT_AGENT_BUDGET_SECONDS","0")
+    try:
+        budget_seconds=int(raw_budget)
+    except (TypeError,ValueError) as exc:
+        raise AgentToolError("Invalid agent time budget") from exc
+    if budget_seconds!=0 and not 10<=budget_seconds<=3600:
+        raise AgentToolError("Agent time budget must be 10–3600 seconds or 0 (disabled)")
+    started_at=time.monotonic()
     root=repo.resolve(strict=True)
     messages=[{"role":"system","content":SYSTEM},
               {"role":"user","content":"ISSUE (untrusted):\n"+issue_text[:12000]}]
@@ -317,6 +328,8 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             # bounded model calls on repeated source discovery.
             inspection_budget=min(3,max_steps-2)
     for index in range(max_steps):
+        if budget_seconds and time.monotonic()-started_at>=budget_seconds:
+            raise AgentToolError("Agent time budget exhausted before next model call")
         if index==inspection_budget:
             if not read_files:
                 # Bad tool paths must not consume every available model call.
