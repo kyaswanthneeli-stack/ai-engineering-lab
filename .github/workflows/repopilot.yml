@@ -102,6 +102,35 @@ jobs:
               assert file.read_text()==original
               print('PASS: trusted offline dependencies enable real baseline-pass/candidate-fail check')
           PY
+      - name: Verify issue reproduction fallback in real offline Docker
+        env:
+          REPOPILOT_CANDIDATE_SMOKE_IMAGE: repopilot-candidate-deps:py310
+        run: |
+          python - <<'PY'
+          import tempfile
+          from pathlib import Path
+          from repopilot.candidate_smoke import smoke_candidate
+          with tempfile.TemporaryDirectory(prefix='repopilot-fallback-') as td:
+              root=Path(td)/'repo'
+              root.mkdir(mode=0o755)
+              file=root/'math_fixture.py'
+              original='from mpmath import mp\ndef value(): return mp.sqrt(9)\n'
+              file.write_text(original)
+              patch=('diff --git a/math_fixture.py b/math_fixture.py\n'
+                     '--- a/math_fixture.py\n+++ b/math_fixture.py\n'
+                     '@@ -1,2 +1,2 @@\n'
+                     ' from mpmath import mp\n'
+                     '-def value(): return mp.sqrt(9)\n'
+                     '+raise RuntimeError("new import regression")\n')
+              # This public-style issue reproducer intentionally fails
+              # against the original, so a pristine import baseline is used.
+              issue='Reproducer:\n```python\nfrom math_fixture import value\nassert int(value()) == 999\n```'
+              evidence=smoke_candidate(root,patch,issue,timeout=25)
+              assert evidence['status']=='regression', evidence
+              assert evidence['probe']=='module_import_fallback', evidence
+              assert file.read_text()==original
+              print('PASS: real offline Docker used passing fallback baseline and rejected regression')
+          PY
       - name: Verify candidate smoke regression gate with actual restricted Docker
         run: |
           python - <<'PY'
