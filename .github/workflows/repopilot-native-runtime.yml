@@ -1,0 +1,46 @@
+name: RepoPilot pinned Matplotlib runtime and behavior replay
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/repopilot-native-runtime.yml'
+      - 'repopilot/src/repopilot/source_examples.py'
+      - 'repopilot/src/repopilot/candidate_smoke.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: repopilot-native-behavior-replay
+  cancel-in-progress: false
+jobs:
+  native-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch official pinned-instance native runtime
+        run: |
+          mkdir -p repopilot/.runs/native-runtime
+          docker pull swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-22835:latest
+          docker image inspect swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-22835:latest \
+            --format '{{json .RepoDigests}}' > repopilot/.runs/native-runtime/registry-digests.json
+      - name: Verify exact checkout and native imports under restricted execution
+        run: |
+          docker run --rm --pull=never --network=none --read-only \
+            --user=65534:65534 --cap-drop=ALL --security-opt=no-new-privileges \
+            --memory=512m --cpus=1 --pids-limit=64 \
+            --tmpfs=/tmp:rw,nosuid,nodev,size=32m,mode=1777 \
+            -e MPLCONFIGDIR=/tmp/mpl-config -e MPLBACKEND=Agg \
+            -e PYTHONDONTWRITEBYTECODE=1 -w /testbed \
+            --entrypoint /opt/miniconda3/envs/testbed/bin/python \
+            swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-22835:latest \
+            -c 'import subprocess,json,sys; p=subprocess.run(["git","-c","safe.directory=/testbed","rev-parse","HEAD"],capture_output=True,text=True,check=True); assert p.stdout.strip()=="c33557d120eefe3148ebfcf2e758ff2357966000"; import matplotlib,matplotlib._c_internal_utils,matplotlib._path; print(json.dumps({"base_commit":p.stdout.strip(),"python":sys.version.split()[0],"matplotlib_source":matplotlib.__file__,"native_extension":matplotlib._c_internal_utils.__file__}))' \
+            > repopilot/.runs/native-runtime/import-preflight.json
+      - name: Preserve native runtime provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-native-matplotlib-preflight
+          path: repopilot/.runs/native-runtime/
+          if-no-files-found: warn
+          retention-days: 30
