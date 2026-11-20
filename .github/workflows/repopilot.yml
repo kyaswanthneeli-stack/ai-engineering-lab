@@ -73,6 +73,35 @@ jobs:
         run: cd examples/calculator && python -m unittest discover -s tests -v
       - name: Prepare pinned Docker test image
         run: docker pull python:3.12-alpine
+      - name: Build developer-owned offline candidate dependency image
+        run: docker build --pull -t repopilot-candidate-deps:py310 -f ci/Dockerfile.candidate-smoke ci
+      - name: Verify actual dependency-aware candidate smoke with no runtime network
+        env:
+          REPOPILOT_CANDIDATE_SMOKE_IMAGE: repopilot-candidate-deps:py310
+        run: |
+          python - <<'PY'
+          import tempfile
+          from pathlib import Path
+          from repopilot.candidate_smoke import smoke_candidate
+          with tempfile.TemporaryDirectory(prefix='repopilot-offline-deps-') as td:
+              root=Path(td)/'repo'
+              root.mkdir(mode=0o755)
+              file=root/'math_fixture.py'
+              original='from mpmath import mp\ndef value(): return mp.sqrt(9)\n'
+              file.write_text(original)
+              patch=('diff --git a/math_fixture.py b/math_fixture.py\n'
+                     '--- a/math_fixture.py\n+++ b/math_fixture.py\n'
+                     '@@ -1,2 +1,2 @@\n'
+                     ' from mpmath import mp\n'
+                     '-def value(): return mp.sqrt(9)\n'
+                     '+def value(): raise ValueError("broken")\n')
+              issue='Expected:\n```python\nfrom math_fixture import value\nassert int(value()) == 3\n```'
+              evidence=smoke_candidate(root,patch,issue,timeout=22)
+              assert evidence['status']=='regression', evidence
+              assert evidence['reason']=='baseline_passed_candidate_failed'
+              assert file.read_text()==original
+              print('PASS: trusted offline dependencies enable real baseline-pass/candidate-fail check')
+          PY
       - name: Verify candidate smoke regression gate with actual restricted Docker
         run: |
           python - <<'PY'

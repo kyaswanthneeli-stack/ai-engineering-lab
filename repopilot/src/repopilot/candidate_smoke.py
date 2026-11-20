@@ -7,6 +7,7 @@ transition can reject a candidate; unavailable dependencies are inconclusive.
 from __future__ import annotations
 
 import ast
+import os
 import re
 import shutil
 import subprocess
@@ -22,6 +23,19 @@ from .pr import patch_targets
 _SAFE_PATH = re.compile(r"[A-Za-z0-9_./-]{1,240}\Z")
 _FENCE = re.compile(r"```(?:python|py)\s*\n(.*?)\n```", re.I | re.S)
 _IMAGE = "python:3.12-alpine"
+_TRUSTED_OFFLINE_DEPS_IMAGE = "repopilot-candidate-deps:py310"
+_APPROVED_IMAGES = frozenset({_IMAGE, _TRUSTED_OFFLINE_DEPS_IMAGE})
+
+
+def _approved_image() -> str | None:
+    """Images are selected only by trusted operator environment, never by issue.
+
+    No docker pull is allowed during candidate verification; the optional
+    dependency-rich image must have been prebuilt by the CI workflow.
+    """
+    image = os.getenv("REPOPILOT_CANDIDATE_SMOKE_IMAGE", _IMAGE).strip()
+    return image if image in _APPROVED_IMAGES else None
+
 
 
 def _reproducer(issue: str, targets: list[str]) -> tuple[str, str]:
@@ -73,7 +87,10 @@ def _run_docker(repo: Path, script: str, *, overlay: Path | None,
             args.extend(["--mount", "type=bind,src=" +
                          str(overlay / path) + ",dst=/workspace/" +
                          path + ",readonly"])
-    args.extend(["-w", "/workspace", _IMAGE, "python", "-c", script])
+    image = _approved_image()
+    if image is None:
+        raise ValueError("Unapproved candidate smoke runtime image")
+    args.extend(["-w", "/workspace", image, "python", "-c", script])
     try:
         result = subprocess.run(
             args, capture_output=True, text=True, check=False,
@@ -104,6 +121,8 @@ def smoke_candidate(repo: Path, patch: str, issue: str, *,
     if not 8 <= timeout <= 30:
         raise ValueError("Candidate smoke timeout must be 8–30 seconds")
     started = time.monotonic()
+    if _approved_image() is None:
+        return {"status": "skipped", "reason": "unapproved_runtime_image"}
     result = {"status": "inconclusive", "probe": "none"}
     if shutil.which("docker") is None:
         return {"status": "skipped", "reason": "docker_unavailable"}
