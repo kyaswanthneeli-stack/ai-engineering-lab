@@ -21,6 +21,8 @@ import tempfile
 def main(argv=None):
     parser=argparse.ArgumentParser(prog="repopilot")
     sub=parser.add_subparsers(dest="cmd",required=True)
+    doctor=sub.add_parser("doctor",help="Read-only environment preflight; --live checks Docker and local Ollama")
+    doctor.add_argument("--live",action="store_true",help="Check Docker daemon and localhost Ollama model inventory")
     a=sub.add_parser("index");a.add_argument("repo",type=Path)
     ggraph=sub.add_parser("graph",help="Read-only static Python module graph");ggraph.add_argument("repo",type=Path)
     ggraph.add_argument("--impact",nargs="+",metavar="MODULE",help="Trace direct and transitive static dependents of changed modules")
@@ -56,7 +58,13 @@ def main(argv=None):
     h.add_argument("--seed",type=int,default=73)
     h.add_argument("--output",type=Path,default=Path(".runs/swebench-lite-manifest.json"))
     args=parser.parse_args(argv)
-    if args.cmd=="index":
+    if args.cmd=="doctor":
+        from .doctor import inspect_runtime
+        result=inspect_runtime(live=args.live)
+        print(json.dumps(result,indent=2))
+        if args.live and not result["ready_for_verified_workflow"]:
+            raise SystemExit(1)
+    elif args.cmd=="index":
         print(json.dumps([vars(s) for s in index_python(args.repo)],indent=2))
     elif args.cmd=="graph":
         graph=import_graph(args.repo)
