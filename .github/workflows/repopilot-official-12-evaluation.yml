@@ -44,11 +44,16 @@ jobs:
             if [ "$attempt" -eq 3 ]; then exit 1; fi
             sleep $((attempt*10))
           done
+      # Keep per-call and whole-agent time budgets below the 300-second
+      # subprocess cap, so stalled CPU inference is reported as a failure.
       - name: Run all 12 pinned tasks using actual model-generated patches
         env:
           REPOPILOT_MODEL: qwen2.5-coder:3b
           REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
           REPOPILOT_MAX_TOKENS: '1200'
+          REPOPILOT_OLLAMA_NATIVE: '1'
+          REPOPILOT_PROVIDER_TIMEOUT_SECONDS: '110'
+          REPOPILOT_AGENT_BUDGET_SECONDS: '270'
         run: |
           curl -fsS "${REPOPILOT_BASE_URL}/models" >/dev/null
           # Warm the local model with a tiny request before the large issue prompts.
