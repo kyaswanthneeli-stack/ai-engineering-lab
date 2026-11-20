@@ -90,7 +90,7 @@ class AttemptsTests(unittest.TestCase):
         for raw in ("100","1000","2499","6501","100000","bad","3.5",""):
             with self.subTest(raw=raw), patch.dict(
                     "os.environ",{"REPOPILOT_ISSUE_CONTEXT_CHARS":raw}):
-                with self.assertRaisesRegex(ValueError,"issue context"):
+                with self.assertRaisesRegex(ValueError,"[Ii]ssue context"):
                     configured_issue_context_chars()
 
     def test_agentic_cli_wires_requested_step_budget(self):
