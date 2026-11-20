@@ -1,10 +1,10 @@
 # RepoPilot — Evidence-first autonomous coding harness
 
-**RepoPilot v1.0.0** is an independent Python issue-to-patch engineering prototype. The source is inspectable, with explicit trust boundaries and tests. See [v1.0.0 release notes](RELEASE_NOTES_v1.0.0.md), the [interactive demo](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/recruiter-demo.html), and the [official benchmark evidence](benchmarks/OFFICIAL_EVALUATION_2026-11-19.md). It is a validated portfolio release, not a production autonomous code-repair service.
+**Latest published release: [RepoPilot v2.0.0](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.0.0).** This independent, evidence-backed Python issue-to-patch prototype includes source code, tests, Docker verification, a live-model demonstration and [official SWE-bench evidence](benchmarks/OFFICIAL_EVALUATION_2026-11-20.md). Changes on `main` may be newer than the immutable release. It is a verified portfolio project, not a production autonomous code-repair guarantee. Historical [v1.0.0 notes](RELEASE_NOTES_v1.0.0.md) remain available.
 
 **For Upwork clients:** [Portfolio-ready project case study, deliverables and demonstration script](UPWORK_PORTFOLIO.md). This document distinguishes verified results from experimental capabilities and includes copy suitable for an Upwork portfolio item.
 
-**RepoPilot v2.0 portfolio handoff:** [Verified v2.0 release notes](RELEASE_NOTES_v2.0.0.md) summarize the merged implementation, **183 CI tests passed, 82% coverage**, official Nov 20 **1/6 submitted and 1/12 selected** benchmark score, and limits. The [one-time v2.0.0 release workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/workflows/repopilot-v2-release.yml) verifies official evidence, unit tests, restricted Docker and package files before it publishes the [immutable release](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.0.0). Check the workflow and release page to confirm publication.
+**RepoPilot v2.0 portfolio handoff:** [Verified v2.0 release notes](RELEASE_NOTES_v2.0.0.md) summarize the merged implementation, **185 release-gate Python tests passed, 82% coverage**, official Nov 20 **1/6 submitted and 1/12 selected** benchmark score, and limits. The [one-time v2.0.0 release workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/workflows/repopilot-v2-release.yml) verifies official evidence, unit tests, restricted Docker and package files before it publishes the [immutable release](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.0.0). Check the workflow and release page to confirm publication.
 
 ## Current implementation status (verify before citing)
 
@@ -83,6 +83,34 @@ python -m repopilot.cli run-repair fixtures/calculator-buggy \
 ```
 
 It never automatically merges code or publishes a PR.
+
+## Setup preflight (on main after v2.0.0)
+
+Check local prerequisites before any real issue-to-fix attempt. The default
+command is **read-only and offline**: it does not invoke Docker, contact a
+model provider, or execute repository code.
+
+```bash
+cd repopilot
+python -m pip install -e .
+python -m repopilot.cli doctor
+```
+
+For a live local readiness check, start Docker and Ollama and install
+the chosen model first:
+
+```bash
+export REPOPILOT_BASE_URL=http://127.0.0.1:11434/v1
+export REPOPILOT_MODEL=qwen2.5-coder:3b
+python -m repopilot.cli doctor --live
+```
+
+The `--live` command checks the Docker daemon and reads only the local
+Ollama `/api/tags` model inventory. It does not run a model, fetch issues,
+or evaluate patches. Remote HTTPS provider endpoints are **not contacted**
+and are explicitly **unverified**. `--live` exits nonzero when any required
+local check is missing or unverified. The diagnostic is not proof of
+correctness or production readiness.
 
 ## Local usage
 
