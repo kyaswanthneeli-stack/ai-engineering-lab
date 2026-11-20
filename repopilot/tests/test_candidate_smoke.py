@@ -61,14 +61,17 @@ class CandidateSmokeTests(unittest.TestCase):
             "def price(x):\n    return x + 1\n")
 
     def test_baseline_failure_is_inconclusive_and_not_blocked(self):
+        # An issue example that fails against the original may reproduce the
+        # reported bug. The bounded import fallback also fails here, so no
+        # regression or successful verification can be claimed.
         with patch("repopilot.candidate_smoke.shutil.which",
                    return_value="/usr/bin/docker"), patch(
                    "repopilot.candidate_smoke._run_docker",
-                   side_effect=[(1, False)]) as runner:
+                   side_effect=[(1, False), (1, False)]) as runner:
             report = smoke_candidate(self.root, DIFF, self.issue)
         self.assertEqual(report["status"], "inconclusive")
         self.assertEqual(report["reason"], "baseline_did_not_pass")
-        runner.assert_called_once()
+        self.assertEqual(runner.call_count, 2)
 
     def test_both_pass_only_limited_smoke_not_official_solve(self):
         with patch("repopilot.candidate_smoke.shutil.which",
