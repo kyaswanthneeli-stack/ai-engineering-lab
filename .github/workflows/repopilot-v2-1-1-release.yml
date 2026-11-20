@@ -1,0 +1,165 @@
+name: RepoPilot v2.1.1 release (official evidence verified)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/repopilot-v2-1-1-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repopilot-v2.1.1-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'kyaswanthneeli-stack/ai-engineering-lab' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Refuse to replace an existing immutable tag or release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v2.1.1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::v2.1.1 release already exists; refusing to replace it"
+            exit 1
+          fi
+          if git ls-remote --tags "https://github.com/$GITHUB_REPOSITORY.git" 'refs/tags/v2.1.1' | grep -q .; then
+            echo "::error::v2.1.1 tag already exists; refusing to move it"
+            exit 1
+          fi
+      - name: Install package and pinned test/build tools
+        run: |
+          python -m pip install -e .
+          python -m pip install 'coverage>=7,<9' 'build>=1,<3'
+      - name: Validate v2 package version and November 20 official SWE-bench evidence
+        run: |
+          python - <<'PY'
+          import tomllib
+          from pathlib import Path
+          from importlib.metadata import version
+          from repopilot import __version__
+          from repopilot.swebench_results import official_summary
+
+          pyproject=tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))
+          assert (version('repopilot'),__version__,pyproject['project']['version']) == ('2.1.1',)*3
+          b=Path('benchmarks')
+          summary=official_summary(
+              b/'swebench-lite-12.json',
+              b/'official-score-2026-11-20.json',
+              b/'official-predictions-2026-11-20.jsonl')
+          assert (summary['selected'],summary['submitted'],summary['evaluated'],
+                  summary['resolved'],summary['unresolved'],summary['error'],
+                  summary['not_submitted']) == (12,6,6,1,5,0,6)
+          assert summary['is_complete_12_task_evaluation'] is False
+          assert (b/'OFFICIAL_EVALUATION_2026-11-20.md').is_file()
+          assert Path('RELEASE_NOTES_v2.1.1.md').is_file()
+          print('VERIFIED: RepoPilot package 2.1.1; official 12 selected, 6 submitted, 1 resolved, 0 harness errors')
+          PY
+      - name: Run offline setup diagnostic without model or Docker subprocess
+        run: |
+          mkdir -p .runs
+          python -m repopilot.cli doctor > .runs/release-v2.1-doctor-offline.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path('.runs/release-v2.1-doctor-offline.json').read_text())
+          checks={item['name']: item['status'] for item in report['checks']}
+          assert report['mode']=='offline'
+          assert report['ready_for_verified_workflow'] is False
+          assert checks['python']=='pass' and checks['git']=='pass'
+          assert checks['docker_daemon']=='not_checked'
+          assert checks['model_available'] in {'not_checked','fail'}
+          print('Offline diagnostic safely reported local readiness without model inference')
+          PY
+
+      - name: Run full Python tests and verify patch hashes with coverage
+        run: |
+          python -m compileall -q src/repopilot tests
+          python -m coverage run --source=repopilot -m unittest discover -s tests -v
+          python -m coverage report --show-missing
+      - name: Verify reference regression in network-restricted Docker
+        run: |
+          docker pull python:3.12-alpine
+          mkdir -p .runs
+          python -m repopilot.cli verify fixtures/calculator-buggy examples/issue.json \
+            --output .runs/release-v2-reference-verification.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path('.runs/release-v2-reference-verification.json').read_text())
+          assert data['outcome']=='verified_in_sandbox'
+          assert data['before']['exit_code']!=0 and data['after']['exit_code']==0
+          print('Restricted Docker baseline/reproduction/patched verification passed')
+          PY
+          cd fixtures/invoice-multifile
+          python -m unittest discover -s tests -v
+      - name: Build versioned wheel and source distribution
+        run: |
+          python -m build --sdist --wheel --outdir dist .
+          python - <<'PY'
+          from pathlib import Path
+          wheel=list(Path('dist').glob('repopilot-2.1.1-*.whl'))
+          sdist=list(Path('dist').glob('repopilot-2.1.1.tar.gz'))
+          assert len(wheel)==1 and len(sdist)==1, 'Missing expected v2 distribution files'
+          print('VERIFIED DIST FILES:',wheel[0],sdist[0])
+          PY
+          sha256sum dist/*
+      - name: Verify installed wheel in a clean offline virtual environment
+        run: |
+          python -m venv .runs/repopilot-wheel-smoke
+          .runs/repopilot-wheel-smoke/bin/python -m pip install --no-index --no-deps dist/repopilot-2.1.1-*.whl
+          .runs/repopilot-wheel-smoke/bin/python - <<'PY'
+          from importlib.metadata import version
+          from repopilot import __version__
+          from repopilot.doctor import inspect_runtime
+          assert (version('repopilot'),__version__)==('2.1.1','2.1.1')
+          assert inspect_runtime(live=False)['mode']=='offline'
+          print('Clean wheel installation and CLI runtime imports validated')
+          PY
+
+      - name: Preserve tests and build artifacts for audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-v2.1.1-release-verification
+          path: |
+            repopilot/dist/
+            repopilot/.runs/release-v2-reference-verification.json
+            repopilot/.runs/release-v2.1-doctor-offline.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Create immutable v2.1.1 GitHub release after all gates pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v2.1.1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::v2.1.1 release appeared during verification; refusing overwrite"
+            exit 1
+          fi
+          if git ls-remote --tags "https://github.com/$GITHUB_REPOSITORY.git" 'refs/tags/v2.1.1' | grep -q .; then
+            echo "::error::v2.1.1 tag appeared during verification; refusing overwrite"
+            exit 1
+          fi
+          gh release create v2.1.1 dist/repopilot-2.1.1-*.whl dist/repopilot-2.1.1.tar.gz \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "RepoPilot v2.1.1 — Verified AI Coding Agent Portfolio Release" \
+            --notes-file RELEASE_NOTES_v2.1.1.md
+          gh release view v2.1.1 --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,isPrerelease,url
