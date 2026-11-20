@@ -1,6 +1,6 @@
 # RepoPilot — Evidence-first autonomous coding harness
 
-**Latest published release: [RepoPilot v2.0.0](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.0.0).** This independent, evidence-backed Python issue-to-patch prototype includes source code, tests, Docker verification, a live-model demonstration and [official SWE-bench evidence](benchmarks/OFFICIAL_EVALUATION_2026-11-20.md). Changes on `main` may be newer than the immutable release. It is a verified portfolio project, not a production autonomous code-repair guarantee. Historical [v1.0.0 notes](RELEASE_NOTES_v1.0.0.md) remain available.
+**Latest published release: [RepoPilot v2.1.0](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.1.0).** This evidence-backed Python issue-to-patch prototype includes bounded source inspection, model-generated proposals, regression verification in restricted Docker, approval-gated draft pull requests, and a local setup diagnostic. Its verified v2.1 release passed **204 Python tests (82% coverage)**, restricted Docker tests and clean-install package validation. [Release notes](RELEASE_NOTES_v2.1.0.md) · [Official SWE-bench evidence](benchmarks/OFFICIAL_EVALUATION_2026-11-20.md) · [Live demo](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/recruiter-demo.html). It remains a tested portfolio prototype, not production-grade autonomous repair.
 
 **For Upwork clients:** [Portfolio-ready project case study, deliverables and demonstration script](UPWORK_PORTFOLIO.md). This document distinguishes verified results from experimental capabilities and includes copy suitable for an Upwork portfolio item.
 
@@ -84,7 +84,7 @@ python -m repopilot.cli run-repair fixtures/calculator-buggy \
 
 It never automatically merges code or publishes a PR.
 
-## Setup preflight (on main after v2.0.0)
+## Setup preflight (v2.1.0 and later)
 
 Check local prerequisites before any real issue-to-fix attempt. The default
 command is **read-only and offline**: it does not invoke Docker, contact a
