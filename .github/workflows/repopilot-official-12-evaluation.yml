@@ -112,8 +112,10 @@ jobs:
         with:
           name: repopilot-12-model-attempts-v5-unscored
           path: repopilot/.runs/swebench-batch/
-      - name: Install official SWE-bench harness
-        run: python -m pip install 'swebench>=3.0,<5.0'
+      - name: Install official SWE-bench harness and RepoPilot result validator
+        run: |
+          python -m pip install -e .
+          python -m pip install 'swebench>=3.0,<5.0'
       - name: Evaluate actual predictions for the pinned 12 instances
         run: |
           # Evaluate only actual model-submitted predictions. Other pinned
@@ -161,6 +163,58 @@ jobs:
               with tarfile.open(out/'official-evaluation-logs.tar.gz','w:gz') as archive:
                   archive.add('logs/evaluation',arcname='logs/evaluation')
           shutil.copy2('.runs/swebench-batch/predictions.jsonl',out/'real-model-predictions.jsonl')
+          PY
+      - name: Validate official evaluator and write reproducible scorecard
+        run: |
+          test -s .runs/official-evidence/official-evaluation-result.json
+          python -m repopilot.swebench_results \
+            benchmarks/swebench-lite-12.json \
+            .runs/official-evidence/official-evaluation-result.json \
+            .runs/swebench-batch/predictions.jsonl \
+            --output .runs/official-evidence/official-summary.json
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          summary_file=Path('.runs/official-evidence/official-summary.json')
+          summary=json.loads(summary_file.read_text(encoding='utf-8'))
+          # A green evaluator job requires a result for every submitted
+          # prediction, but does not require twelve successful predictions.
+          if (not summary['submitted'] or
+              summary['evaluated'] != summary['submitted'] or
+              summary['submitted_but_unreported']):
+              raise SystemExit('Incomplete official SWE-bench evidence')
+          files={
+              'manifest': Path('benchmarks/swebench-lite-12.json'),
+              'model_predictions': Path('.runs/swebench-batch/predictions.jsonl'),
+              'official_results': Path('.runs/official-evidence/official-evaluation-result.json'),
+              'validated_summary': summary_file,
+          }
+          provenance={
+              'github_run_url': ('https://github.com/'+os.environ.get('GITHUB_REPOSITORY','')+
+                                 '/actions/runs/'+os.environ.get('GITHUB_RUN_ID','')),
+              'commit_sha': os.environ.get('GITHUB_SHA',''),
+              'harness_run_id': 'repopilot-12-qwen3b-v5',
+              'model': 'qwen2.5-coder:3b',
+              'dataset': 'princeton-nlp/SWE-bench_Lite',
+              'selected': summary['selected'],
+              'submitted': summary['submitted'],
+              'evaluated': summary['evaluated'],
+              'resolved': summary['resolved'],
+              'sha256': {name:hashlib.sha256(path.read_bytes()).hexdigest()
+                         for name,path in files.items()},
+          }
+          Path('.runs/official-evidence/provenance.json').write_text(
+              json.dumps(provenance,indent=2)+'\\n', encoding='utf-8')
+          print('OFFICIAL RESOLVED:', summary['resolved'])
+          print('OFFICIAL SUBMITTED:', summary['submitted'])
+          print('SELECTED COHORT:', summary['selected'])
+          print('RESOLVED / SUBMITTED:',
+                f"{summary['resolved']}/{summary['submitted']}")
+          print('RESOLVED / SELECTED:',
+                f"{summary['resolved']}/{summary['selected']}")
           PY
       - name: Upload official reports without unsafe colon filenames
         if: always()
