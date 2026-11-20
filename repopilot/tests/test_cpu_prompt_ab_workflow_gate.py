@@ -41,7 +41,7 @@ class CpuPromptABWorkflowTests(unittest.TestCase):
             "pytest-dev__pytest-11148",
             "python -m repopilot.cpu_prompt_ab",
             "--per-task-timeout 300 --max-steps 12",
-            "selected task",
+            "unique_selected_tasks",
             "officially_resolved",
             "officially_evaluated",
             "UNSCORED EXPERIMENT",
