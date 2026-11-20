@@ -316,7 +316,9 @@ def _compact_final_context(chunks:list[str],max_chars:int)->list[str]:
             continue
         # Bounded message size matters more than completing a line. Retain
         # the original header to keep the valid inspected path available.
-        result.append(chunk[:max(0,cap-len(marker))]+marker[:cap])
+        prefix=chunk[:max(0,cap-len(marker))]
+        prefix=prefix.replace("EXACT COMPLETE SOURCE ","SOURCE EXCERPT ",1)
+        result.append((prefix+marker)[:cap])
     return result
 
 
