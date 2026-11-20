@@ -37,6 +37,12 @@ latencies, model variability and run-order effects prevent a causal speed claim.
 The order was Django default, pytest short, Django short, pytest default.
 Patch existence does not establish correctness or independent test success.
 
+Inspection of the preserved short-prompt pytest proposal shows it changes only
+`HookimplMarker("pytest")` to `HookimplMarker('pytest')`. Both string literals
+have the same value; this edit supplies no behavioral fix. Its acceptance by
+the experiment's format/provenance gate must not be interpreted as successful
+repair or evidence that the shorter prompt improves quality.
+
 Both generated patches had `inconclusive: baseline_did_not_pass` smoke results.
 Successful requests reported 2,702 prompt tokens for Django default and 2,736
 for pytest short. Failed attempts do not retain comparable request-token counts
@@ -53,7 +59,9 @@ the reported issue.
 Retain the existing default and the shorter cap as an explicit operator option.
 Do not start another twelve-task run on the strength of this study. The next
 useful engineering task is to diagnose the inconclusive baseline setup and
-validate a correction with a small reproducible Docker experiment. If prompt
+validate a correction with a small reproducible Docker experiment. Proposal
+quality also needs attention: the quote-only pytest edit warrants a controlled
+check for behaviorally unchanged proposals before more model experiments. If prompt
 optimization is revisited, collect per-call timeout/token evidence and repeated
 paired trials, then evaluate actual proposals independently before claiming
 better resolution. The verified official cohort result remains **1/12 (8.3%)**.
