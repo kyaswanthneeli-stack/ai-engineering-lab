@@ -171,9 +171,34 @@ def smoke_candidate(repo: Path, patch: str, issue: str, *,
         if before is None:
             return {"status": "inconclusive", "probe": kind,
                     "reason": "baseline_unavailable"}
+        if before != 0 and kind == "issue_python_example":
+            # Public issue examples often *demonstrate* the existing bug,
+            # so failing on original source is expected. The candidate
+            # must not be judged by the example's failure alone. With
+            # remaining budget, fall back to a weak import-only baseline
+            # and report that distinct probe type transparently.
+            fallback_script, fallback_kind = _reproducer("", targets)
+            remaining = timeout - (time.monotonic() - started)
+            if fallback_kind == "module_import" and remaining >= 9:
+                fallback_before, cleanup_failure = _run_docker(
+                    root, fallback_script, overlay=None, targets=targets,
+                    timeout=min(5, remaining / 2))
+                if cleanup_failure:
+                    return {"status": "inconclusive", "probe": kind,
+                            "reason": "container_cleanup_unconfirmed"}
+                if fallback_before == 0:
+                    script = fallback_script
+                    kind = "module_import_fallback"
+                    before = 0
+                else:
+                    return {"status": "inconclusive", "probe": kind,
+                            "reason": "baseline_did_not_pass"}
+            else:
+                return {"status": "inconclusive", "probe": kind,
+                        "reason": "baseline_did_not_pass"}
         if before != 0:
-            # Could be an expected reproduction failure or missing imports.
-            # Never silently classify a baseline failure as a patch failure.
+            # A failed original-code import is not evidence the proposed
+            # candidate is broken. Do not upgrade to a false pass.
             return {"status": "inconclusive", "probe": kind,
                     "reason": "baseline_did_not_pass"}
         remaining = timeout - (time.monotonic() - started)
