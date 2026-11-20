@@ -14,9 +14,11 @@ PROJECT_ROOT = REPO_ROOT / "repopilot"
 class V2ReleaseGateTests(unittest.TestCase):
     def test_distribution_and_runtime_have_same_release_version(self):
         metadata=tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())
-        self.assertEqual(metadata["project"]["version"], "2.1.1")
-        self.assertEqual(__version__, "2.1.1")
-        self.assertEqual(version("repopilot"), "2.1.1")
+        # Historic v2 workflow stays protected, but future version bumps
+        # must remain consistent between installed runtime and metadata.
+        self.assertEqual(metadata["project"]["version"], __version__)
+        self.assertEqual(version("repopilot"), __version__)
+        self.assertTrue((PROJECT_ROOT/"RELEASE_NOTES_v2.0.0.md").is_file())
 
     def test_publish_only_from_main_after_release_checks(self):
         workflow=(REPO_ROOT / ".github/workflows/repopilot-v2-release.yml").read_text()
