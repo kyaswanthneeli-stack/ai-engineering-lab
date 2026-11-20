@@ -1,0 +1,169 @@
+name: RepoPilot CPU issue prompt A/B after official v9
+
+on:
+  workflow_run:
+    workflows:
+      - RepoPilot official v9 12-task SWE-bench evaluation
+    types:
+      - completed
+  # If the v9 completed event happens before this workflow reaches main,
+  # manual dispatch can still run the SAME verified, small A/B check.
+  workflow_dispatch:
+
+concurrency:
+  group: repopilot-small-cpu-prompt-ab
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  cpu-prompt-ab:
+    # Do not start inference until the exact independent v9 run has finished.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.id == 44776554310 &&
+       github.event.workflow_run.head_sha == '5ffdcd5695fc2df32fef40d0e388a04798f4dee7' &&
+       github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 42
+    defaults:
+      run:
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install repository code and official dataset reader
+        run: |
+          python -m pip install -e .
+          python -m pip install 'datasets>=3.0,<5.0'
+      - name: Fetch independent v9 scorecard before starting any new inference
+        uses: actions/download-artifact@v4
+        with:
+          name: repopilot-12-official-harness-v9
+          run-id: 44776554310
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: repopilot/.runs/v9-official-evidence
+      - name: Verify exact v9 provenance and official scorecard SHA256
+        run: |
+          python - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          root=Path('.runs/v9-official-evidence')
+          summary_file=root/'official-summary.json'
+          provenance_file=root/'provenance.json'
+          result_file=root/'official-evaluation-result.json'
+          summary=json.loads(summary_file.read_text())
+          provenance=json.loads(provenance_file.read_text())
+          assert provenance['commit_sha']=='5ffdcd5695fc2df32fef40d0e388a04798f4dee7'
+          assert provenance['harness_run_id']=='repopilot-12-qwen3b-v9'
+          assert provenance['model']=='qwen2.5-coder:3b'
+          assert provenance['selected']==12
+          assert summary['selected']==12
+          assert provenance['submitted']==summary['submitted']
+          assert provenance['evaluated']==summary['evaluated']
+          assert provenance['resolved']==summary['resolved']
+          assert summary['submitted']>0
+          assert summary['evaluated']==summary['submitted']
+          assert summary['submitted_but_unreported']==0
+          for label,file in [
+              ('official_results',result_file),
+              ('validated_summary',summary_file)]:
+              assert hashlib.sha256(file.read_bytes()).hexdigest()==provenance['sha256'][label]
+          print('INDEPENDENTLY VERIFIED V9:',summary['resolved'],'resolved / 12 selected')
+          print('V8 OFFICIAL BASELINE: 1 / 12 resolved')
+          print('Starting two-task unscored prompt comparison; not a new resolution claim')
+          PY
+      - name: Verify both actual pinned problem statements exceed shorter cap
+        run: |
+          python - <<'PY'
+          from datasets import load_dataset
+          from repopilot.swebench_export import load_manifest
+          from pathlib import Path
+          desired={'django__django-12113','pytest-dev__pytest-11148'}
+          pinned={row['instance_id']:row for row in
+                  load_manifest(Path('benchmarks/swebench-lite-12.json'))}
+          assert desired <= set(pinned)
+          rows=load_dataset('princeton-nlp/SWE-bench_Lite',split='test')
+          found={}
+          for row in rows:
+              if row['instance_id'] in desired:
+                  assert row['base_commit']==pinned[row['instance_id']]['base_commit']
+                  assert row['repo']==pinned[row['instance_id']]['repo']
+                  found[row['instance_id']]=len(row['problem_statement'])
+          assert set(found)==desired
+          assert all(chars>2500 for chars in found.values()),found
+          print('PUBLIC PROBLEM LENGTHS:',found)
+          PY
+      - name: Build trusted offline candidate smoke runtime
+        run: docker build --pull -t repopilot-candidate-deps:py310 -f ci/Dockerfile.candidate-smoke ci
+      - name: Start same local Qwen2.5-Coder 3B CPU model as v9
+        run: |
+          docker run -d --name repopilot-ab-ollama -p 127.0.0.1:11434:11434 ollama/ollama:latest
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
+          for attempt in 1 2 3; do
+            if docker exec repopilot-ab-ollama ollama pull qwen2.5-coder:3b; then break; fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep $((attempt*10))
+          done
+      - name: Run four actual model attempts on two pinned issues
+        env:
+          REPOPILOT_MODEL: qwen2.5-coder:3b
+          REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
+          REPOPILOT_MAX_TOKENS: '1200'
+          REPOPILOT_OLLAMA_NATIVE: '1'
+          REPOPILOT_PROVIDER_TIMEOUT_SECONDS: '110'
+          REPOPILOT_AGENT_BUDGET_SECONDS: '270'
+          REPOPILOT_FINAL_CONTEXT_CHARS: '9000'
+          REPOPILOT_CANDIDATE_SMOKE: '1'
+          REPOPILOT_CANDIDATE_SMOKE_IMAGE: repopilot-candidate-deps:py310
+        run: |
+          curl -fsS --retry 2 --max-time 120 \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"qwen2.5-coder:3b","prompt":"hello","stream":false,"options":{"num_predict":8}}' \
+            http://127.0.0.1:11434/api/generate >/dev/null
+          python -m repopilot.cpu_prompt_ab \
+            --manifest benchmarks/swebench-lite-12.json \
+            --output .runs/cpu-prompt-ab \
+            --per-task-timeout 300 --max-steps 12
+      - name: Print comparison without claiming official resolution
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          f=Path('.runs/cpu-prompt-ab/comparison.json')
+          if not f.exists():
+              print('No complete comparison. Keep partial progress artifact; do not infer any solve.')
+          else:
+              summary=json.loads(f.read_text())
+              assert summary['unique_selected_tasks']==2
+              assert summary['attempts']==4
+              assert summary['officially_evaluated'] is False
+              assert summary['officially_resolved'] is None
+              for pair in summary['pairs']:
+                  print('ISSUE:',pair['instance_id'])
+                  print('DEFAULT MS:',pair['default_elapsed_ms'],
+                        'SHORT MS:',pair['short_elapsed_ms'])
+                  print('DEFAULT PATCH:',pair['default_generated_patch'],
+                        'SHORT PATCH:',pair['short_generated_patch'])
+              print('UNSCORED EXPERIMENT; do not infer SWE-bench resolution')
+          PY
+      - name: Save authentic A/B attempt records and comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-cpu-prompt-ab-after-v9
+          path: repopilot/.runs/cpu-prompt-ab/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Shut down local model
+        if: always()
+        run: docker rm -f repopilot-ab-ollama || true
