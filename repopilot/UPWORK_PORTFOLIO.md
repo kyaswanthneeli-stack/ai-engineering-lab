@@ -10,7 +10,7 @@
 
 **Description (under Upwork's 600-character portfolio limit):**
 
-Developed RepoPilot, an open-source Python AI coding-agent prototype that turns GitHub bug reports into reviewable patches. It supports bounded source inspection, LLM-generated code changes, regression-test workflows, restricted Docker verification, and human-approved pull requests. Demonstrated real Ollama-generated fixes and a public SWE-bench Lite evaluation. The benchmark covers 12 pinned issues; baseline results were 1 resolved of 6 evaluated patches, not 12/12. Includes source, reproducible tests, CI evidence, and a client-facing walkthrough.
+Developed RepoPilot, an open-source Python AI coding-agent prototype that turns GitHub bug reports into reviewable patches. It supports bounded source inspection, LLM-generated code changes, regression-test workflows, restricted Docker verification, and human-approved pull requests. Demonstrated real Ollama-generated fixes and a public SWE-bench Lite evaluation. The benchmark covers 12 pinned issues; v10 resolved one of four evaluated patches (one of twelve selected). Includes source, reproducible tests, CI evidence, and a client-facing walkthrough.
 
 **Skills:** Python, Generative AI, LLM Integration, AI Agents, GitHub Actions, Docker (choose the closest current Upwork skill tags).
 
@@ -58,7 +58,7 @@ GitHub issue + pinned commit
 - **Automated testing:** [post-merge main CI](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44703057248) passed. The exact test count and coverage depend on the commit tested.
 - **Official benchmark baseline:** [Nov 19 authenticated evidence](benchmarks/OFFICIAL_EVALUATION_2026-11-19.md) recorded 12 selected SWE-bench Lite issues, six submitted model patches, one officially resolved, and five unresolved. This means **1/6 evaluated** and **1/12 selected**. The [later Nov 19 run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44580636292) separately submitted four and resolved one.
 - **Nov 20 verified follow-up:** [official workflow #44703057273](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44703057273) attempted all 12 pinned issues, generated six candidate patches, and the independent evaluator [resolved one](benchmarks/OFFICIAL_EVALUATION_2026-11-20.md) (**1/6 submitted; 1/12 selected**). Three other tasks timed out and three produced model failures. **No improvement** over the original Nov 19 six-submission result.
-- **Progress tracker:** [v2 release gate](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/16). v2 remains an unreleased engineering milestone until evaluation evidence, review and release gates finish.
+- **Current v10 evidence:** [results and per-patch outcomes](benchmarks/README.md).
 
 ## Scope clients could commission
 
@@ -90,7 +90,7 @@ RepoPilot is a demonstration of transferable skills. A client engagement should 
 3. Display the real model-produced candidate for the controlled two-file example.
 4. Show the baseline green / reproduced issue red / patched tests green sequence in Docker.
 5. Show the reviewer dashboard and explain why approval is required for any pull request.
-6. Conclude with the official benchmark's **submitted and selected denominators**, including failures and timeouts. As of Nov 20 the new run is complete: state 1/6 submitted resolved, 1/12 selected resolved, and 0 evaluator errors.
+6. Conclude with the official benchmark's **submitted and selected denominators**, including failures and timeouts. For v10, state 1/4 submitted resolved, 1/12 selected resolved, and 0 evaluator errors.
 
 ## Local reproduction
 
