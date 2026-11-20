@@ -85,7 +85,7 @@ class BenchmarkBatchTests(unittest.TestCase):
                     "base_commit": "a" * 40,
                     "generated_by_model": True,
                     "model_name_or_path": "test-model",
-                    "model_patch": "diff --git a/x.py b/x.py\\n@@ -1 +1 @@\\n-a\\n+b\\n",
+                    "model_patch": "diff --git a/x.py b/x.py\n@@ -1 +1 @@\n-a\n+b\n",
                 }))
             else:
                 (output / "attempt.json").write_text(
