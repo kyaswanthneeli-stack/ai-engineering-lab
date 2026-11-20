@@ -1,8 +1,8 @@
 # RepoPilot — Evidence-first autonomous coding harness
 
-**Stable release: [RepoPilot v2.1.1](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.1.1).** This evidence-backed Python issue-to-patch prototype includes bounded source inspection, model-generated proposals, regression verification in restricted Docker, approval-gated draft pull requests, local setup diagnostics, and deadline-aware model requests. Its verified patch-release workflow passed **212 Python tests (82% coverage)**, restricted Docker regression checks and clean-install wheel validation. [v2.1.1 release notes](RELEASE_NOTES_v2.1.1.md) · [Official SWE-bench evidence](benchmarks/OFFICIAL_EVALUATION_2026-11-20.md) · [Live demo](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/recruiter-demo.html). This remains a tested portfolio prototype, not a production-grade autonomous repair guarantee.
+**Stable release: [RepoPilot v2.1.1](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.1.1).** This evidence-backed Python issue-to-patch prototype includes bounded source inspection, model-generated proposals, regression verification in restricted Docker, approval-gated draft pull requests, local setup diagnostics, and deadline-aware model requests. Its verified patch-release workflow passed **212 Python tests (82% coverage)**, restricted Docker regression checks and clean-install wheel validation. [v2.1.1 release notes](RELEASE_NOTES_v2.1.1.md) · [Official SWE-bench evidence](benchmarks/README.md) · [Live demo](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/recruiter-demo.html). This remains a tested portfolio prototype, not a production-grade autonomous repair guarantee.
 
-**Published pre-release: [RepoPilot v2.2.0rc1](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.2.0rc1)** — [deployment and rollback](docs/DEPLOYMENT.md) · [operator runbook](docs/OPERATIONS.md) · [security model](SECURITY.md) · [architecture](docs/ARCHITECTURE.md) · [release-candidate notes](RELEASE_NOTES_v2.2.0rc1.md). This is a deployable **read-only CLI image** and a separate human-supervised repair worker, **not** a public authenticated SaaS or unsupervised production fixer. The release workflow verified the packages, restricted Docker execution and non-root CLI image before publishing. [Release evidence and image digest](docs/RELEASE_EVIDENCE_v2.2.0rc1.md). The independently verified official v9 result remains **1/12 selected tasks resolved (8.3%)**; [v9 scoring run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44776554310). No 2/12 success is claimed.
+**Published pre-release: [RepoPilot v2.2.0rc1](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.2.0rc1)** — [deployment and rollback](docs/DEPLOYMENT.md) · [operator runbook](docs/OPERATIONS.md) · [security model](SECURITY.md) · [architecture](docs/ARCHITECTURE.md) · [release-candidate notes](RELEASE_NOTES_v2.2.0rc1.md). This is a deployable **read-only CLI image** and a separate human-supervised repair worker, **not** a public authenticated SaaS or unsupervised production fixer. The release workflow verified the packages, restricted Docker execution and non-root CLI image before publishing. [Release evidence and image digest](docs/RELEASE_EVIDENCE_v2.2.0rc1.md). The [official v10 evaluation](benchmarks/README.md) resolved 1 of 12 selected issues and 1 of 4 submitted patches.
 
 **For Upwork clients:** [Portfolio-ready project case study, deliverables and demonstration script](UPWORK_PORTFOLIO.md). This document distinguishes verified results from experimental capabilities and includes copy suitable for an Upwork portfolio item.
 
@@ -19,9 +19,9 @@
 | Static pre-execution review and Docker verification | Built | Static review unit tested; still requires human judgment on real patches |
 | Offline dashboard and execution-event report | Built | [Interactive recruiter walkthrough](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/recruiter-demo.html), [real Ollama sample](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/model-run.html), and reference-patch dashboard |
 | Approval-gated draft PR via GitHub API | Built | [PR #10](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/10) is **merged** after review corrections to a real Qwen 7B two-file model candidate; the corrected result passed CI and restricted Docker checks. Do not attribute the subsequent corrections entirely to the model. Earlier seeded [draft PR #2](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/2) remains unmerged |
-| 12 SWE-bench Lite task preparation and result import | Built | All 12 pinned tasks attempted; six genuine model-generated patches submitted and evaluated by the official harness |
+| 12 SWE-bench Lite task preparation and result import | Built | All 12 pinned tasks attempted; four model-generated patches submitted and evaluated by the official harness |
 | Real SWE-bench model issue attempts | Bounded single and 12-task model runners available | [Baseline 12-task batch](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44547336463) yielded six patches and six timeouts; the [later Nov 19 run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44580636292) yielded four submitted patches and 1 official resolution. The [evidence recovery run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44558575315) preserved the baseline results. |
-| SWE-bench model issue resolution rate | Officially measured for Nov 19 and Nov 20 cohorts | **Nov 20: 1 / 6 submitted resolved (16.7%); 1 / 12 selected resolved (8.3%)**, specifically `sympy__sympy-14774`. No improvement over the original Nov 19 cohort. [Official report](benchmarks/OFFICIAL_EVALUATION_2026-11-20.md) · [raw result](benchmarks/official-score-2026-11-20.json) |
+| SWE-bench model issue resolution rate | Official v10 evaluation | 1/12 selected (8.3%) and 1/4 evaluated (25%). The resolved issue was `sympy__sympy-14774`. [Results](benchmarks/README.md) |
 
 [Open the recruiter-facing explanation](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/) · [View CI and downloadable run artifacts](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/workflows/repopilot.yml)
 
@@ -49,7 +49,7 @@
 
 [GitHub Actions run #44497087568](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44497087568) passed the entire supported integration flow: fetch public issue #1 → clone the repository at an immutable commit → select the vulnerable calculator fixture → generate a fix with local Ollama/Qwen2.5-Coder 3B → run static review → verify baseline pass / reproduction fail / patched pass in restricted Docker → save dashboard and evidence as CI artifacts.
 
-This is an intentionally small public issue. It demonstrates **end-to-end operability on the supported fixture**, not reliable autonomy on arbitrary repositories. Human review is still needed to create a draft PR and the separate official SWE-bench benchmark now reports one resolved issue out of six evaluated submissions.
+This is an intentionally small public issue. It demonstrates **end-to-end operability on the supported fixture**, not reliable autonomy on arbitrary repositories. Human review is still needed to create a draft PR and the separate official SWE-bench benchmark now reports one resolved issue out of four evaluated submissions.
 
 ## Additional engineering evidence
 
@@ -116,21 +116,34 @@ correctness or production readiness.
 
 ## Local usage
 
-Python 3.11+ and Docker are required for the full workflow.
+The v10 benchmark used source revision `8388139a219d72801f1c06a76ae9a7cd10e821c7`. The downloadable v2.2.0rc1 packages predate the v10 validation changes. To install the evaluated revision in a fresh directory, use Python 3.11 or newer:
 
 ```sh
+git clone https://github.com/kyaswanthneeli-stack/ai-engineering-lab.git repopilot-v10
+cd repopilot-v10
+git checkout --detach 8388139a219d72801f1c06a76ae9a7cd10e821c7
 cd repopilot
+python -m venv .venv
+. .venv/bin/activate
 python -m pip install -e .
+```
+
+From that directory, run the tests and index the sample. Generating a proposal requires a running model provider. Verification requires Docker.
+
+```sh
 python -m unittest discover -s tests -v
 python -m repopilot.cli index examples/calculator
 export REPOPILOT_BASE_URL=http://127.0.0.1:11434/v1
 export REPOPILOT_MODEL=your-local-model
 python -m repopilot.cli propose examples/calculator examples/issue.txt --output .runs/proposal.json
-# Review generated proposal and patch first.
+# Read the generated patch and test before continuing.
+python -m json.tool .runs/proposal.json
 docker pull python:3.12-alpine
-python -m repopilot.cli verify examples/calculator examples/issue.json --output .runs/verification.json
+python -m repopilot.cli verify examples/calculator .runs/proposal.json --output .runs/verification.json
 python -m repopilot.cli dashboard .runs/verification.json --output .runs/dashboard.html
-python -m repopilot.cli benchmark .runs/verification.json --dataset "reference-patch fixture"
+
+# Optional fixture check using the bundled reference patch (requires Docker only).
+python -m repopilot.cli verify examples/calculator examples/issue.json --output .runs/reference-verification.json
 
 # When Ollama is running locally and the desired model is already downloaded:
 # ollama list
@@ -157,7 +170,7 @@ python -m repopilot.cli benchmark .runs/verification.json --dataset "reference-p
 
 For remote providers, set `REPOPILOT_BASE_URL`, `REPOPILOT_MODEL`, and `REPOPILOT_API_KEY` via environment variables.
 
-**Official 12-task workflow (completed on Nov 20):** [run #44703057273](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44703057273) used loopback-only native Ollama JSON mode (`REPOPILOT_OLLAMA_NATIVE=1`), a 110-second per-request timeout, and a 270-second agent-step budget inside a 300-second per-task timeout. It produced six predictions from twelve attempts and the independent official evaluator resolved one: **1/6 submitted; 1/12 selected**. [Audited report](benchmarks/OFFICIAL_EVALUATION_2026-11-20.md). The improvements did not increase the selected-cohort resolution count. [The Nov 20 single-task run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44700767322) failed with `Local Ollama native chat failed or timed out` after approximately 80 seconds; it generated **no** valid candidate and received **no** official score. The later Nov 19 official run submitted four candidates and resolved one (1/4 evaluated, 1/12 selected), compared with the preserved historical baseline (1/6 evaluated, 1/12 selected). Do not combine these denominators or claim new improvement.
+**Historical v5 workflow (Nov 20):** [run #44703057273](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44703057273) used loopback-only native Ollama JSON mode (`REPOPILOT_OLLAMA_NATIVE=1`), a 110-second per-request timeout, and a 270-second agent-step budget inside a 300-second per-task timeout. It produced six predictions from twelve attempts and the independent official evaluator resolved one: **1/6 submitted; 1/12 selected**. [Audited report](benchmarks/OFFICIAL_EVALUATION_2026-11-20.md). The improvements did not increase the selected-cohort resolution count. [The Nov 20 single-task run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44700767322) failed with `Local Ollama native chat failed or timed out` after approximately 80 seconds; it generated **no** valid candidate and received **no** official score. The later Nov 19 official run submitted four candidates and resolved one (1/4 evaluated, 1/12 selected), compared with the preserved historical baseline (1/6 evaluated, 1/12 selected). Do not combine these denominators or claim new improvement.
 
 **Optional agent wall-clock budget:** `REPOPILOT_AGENT_BUDGET_SECONDS` accepts `0` (default, disabled) or 10–3600 seconds. Before each agent step RepoPilot checks elapsed time and stops with a recorded error rather than starting a new model call after the budget expires. This is not a hard process timeout: a request already running may finish after the limit and still needs an independent HTTP timeout or external worker deadline. The single-task SWE-bench attempt workflow uses a 600-second agent budget; resolution improvement must be measured separately. Never commit keys. **Only connect to trusted model endpoints**.
 
@@ -167,11 +180,11 @@ For remote providers, set `REPOPILOT_BASE_URL`, `REPOPILOT_MODEL`, and `REPOPILO
 
 Repository data and issue text are untrusted. Generated patches are never automatically approved. Docker provides defense in depth, not hardened hostile-code isolation. Run verification only on disposable worker machines, without host credentials or Docker socket mounts. Network is disabled within the container; image is pre-pulled. Container timeouts may require manual worker disposal if daemon cleanup fails.
 
-Opt-in pinned public GitHub repository checkout is implemented. There is **no arbitrary-revision automatic cloning** and no unattended merging. GitHub issues can be read via the public REST API. The draft PR CLI publisher's external API route remains mocked in tests. Separately, the authenticated GitHub connector created [real draft PR #2](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/2), CI passed, and it remains unmerged. Separately, the reviewed multi-file PR #10 and agent reliability PR #12 were both merged into main in the v1.0.0 release work. The official SWE-bench harness result of one resolved issue out of six submitted patches is separately documented; no general cost or token savings are claimed.
+Opt-in pinned public GitHub repository checkout is implemented. There is **no arbitrary-revision automatic cloning** and no unattended merging. GitHub issues can be read via the public REST API. The draft PR CLI publisher's external API route remains mocked in tests. Separately, the authenticated GitHub connector created [real draft PR #2](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/2), CI passed, and it remains unmerged. Separately, the reviewed multi-file PR #10 and agent reliability PR #12 were both merged into main in the v1.0.0 release work. The official SWE-bench harness result of one resolved issue out of four submitted patches is separately documented; no general cost or token savings are claimed.
 
 ## Benchmark policy
 
-**Latest completed official evidence (Nov 20):** [12-task report](benchmarks/OFFICIAL_EVALUATION_2026-11-20.md), [official JSON](benchmarks/official-score-2026-11-20.json) and [six model predictions](benchmarks/official-predictions-2026-11-20.jsonl). All 12 attempted; six submitted; one officially resolved; three task timeouts and three model failures. This is not a full 12-task submitted-patch evaluation.
+**Official v10 evidence.** RepoPilot attempted 12 pinned issues and submitted four patches. The official harness resolved one issue, marked three unresolved and recorded zero evaluator errors. Eight attempts produced no submission. [Results and artifacts](benchmarks/README.md).
 
 
 The official [SWE-bench Lite](https://github.com/SWE-bench/SWE-bench) dataset has 300 issue/patch pairs. Its official evaluation harness requires task-specific environments and regression tests; passing RepoPilot's tiny calculator fixture does not mean a SWE-bench instance is resolved.
@@ -188,4 +201,4 @@ For an accurate 90-second recording and LinkedIn Featured description, open the 
 
 GitHub Actions produces an artifact named `repopilot-verification-fixture` containing an offline HTML dashboard, verification JSON and an explicitly labeled reference-fixture benchmark report. A real model response or PR appears only after an independently verifiable run.
 
-This project is deliberately distinct from browser simulations. Real provider inference and Docker verification have been demonstrated for a seeded issue and a **controlled two-file invoice issue** subsequently reviewed and merged as PR #10. Independent SWE-bench resolution is now **measured** for six submissions: **one resolved out of six evaluated**, with six of the twelve selected tasks unsubmitted. This is a limited reproducible result, not general autonomous reliability.
+This project is deliberately distinct from browser simulations. Real provider inference and Docker verification have been demonstrated for a seeded issue and a **controlled two-file invoice issue** subsequently reviewed and merged as PR #10. The [v10 evaluation](benchmarks/README.md) resolved one of four submissions from twelve attempts.
