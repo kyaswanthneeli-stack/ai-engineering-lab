@@ -89,6 +89,7 @@ def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
         report["inspected_files"]=meta.get("inspected_files",[])
         report["tool_trace"]=meta.get("tool_trace",[])
         report["provider_usage"]=meta.get("provider_reported_usage_by_attempt",[])
+        report["candidate_smoke"]=meta.get("candidate_smoke")
         report["status"]="model_patch_proposed"
         report["model_generated"]=True
         # Model-reported provenance does not replace review or the official harness.
