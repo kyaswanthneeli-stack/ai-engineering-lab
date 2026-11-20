@@ -123,6 +123,8 @@ python -m repopilot.cli benchmark .runs/verification.json --dataset "reference-p
 
 For remote providers, set `REPOPILOT_BASE_URL`, `REPOPILOT_MODEL`, and `REPOPILOT_API_KEY` via environment variables.
 
+**Optional agent wall-clock budget:** `REPOPILOT_AGENT_BUDGET_SECONDS` accepts `0` (default, disabled) or 10–3600 seconds. Before each agent step RepoPilot checks elapsed time and stops with a recorded error rather than starting a new model call after the budget expires. This is not a hard process timeout: a request already running may finish after the limit and still needs an independent HTTP timeout or external worker deadline. The single-task SWE-bench attempt workflow uses a 600-second agent budget; resolution improvement must be measured separately. Never commit keys. **Only connect to trusted model endpoints**.
+
 **Bounded model calls:** set `REPOPILOT_PROVIDER_TIMEOUT_SECONDS` to an integer from `10` to `120` (default `120`). The value caps each native Ollama or OpenAI-compatible HTTP request, not the entire agent run; timed-out attempts remain failures, never successes. For a **local loopback Ollama** endpoint (`http://127.0.0.1:11434/v1`) without API tokens, `REPOPILOT_OLLAMA_NATIVE=1` opts into Ollama's native JSON API to avoid compatibility-mode stalls. The real single-task SWE-bench attempt workflow opts into native mode and a 75-second request cap, but this is **not** evidence of higher official resolution accuracy. Never commit keys. **Only connect to trusted model endpoints**.
 
 ## Threat model and limits
