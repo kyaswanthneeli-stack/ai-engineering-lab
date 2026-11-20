@@ -1,7 +1,7 @@
 # RepoPilot v2.0 — Evidence-backed portfolio release notes
 
 **Date:** November 20, 2026  
-**Status:** Code and benchmark evidence verified in GitHub Actions. This document is a release-note handoff; **a formal GitHub Releases entry and version tag have not yet been created**. RepoPilot remains a portfolio-quality research prototype, not an unattended production code-repair service.
+**Release provenance:** The formal [v2.0.0 release](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.0.0) is published only after the [one-time release workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/workflows/repopilot-v2-release.yml) confirms package version 2.0.0, the official six-prediction result, all Python tests, and restricted Docker verification. The release page and published tag are authoritative; this document alone does not prove release completion. RepoPilot remains a portfolio-quality research prototype, not an unattended production code-repair service.
 
 ## What ships in the verified v2.0 code snapshot
 
@@ -52,6 +52,6 @@ Start with [README.md](README.md) for sample fixture/CLI and Ollama prerequisite
 - The tested workflows and authenticated GitHub integration rely on configuration and may fail on CPU-limited runners or large repositories.
 - Human approval remains required before adopting or merging any proposed patch.
 - The official 12-task result shows no improvement versus the original 1/6, 1/12 baseline; improving model solve rate is a future research goal.
-- A formal immutable `v2.0.0` Git tag / GitHub Release entry is a **remaining publishing action**, not falsely represented as already complete.
+- The **immutable** `v2.0.0` Git tag and distribution files are created by a one-time release workflow, conditional on all release gates. Verify the actual [GitHub release page](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.0.0) before sharing a download link.
 
 **Claims suitable for a freelancer portfolio:** built and tested a Python LLM coding-agent proof of concept; integrated GitHub source inspection, model patches, Docker regression, human-approved PR workflow and an independent benchmark with transparent successes and failures.
