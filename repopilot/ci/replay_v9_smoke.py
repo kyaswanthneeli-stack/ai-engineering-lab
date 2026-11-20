@@ -76,6 +76,7 @@ def replay(manifest, evidence, output, *, label, dataset_loader=None,
             source = checkout(f"https://github.com/{task['repo']}/issues/1",
                               task["base_commit"], Path(tmp) / "repo")
             record = {"instance_id": instance, "base_commit": task["base_commit"],
+                      "public_issue_sha256": hashlib.sha256(issues[instance].encode()).hexdigest(),
                       "original_prediction_sha256": hashlib.sha256(
                           prediction["model_patch"].encode()).hexdigest(),
                       "candidate_quality": review_quote_only_patch(source, prediction["model_patch"]),
@@ -90,6 +91,9 @@ def replay(manifest, evidence, output, *, label, dataset_loader=None,
                "selected_tasks": list(SELECTED), "records": records,
                "model_calls": 0, "officially_evaluated": False,
                "officially_resolved": None,
+               "confirmed_regressions": sum(row["candidate_smoke"]["status"] == "regression" for row in records),
+               "behavior_probe_cases": sum(row["candidate_smoke"].get("probe", "").startswith("source_doctest")
+                   and row["candidate_smoke"]["status"] in {"regression", "no_regression_observed"} for row in records),
                "usable_smoke_baselines": sum(row["candidate_smoke"]["status"]
                    in {"regression", "no_regression_observed"} for row in records)}
     (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")

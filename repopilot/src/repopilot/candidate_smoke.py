@@ -18,6 +18,8 @@ from pathlib import Path
 
 from .patches import apply_patch
 from .pr import patch_targets
+from .source_examples import select_source_examples, runner_script
+from . import native_runtime
 
 # Keep patch paths predictable when embedding them in Docker --mount values.
 _SAFE_PATH = re.compile(r"[A-Za-z0-9_./-]{1,240}\Z")
@@ -63,7 +65,8 @@ def _approved_image() -> str | None:
 
 
 
-def _reproducer(issue: str, targets: list[str], *, root: Path | None = None) -> tuple[str, str]:
+def _reproducer(issue: str, targets: list[str], *, root: Path | None = None,
+                evidence: dict | None = None) -> tuple[str, str]:
     """Use a small, parseable public issue snippet or import the target.
 
     Tests can also exercise this with explicit assertion snippets; no
@@ -78,12 +81,25 @@ def _reproducer(issue: str, targets: list[str], *, root: Path | None = None) -> 
         except SyntaxError:
             continue
         return code + "\n", "issue_python_example"
+    if (root is not None and
+            os.getenv("REPOPILOT_CANDIDATE_SOURCE_EXAMPLES", "0").strip() == "1"):
+        selection = select_source_examples(root, targets)
+        if selection is not None:
+            if evidence is not None:
+                evidence["source_examples"] = {k: v for k, v in selection.items() if k != "text"}
+            script, _ = _import_probe([selection["path"]], root=root)
+            return script + runner_script(selection), "source_doctest"
+    return _import_probe(targets, root=root)
+
+
+def _import_probe(targets: list[str], *, root: Path | None = None) -> tuple[str, str]:
     # Import is a weak smoke; both sides passing is not proof of correctness.
     names = []
     origins = []
     for original_path in targets[:2]:
         path = original_path
-        if (os.getenv("REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP", "0").strip() == "1"
+        if ((os.getenv("REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP", "0").strip() == "1"
+                or native_runtime.selected(targets))
                 and root is not None and path.startswith(("src/", "lib/"))
                 and not (root / path.split("/", 1)[0] / "__init__.py").exists()):
             path = path.split("/", 1)[1]
@@ -144,7 +160,7 @@ def _run_docker(repo: Path, script: str, *, overlay: Path | None,
                 phase: str = "baseline") -> tuple[int | None, bool]:
     """Run a fixed Python command with no host credentials, network or writes."""
     container = "repopilot-smoke-" + uuid.uuid4().hex[:16]
-    if phase not in {"baseline", "fallback_baseline", "candidate"}:
+    if phase not in {"baseline", "fallback_baseline", "behavior_baseline", "candidate"}:
         raise ValueError("Invalid smoke phase")
     def record(code, category):
         if diagnostics is not None:
@@ -171,6 +187,15 @@ def _run_docker(repo: Path, script: str, *, overlay: Path | None,
                else "PYTHONPATH=/workspace"),
         "-v", str(repo) + ":/workspace:ro",
     ]
+    use_native = native_runtime.selected(targets)
+    if use_native:
+        args.extend(["-e", "MPLCONFIGDIR=/tmp/mpl-config", "-e", "MPLBACKEND=Agg",
+                     "-e", "MATPLOTLIBRC=/testbed/lib/matplotlib/mpl-data",
+                     "-e", "OPENBLAS_NUM_THREADS=1", "-e", "OMP_NUM_THREADS=1",
+                     "--entrypoint", native_runtime.NATIVE_PYTHON])
+        script = native_runtime.prefix(repo, targets) + script
+    if diagnostics is not None:
+        diagnostics[phase + "_runtime_profile"] = "matplotlib_native_pinned" if use_native else "generic_python"
     if overlay is not None:
         for path in targets:
             args.extend(["--mount", "type=bind,src=" +
@@ -179,7 +204,12 @@ def _run_docker(repo: Path, script: str, *, overlay: Path | None,
     image = _approved_image()
     if image is None:
         raise ValueError("Unapproved candidate smoke runtime image")
-    args.extend(["-w", "/workspace", image, "python", "-c", script])
+    if use_native:
+        image = native_runtime.MATPLOTLIB_IMAGE
+    args.extend(["-w", "/workspace", image])
+    if not use_native:
+        args.append("python")
+    args.extend(["-c", script])
     try:
         # Discard stdout; inspect only the final 4 KiB of temporary stderr.
         # Never put raw traceback, source, missing module names or issue text
@@ -193,6 +223,9 @@ def _run_docker(repo: Path, script: str, *, overlay: Path | None,
             category = _failure_category(
                 result.returncode, errors.read(4096).decode("utf-8", "replace"))
         record(result.returncode, category)
+        if use_native and result.returncode == 78:
+            record(78, "runtime_provenance_unavailable")
+            return None, False
         if result.returncode < 0 or result.returncode >= 128:
             return None, cleanup_failed()
         if result.returncode in (125, 126, 127):
@@ -237,16 +270,18 @@ def smoke_candidate(repo: Path, patch: str, issue: str, *,
                     for n in range(1, len(Path(name).parts) + 1)) or
                 source.stat().st_size > 100_000):
             return {"status": "skipped", "reason": "unsafe_or_large_patch_target"}
-    script, kind = _reproducer(issue, targets, root=root)
+    diagnostics = {}
+    script, kind = _reproducer(issue, targets, root=root, evidence=diagnostics)
     if not script:
         return {"status": "skipped", "reason": "no_probe"}
-    diagnostics = {}
     setup, profile = _bootstrap(targets)
-    diagnostics["baseline_bootstrap_profile"] = profile if kind == "module_import" else "none"
+    probe_cap = 12 if native_runtime.selected(targets) else 7
+    fallback_cap = 8 if native_runtime.selected(targets) else 5
+    diagnostics["baseline_bootstrap_profile"] = profile if kind in {"module_import", "source_doctest"} else "none"
     # Import setup is never prepended to public issue examples, which may
     # intentionally configure their own runtime. It applies only to our
     # developer-generated module-import probes (including import fallbacks).
-    if kind == "module_import":
+    if kind in {"module_import", "source_doctest"}:
         script = setup + script
     def report(status, probe, reason):
         return {"status": status, "probe": probe, "reason": reason,
@@ -271,26 +306,42 @@ def smoke_candidate(repo: Path, patch: str, issue: str, *,
                     "reason": "deadline"}
         before, unsafe_cleanup = _run_docker(
             root, script, overlay=None, targets=targets,
-            timeout=min(7, remaining / 2), diagnostics=diagnostics,
+            timeout=min(probe_cap, remaining / 2), diagnostics=diagnostics,
             phase="baseline")
         if unsafe_cleanup:
             return report("inconclusive", kind, "container_cleanup_unconfirmed")
         if before is None:
             return report("inconclusive", kind, "baseline_unavailable")
         if before != 0 and kind == "issue_python_example":
+            # A failing issue example may intentionally demonstrate the bug.
+            # First try an independent, frozen original-source behavior probe.
+            alternate, alternate_kind = _reproducer("", targets, root=root,
+                                                       evidence=diagnostics)
+            remaining = timeout - (time.monotonic() - started)
+            if alternate_kind == "source_doctest" and remaining >= 12:
+                diagnostics["behavior_bootstrap_profile"] = profile
+                code, cleanup_failure = _run_docker(
+                    root, setup + alternate, overlay=None, targets=targets,
+                    timeout=min(fallback_cap, remaining / 2), diagnostics=diagnostics,
+                    phase="behavior_baseline")
+                if cleanup_failure:
+                    return report("inconclusive", kind, "container_cleanup_unconfirmed")
+                if code == 0:
+                    script, kind, before = setup + alternate, "source_doctest_fallback", 0
+        if before != 0 and kind in {"issue_python_example", "source_doctest"}:
             # Public issue examples often *demonstrate* the existing bug,
             # so failing on original source is expected. The candidate
             # must not be judged by the example's failure alone. With
             # remaining budget, fall back to a weak import-only baseline
             # and report that distinct probe type transparently.
-            fallback_script, fallback_kind = _reproducer("", targets, root=root)
+            fallback_script, fallback_kind = _import_probe(targets, root=root)
             fallback_script = setup + fallback_script
             remaining = timeout - (time.monotonic() - started)
             if fallback_kind == "module_import" and remaining >= 9:
                 diagnostics["fallback_bootstrap_profile"] = profile
                 fallback_before, cleanup_failure = _run_docker(
                     root, fallback_script, overlay=None, targets=targets,
-                    timeout=min(5, remaining / 2), diagnostics=diagnostics,
+                    timeout=min(fallback_cap, remaining / 2), diagnostics=diagnostics,
                     phase="fallback_baseline")
                 if cleanup_failure:
                     return report("inconclusive", kind, "container_cleanup_unconfirmed")
@@ -311,7 +362,7 @@ def smoke_candidate(repo: Path, patch: str, issue: str, *,
             return report("skipped", kind, "deadline")
         after, unsafe_cleanup = _run_docker(
             root, script, overlay=staging, targets=targets,
-            timeout=min(7, remaining), diagnostics=diagnostics,
+            timeout=min(probe_cap, remaining), diagnostics=diagnostics,
             phase="candidate")
         if unsafe_cleanup or after is None:
             return report("inconclusive", kind, "candidate_or_cleanup_unavailable")

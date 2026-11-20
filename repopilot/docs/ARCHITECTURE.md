@@ -117,3 +117,33 @@ hashes, reuses the original proposals and exact pinned commits, and compares
 setup off/on without any model calls. It does not execute the official evaluator
 or produce a new resolution score. These are deliberately weak compatibility
 checks; a passing import can still accompany an incorrect semantic patch.
+
+### Frozen source behavior and pinned native support
+
+`REPOPILOT_CANDIDATE_SOURCE_EXAMPLES=1` selects at most one complete original
+docstring containing 1–8 runnable doctest examples and an expected output.
+Selection is static and bounded to existing inspected source files, a 6,000
+character docstring and 2,400 example/expectation characters. Skipped-only and
+import-only examples are excluded. Target Python never executes on the host.
+
+The exact original examples and their SHA-256 are frozen before the candidate
+overlay is applied. Inside Docker, doctest runs them against the imported
+original or candidate module, after source-origin verification. A candidate
+cannot pass by rewriting its own docstring expectations. Only an original-pass,
+candidate-fail comparison is a regression; a failing original example can fall
+back to a transparently weaker import probe within the same time budget.
+
+`REPOPILOT_CANDIDATE_MATPLOTLIB_NATIVE=1` selects one developer-owned, immutable
+official SWE-bench instance-image digest for the supported Matplotlib base
+`c33557d120eefe3148ebfcf2e758ff2357966000`. No model/issue-supplied image reference
+is accepted. The runtime requires no tracked package/native-source differences
+against that base and matching original target-file hashes. A provenance failure
+is inconclusive, never a successful validation or candidate regression.
+
+The package loader uses the read-only `/workspace` Python source and candidate
+overlays first; matching native/built assets may come from the image's `/testbed`
+checkout. Imported target-file origins remain checked. Execution keeps the
+existing offline, nonroot, read-only, capability, PID, memory and CPU limits,
+with only bounded temporary Matplotlib configuration writes. Both new features
+default to off. Their replay workflow compares identical issue-text hashes,
+source pins and preserved proposals, without a model or official evaluator.
