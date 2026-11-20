@@ -2,6 +2,8 @@ name: RepoPilot official 12-task SWE-bench evaluation
 
 on:
   push:
+    branches:
+      - main
     paths:
       - 'repopilot/src/repopilot/benchmark_batch.py'
   workflow_dispatch:
