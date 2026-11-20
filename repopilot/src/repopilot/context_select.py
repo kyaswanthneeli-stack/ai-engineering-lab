@@ -88,6 +88,17 @@ def _safe_python_paths(root: Path, max_files: int):
             break
 
 
+
+def _symlink_component(root: Path, name: str) -> bool:
+    """Reject direct issue paths that traverse any symlinked component."""
+    current = root
+    for part in PurePosixPath(name).parts:
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False
+
+
 def _candidate_paths(root: Path, issue: str, scan_limit: int):
     """Prioritize explicit issue paths and nested basename matches.
 
@@ -105,7 +116,7 @@ def _candidate_paths(root: Path, issue: str, scan_limit: int):
         target = root / name
         if (not name.startswith("/") and ".." not in PurePosixPath(name).parts and
                 not any(part in _SKIP for part in PurePosixPath(name).parts) and
-                not target.is_symlink() and target.is_file() and
+                not _symlink_component(root, name) and target.is_file() and
                 target.resolve().is_relative_to(root) and
                 target.stat().st_size <= 100_000):
             explicit.append((target, name))
