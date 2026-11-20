@@ -267,6 +267,59 @@ def _parse_model_action(content):
     return value
 
 
+def _model_source_budget()->int:
+    """Bound CPU-model final source context separately from the issue text."""
+    raw=os.getenv("REPOPILOT_FINAL_CONTEXT_CHARS","9000")
+    try:
+        budget=int(raw)
+    except (TypeError,ValueError) as exc:
+        raise AgentToolError("Invalid final source context character budget") from exc
+    if not 4500<=budget<=24000:
+        raise AgentToolError("Final source context budget must be 4500-24000 characters")
+    return budget
+
+
+def _compact_final_context(chunks:list[str],max_chars:int)->list[str]:
+    """Fit all ranked snippets within a *total* budget, not one cap per file.
+
+    Preserve the start of every inspected source item and its file header.
+    When a source item is shortened, never present it as complete source:
+    explicitly tell the model to propose only exact edits from shown text.
+    """
+    if not 4500<=max_chars<=24000 or not 1<=len(chunks)<=8 or not all(
+            isinstance(chunk,str) for chunk in chunks):
+        raise AgentToolError("Invalid bounded final source context")
+    separators=2*(len(chunks)-1)
+    available=max_chars-separators
+    if sum(map(len,chunks))<=available:
+        return chunks
+    allocations=[0]*len(chunks)
+    remaining=available
+    # Round-robin allocations give every candidate a useful inspected window.
+    # Higher-ranked files appear first and receive residual context.
+    active=list(range(len(chunks)))
+    while active and remaining:
+        share=max(1,remaining//len(active))
+        newly_active=[]
+        for index in active:
+            give=min(share,len(chunks[index])-allocations[index],remaining)
+            allocations[index]+=give
+            remaining-=give
+            if allocations[index]<len(chunks[index]):
+                newly_active.append(index)
+        active=newly_active
+    marker="\n[RepoPilot: source excerpt shortened; use exact edits, NOT full-file replacement]\n"
+    result=[]
+    for chunk,cap in zip(chunks,allocations):
+        if cap>=len(chunk):
+            result.append(chunk)
+            continue
+        # Bounded message size matters more than completing a line. Retain
+        # the original header to keep the valid inspected path available.
+        result.append(chunk[:max(0,cap-len(marker))]+marker[:cap])
+    return result
+
+
 def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:str|None=None,
                               client=None,max_steps:int=8,required_targets:set[str]|None=None,
                               auto_issue_paths:bool=False)->tuple[BenchmarkPatch,dict]:
@@ -423,6 +476,13 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                             excerpt+"\n[remaining source omitted; use exact edits only]")
             else:
                 phase_files=sorted(required)
+            if auto_issue_paths and not required:
+                # SWE-bench tasks on CPU-hosted small models were regularly
+                # timing out during oversized prompt processing. Limit the
+                # *combined* final source context, keeping all chosen paths
+                # visible. This is not proof the candidate will solve a task.
+                final_context=_compact_final_context(
+                    final_context,_model_source_budget())
             # Discard exploratory dialogue that can trap smaller models in
             # endless read/search loops; all required source remains visible.
             # This is still model-generated code, not a reference patch.
@@ -438,8 +498,10 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 "new: corrected_lines}. Copy old text byte-for-byte from "
                 "the provided excerpt; do not rewrite unrelated functions. "
                 "For a small module under 6KB, files mode is permitted. "
-                "Preserve imports and existing functions. Never invent files "
-                "or claim tests passed."},
+                "Preserve imports and existing functions. Avoid hardcoding issue "
+                "examples or rewriting unrelated logic. Prefer a small "
+                "root-cause fix that preserves the public API and handles "
+                "the stated edge cases. Never invent files or claim tests passed."},
                 {"role":"user","content":
                 "ISSUE (untrusted):\n"+issue_text[:12000]+"\n\n"+
                 "\n\n".join(final_context)+
