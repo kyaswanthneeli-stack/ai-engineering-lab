@@ -94,7 +94,7 @@ def _provider_timeout_seconds() -> int:
     return seconds
 
 
-def _local_ollama_chat(url,model,messages,token_budget):
+def _local_ollama_chat(url,model,messages,token_budget,request_timeout_seconds=None):
     """Fallback only for a local Ollama /v1 endpoint returning HTTP 404.
 
     The model is still required to generate every proposed patch. Never
@@ -115,9 +115,12 @@ def _local_ollama_chat(url,model,messages,token_budget):
     request=urllib.request.Request(
         endpoint,data=body,method="POST",
         headers={"Content-Type":"application/json"})
+    timeout=_provider_timeout_seconds()
+    if request_timeout_seconds is not None:
+        timeout=min(timeout,request_timeout_seconds)
     try:
         with urllib.request.build_opener(_NoRedirect()).open(
-                request,timeout=_provider_timeout_seconds()) as response:
+                request,timeout=timeout) as response:
             payload=response.read(1_000_001)
     except urllib.error.HTTPError as exc:
         raise AgentToolError("Local Ollama native API HTTP "+str(exc.code)) from exc
@@ -137,13 +140,23 @@ def _local_ollama_chat(url,model,messages,token_budget):
             "usage":{"prompt_tokens":result.get("prompt_eval_count"),
                      "completion_tokens":result.get("eval_count")}}
 
-def _provider(url,model,token,messages):
+def _provider(url,model,token,messages,*,request_timeout_seconds=None):
     parts=urllib.parse.urlsplit(url)
     if parts.scheme not in {"http","https"} or not parts.hostname or parts.username or parts.password:
         raise AgentToolError("Invalid model endpoint")
     if parts.scheme=="http" and parts.hostname not in {"localhost","127.0.0.1","::1"}:
         raise AgentToolError("Remote models require HTTPS")
     request_timeout=_provider_timeout_seconds()
+    # The caller's remaining agent budget is a *second*, tighter deadline.
+    # Never start a retry after that deadline, even when each individual
+    # HTTP request would otherwise fit its configured provider timeout.
+    if request_timeout_seconds is not None:
+        if (not isinstance(request_timeout_seconds,(int,float)) or
+                not 1<=request_timeout_seconds<=3600):
+            raise AgentToolError("Invalid remaining model request time budget")
+        provider_deadline=time.monotonic()+request_timeout_seconds
+    else:
+        provider_deadline=None
     # Small CPU-only runners need a smaller generation budget for complex repos.
     # Bound configuration so workflow input cannot cause unbounded model output.
     try:
@@ -158,7 +171,14 @@ def _provider(url,model,token,messages):
     if os.getenv("REPOPILOT_OLLAMA_NATIVE","").strip()=="1":
         if token:
             raise AgentToolError("Native local Ollama mode does not use API tokens")
-        return _local_ollama_chat(url,model,messages,token_budget)
+        if provider_deadline is None:
+            return _local_ollama_chat(url,model,messages,token_budget)
+        remaining=provider_deadline-time.monotonic()
+        if remaining<=0:
+            raise AgentToolError("Remaining agent model deadline expired")
+        return _local_ollama_chat(
+            url,model,messages,token_budget,
+            request_timeout_seconds=min(request_timeout,remaining))
     data=json.dumps({"model":model,"temperature":0,"max_tokens":token_budget,
         "stream":False,"messages":messages,
         "response_format":{"type":"json_object"}}).encode("utf-8")
@@ -170,9 +190,15 @@ def _provider(url,model,token,messages):
     # Two bounded attempts recover from transient Ollama warm-up and gateway
     # failures. Never log a response body, full URL, or Authorization header.
     for attempt in range(2):
+        timeout=request_timeout
+        if provider_deadline is not None:
+            remaining=provider_deadline-time.monotonic()
+            if remaining<=0:
+                raise AgentToolError("Remaining agent model deadline expired")
+            timeout=min(timeout,remaining)
         try:
             with urllib.request.build_opener(_NoRedirect()).open(
-                    request,timeout=request_timeout) as response:
+                    request,timeout=timeout) as response:
                 payload=response.read(1_000_001)
                 if len(payload)>1_000_000:
                     raise AgentToolError("Model response exceeded size limit")
@@ -192,7 +218,14 @@ def _provider(url,model,token,messages):
             if (exc.code==404 and urllib.parse.urlsplit(url).hostname in
                     {"127.0.0.1","localhost","::1"} and
                     urllib.parse.urlsplit(url).port==11434):
-                return _local_ollama_chat(url,model,messages,token_budget)
+                if provider_deadline is None:
+                    return _local_ollama_chat(url,model,messages,token_budget)
+                remaining=provider_deadline-time.monotonic()
+                if remaining<=0:
+                    raise AgentToolError("Remaining agent model deadline expired")
+                return _local_ollama_chat(
+                    url,model,messages,token_budget,
+                    request_timeout_seconds=min(request_timeout,remaining))
             category="HTTP "+str(exc.code)
             retry=exc.code in {408,429,500,502,503,504}
         except (TimeoutError,socket.timeout) as exc:
@@ -206,6 +239,8 @@ def _provider(url,model,token,messages):
         if not retry or attempt==1:
             raise AgentToolError("Model provider "+category+
                                  " after "+str(attempt+1)+" attempt(s)")
+        if provider_deadline is not None and provider_deadline-time.monotonic()<=2:
+            raise AgentToolError("Remaining agent model deadline expired before retry")
         time.sleep(2)
     raise AgentToolError("Model provider exhausted retry budget")
 
@@ -415,8 +450,20 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
 
                 (" Previous candidate error: "+last_candidate_reason if last_candidate_reason else "")}]
             trace.append({"step":index+1,"action":"final_phase_started"})
-        response=(client(url,model,token,messages) if client is not None
-                  else _provider(url,model,token,messages))
+        if client is not None:
+            response=client(url,model,token,messages)
+        elif budget_seconds:
+            # Reserve two seconds for patch parsing and local git validation.
+            # This is a best-effort request timeout; the outer subprocess
+            # still enforces the independent absolute per-task limit.
+            remaining=budget_seconds-(time.monotonic()-started_at)-2
+            if remaining<=0:
+                raise AgentToolError("Agent time budget exhausted before model request")
+            response=_provider(
+                url,model,token,messages,
+                request_timeout_seconds=remaining)
+        else:
+            response=_provider(url,model,token,messages)
         usage.append(response.get("usage",{}))
         try:
             content=response["choices"][0]["message"]["content"]
