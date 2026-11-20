@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
 import re
-from .context_select import _safe_python_paths
+from .context_select import _safe_python_paths, _SKIP
 
 
 class InspectionError(ValueError):
@@ -14,10 +14,17 @@ def _safe_file(root: Path, name: str) -> Path:
     if not isinstance(name, str) or len(name)>240:
         raise InspectionError("Invalid source path")
     pure=PurePosixPath(name)
-    if pure.is_absolute() or ".." in pure.parts or "\\" in name or not name.endswith(".py"):
+    if (pure.is_absolute() or ".." in pure.parts or "\\" in name or
+            not name.endswith(".py") or any(part in _SKIP for part in pure.parts)):
         raise InspectionError("Path outside allowed Python source")
-    path=root.joinpath(*pure.parts)
-    if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(root):
+    path=root
+    # Disallow traversal through symbolic link directories even when the
+    # ultimate target resolves back inside the workspace.
+    for part in pure.parts:
+        path=path/part
+        if path.is_symlink():
+            raise InspectionError("Source is not an allowed regular file")
+    if not path.is_file() or not path.resolve().is_relative_to(root):
         raise InspectionError("Source is not an allowed regular file")
     if path.stat().st_size>120_000:
         raise InspectionError("Source is larger than allowed inspection limit")

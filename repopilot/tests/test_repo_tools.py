@@ -35,5 +35,25 @@ class ToolsTests(unittest.TestCase):
     def test_no_arbitrary_regex(self):
         with self.assertRaises(InspectionError):
             search_python(self.repo,".")
+
+    def test_model_direct_read_refuses_excluded_source_directories(self):
+        for name in (".venv", ".git", "node_modules", ".runs", "dist", "build"):
+            directory = self.repo / name
+            directory.mkdir(exist_ok=True)
+            (directory / "secrets.py").write_text("PASSWORD='sensitive'\n")
+            with self.subTest(directory=name), self.assertRaises(InspectionError):
+                read_python(self.repo, name + "/secrets.py")
+            self.assertNotIn(name + "/secrets.py", list_python_files(self.repo)["files"])
+        self.assertEqual(search_python(self.repo, "sensitive")["matches"], [])
+
+    def test_model_direct_read_refuses_symlinked_parent_directory(self):
+        actual = self.repo / "actual"
+        actual.mkdir()
+        (actual / "source.py").write_text("value = 1\n")
+        (self.repo / "shortcut").symlink_to(actual, target_is_directory=True)
+        with self.assertRaises(InspectionError):
+            read_python(self.repo, "shortcut/source.py")
+        self.assertEqual(read_python(self.repo, "actual/source.py")["total_lines"], 1)
+
 if __name__=="__main__":
     unittest.main()

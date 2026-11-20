@@ -93,5 +93,41 @@ class ContextSelectionTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 ranked_source_context(self.root, "tax", scan_limit=value)
 
+
+    def test_truncation_marker_does_not_exceed_total_budget(self):
+        (self.root / "large.py").write_text(
+            "def calculate_invoice_tax(price):\n    return price * 0.2\n" +
+            "# source body\n" * 800)
+        for budget in (300, 500, 9000):
+            with self.subTest(budget=budget):
+                selected = ranked_source_context(
+                    self.root, "Bug in large.py calculate_invoice_tax", max_files=1,
+                    max_chars=budget)
+                self.assertEqual(len(selected), 1)
+                self.assertLessEqual(len(selected[0].text), budget)
+                self.assertIn("context truncated", selected[0].text)
+
+
+    def test_untrusted_issue_path_disallows_symlinked_parent(self):
+        module = self.root / "actual"
+        module.mkdir()
+        (module / "secret.py").write_text("def secret_value(): return True\n")
+        (self.root / "alias").symlink_to(module, target_is_directory=True)
+        items = ranked_source_context(
+            self.root, "Please fix alias/secret.py", max_files=20)
+        self.assertNotIn("alias/secret.py", [item.path for item in items])
+
+    def test_untrusted_explicit_issue_path_cannot_enter_excluded_directories(self):
+        for name in (".venv", ".git", "node_modules", ".runs", "build"):
+            directory = self.root / name
+            directory.mkdir(exist_ok=True)
+            (directory / "private.py").write_text("def dangerous_secret(): return 1\n")
+        items = ranked_source_context(
+            self.root,
+            "Please fix .venv/private.py .git/private.py "
+            "node_modules/private.py .runs/private.py build/private.py",
+            max_files=20)
+        self.assertFalse(any("private.py" in item.path for item in items))
+
 if __name__=="__main__":
     unittest.main()
