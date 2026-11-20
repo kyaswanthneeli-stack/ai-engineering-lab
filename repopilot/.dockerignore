@@ -18,3 +18,7 @@ examples
 benchmarks
 docs
 container/.git
+.env
+.env.*
+*.pem
+*.key
