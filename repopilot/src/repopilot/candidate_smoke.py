@@ -38,7 +38,7 @@ def _bootstrap(targets: list[str]) -> tuple[str, str]:
         return "", "none"
     if any(name.startswith("sympy/") for name in targets):
         return ("import collections, collections.abc\n"
-                "for _name in ('Mapping','MutableMapping','Iterable','Callable','Sequence'):\n"
+                "for _name in ('Mapping','MutableMapping','Iterable','Callable','Sequence','MutableSet','Set','Hashable','Iterator'):\n"
                 "    if not hasattr(collections, _name):\n"
                 "        setattr(collections, _name, getattr(collections.abc, _name))\n",
                 "legacy_collections_import_setup")
@@ -118,7 +118,7 @@ def _failure_category(code: int, stderr_tail: str) -> str | None:
     last = next((line for line in reversed(lines) if line.strip()), "")
     exception = last.split(":", 1)[0].strip()
     if exception in {"ImportError", "AttributeError"} and re.search(
-            r"(?:cannot import name|has no attribute) ['\"](?:Mapping|MutableMapping|Iterable|Callable|Sequence)['\"]", last
+            r"(?:cannot import name|has no attribute) ['\"](?:Mapping|MutableMapping|Iterable|Callable|Sequence|MutableSet|Set|Hashable|Iterator)['\"]", last
     ) and ("from 'collections'" in last or "module 'collections'" in last):
         return "legacy_collections_api"
     if exception in {"ImportError", "ModuleNotFoundError"} and re.search(

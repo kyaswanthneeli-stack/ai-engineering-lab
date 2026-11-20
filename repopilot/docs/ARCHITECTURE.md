@@ -93,3 +93,27 @@ Real restricted-Docker CI verifies an import-failing baseline yields sanitized
 `import_error` evidence. These checks do not change the verified official
 SWE-bench result of **1/12 selected tasks resolved**; another controlled experiment
 and official harness run are required before claiming an accuracy improvement.
+
+### Opt-in historical import setup
+
+`REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP=1` enables a developer-owned import-only
+profile inside the existing restricted Docker runner. It restores nine removed
+`collections` aliases from `collections.abc` for historical SymPy checkouts, or
+configures minimal in-memory Django settings and the contenttypes application
+for Django import probes. It also supports conventional `src/` and `lib/`
+source layouts when those directories are not Python packages themselves.
+Generated import probes check that the imported file is the pinned source path,
+rather than an installed package with the same name.
+
+The setting defaults to **0**. Public issue snippets retain their own setup;
+the profile is applied only to developer-generated imports and import fallbacks.
+The exact same setup and probe run against original and candidate source. No
+target setup scripts, migrations, dependency installation or native builds run
+on the host. Reports distinguish baseline and fallback profiles and retain only
+fixed categories for legacy API or known native-extension failures.
+
+The four-case replay workflow verifies the historical v9 provenance and file
+hashes, reuses the original proposals and exact pinned commits, and compares
+setup off/on without any model calls. It does not execute the official evaluator
+or produce a new resolution score. These are deliberately weak compatibility
+checks; a passing import can still accompany an incorrect semantic patch.

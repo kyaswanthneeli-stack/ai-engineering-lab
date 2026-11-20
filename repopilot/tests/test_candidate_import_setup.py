@@ -37,6 +37,8 @@ class CandidateImportSetupTests(unittest.TestCase):
 
     def test_legacy_collection_aliases_are_same_for_original_and_candidate(self):
         self.check_same_probe("sympy/fixture.py", "getattr(collections.abc, _name)")
+        with patch.dict("os.environ", {"REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP": "1"}):
+            self.assertIn("'MutableSet'", _bootstrap(["sympy/core/containers.py"])[0])
 
     def test_minimal_django_settings_are_same_for_original_and_candidate(self):
         self.check_same_probe("django/fixture.py", "settings.configure(INSTALLED_APPS=['django.contrib.contenttypes']")
@@ -69,6 +71,9 @@ class CandidateImportSetupTests(unittest.TestCase):
     def test_detailed_known_failures_retain_only_fixed_categories(self):
         self.assertEqual(_failure_category(1,
             "ImportError: cannot import name 'Mapping' from 'collections' (/SECRET/path)"),
+            "legacy_collections_api")
+        self.assertEqual(_failure_category(1,
+            "AttributeError: module 'collections' has no attribute 'MutableSet'"),
             "legacy_collections_api")
         self.assertEqual(_failure_category(1,
             "ImportError: cannot import name '_c_internal_utils' from partially initialized module 'matplotlib' (/SECRET)"),
