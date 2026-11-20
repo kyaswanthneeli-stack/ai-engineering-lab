@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from pathlib import Path
-from repopilot.benchmark_attempt import attempt_one,main,bounded_issue_context
+from repopilot.benchmark_attempt import attempt_one,main,bounded_issue_context,configured_issue_context_chars
 
 SHA="a"*40
 INSTANCE="sample__repo-123"
@@ -55,6 +55,44 @@ class AttemptsTests(unittest.TestCase):
         patch=json.loads((output/"unreviewed-prediction.json").read_text())
         self.assertFalse(patch["human_reviewed"])
         self.assertTrue(patch["generated_by_model"])
+    def test_cpu_issue_context_opt_in_preserves_head_tail_and_provenance(self):
+        statement=("Important repro: source semantics changed.\\n" +
+                   "intermediate trace details\\n" * 700 +
+                   "FINAL REPRODUCTION: preserve expected output")
+        captured=[]
+        def proposer(work, issue, *args):
+            captured.append(issue)
+            return self.proposed()
+        row={"instance_id":INSTANCE,"repo":"sample/repo",
+             "base_commit":SHA,"problem_statement":statement}
+        with patch.dict("os.environ",
+                        {"REPOPILOT_ISSUE_CONTEXT_CHARS":"3500"}):
+            report=attempt_one(
+                self.manifest,INSTANCE,self.root/"cpu-limited",
+                dataset_loader=lambda:[row],checkout=self.checkout,
+                model_proposer=proposer)
+        self.assertEqual(report["status"],"model_patch_proposed")
+        self.assertEqual(report["issue_context_limit_chars"],3500)
+        self.assertEqual(report["issue_context_chars"],len(captured[0]))
+        self.assertLessEqual(len(captured[0]),3500)
+        self.assertTrue(report["issue_context_trimmed"])
+        self.assertTrue(captured[0].startswith("Important repro:"))
+        self.assertIn("FINAL REPRODUCTION",captured[0])
+        self.assertIn("middle of long issue omitted",captured[0])
+        self.assertFalse(report["officially_evaluated"])
+        self.assertIsNone(report["officially_resolved"])
+
+    def test_cpu_issue_context_default_is_backward_compatible(self):
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(configured_issue_context_chars(),6500)
+
+    def test_cpu_issue_context_rejects_invalid_limits(self):
+        for raw in ("100","1000","2499","6501","100000","bad","3.5",""):
+            with self.subTest(raw=raw), patch.dict(
+                    "os.environ",{"REPOPILOT_ISSUE_CONTEXT_CHARS":raw}):
+                with self.assertRaisesRegex(ValueError,"[Ii]ssue context"):
+                    configured_issue_context_chars()
+
     def test_agentic_cli_wires_requested_step_budget(self):
         observed=[]
         def mock_agent(repo,issue,model,url,token,max_steps=8,auto_issue_paths=False):

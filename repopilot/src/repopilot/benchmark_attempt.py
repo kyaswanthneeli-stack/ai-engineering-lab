@@ -39,6 +39,23 @@ def bounded_issue_context(statement: str, max_chars: int = 6500) -> str:
     return statement[:head] + marker + statement[-tail:]
 
 
+def configured_issue_context_chars() -> int:
+    """Optional, bounded small-CPU-model issue prompt cap.
+
+    Default preserves existing results. A shorter prompt is an experimental
+    performance setting, not proof of improved SWE-bench correctness.
+    Only an operator can set the environment; no issue/model text selects it.
+    """
+    raw=os.getenv("REPOPILOT_ISSUE_CONTEXT_CHARS", "6500")
+    try:
+        limit=int(raw)
+    except (ValueError,TypeError) as exc:
+        raise ValueError("Invalid issue context character budget") from exc
+    if not 2500<=limit<=6500:
+        raise ValueError("Issue context character budget must be 2500–6500")
+    return limit
+
+
 def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
                 checkout=pinned_checkout,model_proposer=propose_benchmark,model=None,url=None,token=None)->dict:
     tasks={t["instance_id"]:t for t in load_manifest(manifest)}
@@ -73,14 +90,18 @@ def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
         if not isinstance(issue,str) or not issue.strip():
             raise ValueError("Official issue statement missing")
         report["status"]="attempted"
-        report["issue_context_trimmed"]=len(issue)>6500
+        issue_limit=configured_issue_context_chars()
+        issue_context=bounded_issue_context(issue,max_chars=issue_limit)
+        report["issue_context_limit_chars"]=issue_limit
+        report["issue_context_chars"]=len(issue_context)
+        report["issue_context_trimmed"]=len(issue)>issue_limit
         owner,repo=task["repo"].split("/")
         with tempfile.TemporaryDirectory(prefix="repopilot-swebench-") as tmp:
             # Checkout helper only parses the URL to derive the public repo;
             # the issue statement is read from the official pinned dataset.
             work=checkout(f"https://github.com/{owner}/{repo}/issues/1",
                           task["base_commit"],Path(tmp)/"repo")
-            spec,meta=model_proposer(work,bounded_issue_context(issue),
+            spec,meta=model_proposer(work,issue_context,
                                      model or os.getenv("REPOPILOT_MODEL",""),
                                      url or os.getenv("REPOPILOT_BASE_URL",""),
                                      token if token is not None else os.getenv("REPOPILOT_API_KEY"))
