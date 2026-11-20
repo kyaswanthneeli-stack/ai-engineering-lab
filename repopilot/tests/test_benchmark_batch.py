@@ -59,8 +59,9 @@ class BenchmarkBatchTests(unittest.TestCase):
         workflow=(Path(__file__).resolve().parents[2] /
                   ".github/workflows/repopilot-official-12-evaluation.yml")
         content=workflow.read_text(encoding="utf-8")
-        # A costly 12-task benchmark must not auto-start for every PR branch.
-        self.assertIn("push:\n    branches:\n      - main\n    paths:", content)
+        # Full official evaluations require an intentional manual dispatch.
+        self.assertIn("workflow_dispatch:", content)
+        self.assertNotIn("\n  push:", content)
         for setting in (
                 "REPOPILOT_OLLAMA_NATIVE: '1'",
                 "REPOPILOT_PROVIDER_TIMEOUT_SECONDS: '110'",
