@@ -50,7 +50,7 @@ class RcDeploymentWorkflowTests(unittest.TestCase):
         self.assertNotIn("docker.sock",flow)
         self.assertNotIn("docker push repopilot-cli:rc",flow)
         self.assertNotIn("repopilot:latest",flow)
-        self.assertLess(flow.index("Run full Python suite"),flow.index("Build and smoke-test nonroot"))
+        self.assertLess(flow.index("Compile and run full Python suite"),flow.index("Build and smoke-test nonroot"))
         self.assertLess(flow.index("Build and smoke-test nonroot"),
                         flow.index("Publish commit-scoped GHCR"))
 
@@ -59,7 +59,7 @@ class RcDeploymentWorkflowTests(unittest.TestCase):
         security=(root/"SECURITY.md").read_text()
         deployment=(root/"docs/DEPLOYMENT.md").read_text()
         self.assertIn("Never mount",deployment)
-        self.assertIn("Human",security)
+        self.assertIn("human review",security)
         self.assertIn("1/12",security)
         self.assertNotIn("EXPOSE 8000",self.flow)
 
