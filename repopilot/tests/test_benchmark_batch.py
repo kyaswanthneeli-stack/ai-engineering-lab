@@ -54,6 +54,20 @@ class BenchmarkBatchTests(unittest.TestCase):
         self.assertEqual(json.loads(predictions[0])["instance_id"],
                          "sample__project-0")
 
+    def test_official_batch_workflow_uses_bounded_local_model(self):
+        # Catch accidental removal of native Ollama or independent time limits.
+        workflow=(Path(__file__).resolve().parents[2] /
+                  ".github/workflows/repopilot-official-12-evaluation.yml")
+        content=workflow.read_text(encoding="utf-8")
+        for setting in (
+                "REPOPILOT_OLLAMA_NATIVE: '1'",
+                "REPOPILOT_PROVIDER_TIMEOUT_SECONDS: '110'",
+                "REPOPILOT_AGENT_BUDGET_SECONDS: '270'",
+                "--per-task-timeout 300",
+                "python -m swebench.harness.run_evaluation"):
+            with self.subTest(setting=setting):
+                self.assertIn(setting,content)
+
     def test_timeout_is_unscored_and_does_not_create_prediction(self):
         with patch("repopilot.benchmark_batch.load_manifest",
                    return_value=self.tasks), patch(
