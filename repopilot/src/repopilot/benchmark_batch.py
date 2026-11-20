@@ -85,6 +85,9 @@ def collect(manifest: Path, output: Path, *, per_task_timeout: int = 240,
                "selected_tasks": len(tasks),
                "model_predictions": len(predictions),
                "missing_predictions": len(tasks)-len(predictions),
+               "model_timeouts": sum(r["status"] == "model_timeout" for r in records),
+               "failed_or_unsubmitted_tasks": sum(
+                   not r.get("prediction_exported", False) for r in records),
                "officially_evaluated": False,
                "officially_resolved": None,
                "status": ("predictions_ready_unscored" if predictions else
