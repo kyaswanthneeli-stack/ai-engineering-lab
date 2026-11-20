@@ -1,6 +1,21 @@
 # SWE-bench Lite: 12-task evaluation protocol
 
-**Latest verified status (November 20, 2026):** [Official v9](OFFICIAL_EVALUATION_V9_2026-11-20.md) attempted the same 12 pinned tasks, submitted six genuine patches and independently evaluated all six: **one resolved, five unresolved, zero evaluator errors**. Six attempts produced no submission (four Ollama communication/timeout errors and two agent-deadline errors); no hard outer task timeouts occurred. The score remains **1/12 selected (8.3%)**, unchanged from v8; **1/6 evaluated (16.7%)** uses a different denominator. Only **1/6 smoke baselines** was usable. Original v9 results, predictions and provenance are preserved in [evidence](evidence/v9-2026-11-20/). The completed [two-task prompt A/B](CPU_PROMPT_AB_2026-11-20.md) was mixed and unscored; keep the existing default and do not infer a solve-rate gain. Earlier [Nov 20](OFFICIAL_EVALUATION_2026-11-20.md) and [Nov 19](OFFICIAL_EVALUATION_2026-11-19.md) reports remain historical evidence.
+## Official v10 results · November 20, 2026 UTC
+
+**RepoPilot resolved 1 of 12 selected issues (8.3%).** The model attempted all 12 pinned SWE-bench Lite tasks and submitted four patches. The official harness evaluated all four, resolving one (25% of submissions). Eight attempts produced no submission. The harness recorded zero evaluator errors.
+
+| Official outcome | Instance IDs |
+|---|---|
+| Resolved | `sympy__sympy-14774` |
+| Unresolved | `django__django-12125`, `matplotlib__matplotlib-22835`, `scikit-learn__scikit-learn-12471` |
+
+The selected-task score matched v9, while submissions fell from six to four. Both runs resolved the same SymPy issue.
+
+The generation archive contains 12 attempt records. Its four predictions are byte-identical to those in the scoring archive (SHA-256 `70d7c2166772297cdf7e1143db94705eb8a0bc34b52d3a5e05d42cb54e6b07ed`). The official result file and job logs agree on the totals. Model: `qwen2.5-coder:3b`. [Evaluated commit](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/commit/8388139a219d72801f1c06a76ae9a7cd10e821c7) · [Workflow and logs](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44814488203) · [Generation artifact](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44814488203/artifacts/14671703731) · [Scoring artifact](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44814488203/artifacts/14672406833).
+
+## Previous evaluation
+
+**November 20, 2026:** [Official v9](OFFICIAL_EVALUATION_V9_2026-11-20.md) attempted the same 12 pinned tasks, submitted six genuine patches and independently evaluated all six: **one resolved, five unresolved, zero evaluator errors**. Six attempts produced no submission (four Ollama communication/timeout errors and two agent-deadline errors); no hard outer task timeouts occurred. The score remains **1/12 selected (8.3%)**, unchanged from v8; **1/6 evaluated (16.7%)** uses a different denominator. Only **1/6 smoke baselines** was usable. Original v9 results, predictions and provenance are preserved in [evidence](evidence/v9-2026-11-20/). The completed [two-task prompt A/B](CPU_PROMPT_AB_2026-11-20.md) was mixed and unscored; keep the existing default and do not infer a solve-rate gain. Earlier [Nov 20](OFFICIAL_EVALUATION_2026-11-20.md) and [Nov 19](OFFICIAL_EVALUATION_2026-11-19.md) reports remain historical evidence.
 
 This folder contains a deterministic sample of twelve real SWE-bench Lite issue IDs and their exact upstream base commits. The immutable selection manifest intentionally does not include outcomes; results are stored separately to avoid rewriting task provenance.
 
