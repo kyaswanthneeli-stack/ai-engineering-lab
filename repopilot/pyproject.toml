@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "repopilot"
-version = "2.0.0"
+version = "2.1.0"
 description = "Evidence-first issue-to-patch coding agent harness"
 requires-python = ">=3.11"
 
