@@ -164,6 +164,29 @@ jobs:
               assert (root/'sympy/fixture.py').read_text()==source
               print('PASS: historical import setup enables pristine baseline and detects actual candidate regression')
           PY
+      - name: Verify original-source behavior catches changed code and doctest expectations
+        env:
+          REPOPILOT_CANDIDATE_SMOKE_IMAGE: repopilot-candidate-deps:py310
+          REPOPILOT_CANDIDATE_SOURCE_EXAMPLES: '1'
+        run: |
+          python - <<'PY'
+          import tempfile,difflib
+          from pathlib import Path
+          from repopilot.candidate_smoke import smoke_candidate
+          original='def price(x):\n    """Price example.\n\n    >>> price(1)\n    2\n    """\n    return x + 1\n'
+          changed=original.replace('    2\n','    0\n').replace('return x + 1','return x - 1')
+          with tempfile.TemporaryDirectory(prefix='repopilot-source-behavior-') as td:
+              root=Path(td)/'repo';root.mkdir(mode=0o755)
+              (root/'pricing.py').write_text(original)
+              patch='diff --git a/pricing.py b/pricing.py\n'+''.join(difflib.unified_diff(
+                  original.splitlines(True),changed.splitlines(True),fromfile='a/pricing.py',tofile='b/pricing.py'))
+              result=smoke_candidate(root,patch,'Preserve price behavior',timeout=25)
+              assert result['probe']=='source_doctest',result
+              assert result['status']=='regression',result
+              assert result['baseline_exit_code']==0 and result['candidate_exit_code']==1,result
+              assert (root/'pricing.py').read_text()==original
+              print('PASS: frozen original-source behavior detects regression despite changed candidate expectations')
+          PY
       - name: Verify issue reproduction fallback in real offline Docker
         env:
           REPOPILOT_CANDIDATE_SMOKE_IMAGE: repopilot-candidate-deps:py310

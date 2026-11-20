@@ -18,11 +18,36 @@ jobs:
     timeout-minutes: 22
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Prepare trusted replay code and generic dependency runtime
+        working-directory: repopilot
+        run: |
+          python -m pip install -e . 'datasets>=3.0,<5.0'
+          docker build --pull -t repopilot-candidate-deps:py310 -f ci/Dockerfile.candidate-smoke ci
+      - name: Download preserved official v9 proposals
+        uses: actions/download-artifact@v4
+        with:
+          name: repopilot-12-official-harness-v9
+          run-id: 44776554310
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: repopilot/.runs/v9-native-original
+      - name: Compare imports and original-source behavior probes
+        working-directory: repopilot
+        env:
+          REPOPILOT_CANDIDATE_SMOKE_IMAGE: repopilot-candidate-deps:py310
+          REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP: '1'
+        run: |
+          REPOPILOT_CANDIDATE_SOURCE_EXAMPLES=0 python ci/replay_v9_smoke.py \
+            --evidence .runs/v9-native-original --output .runs/native-runtime/imports --label imports-only
+          REPOPILOT_CANDIDATE_SOURCE_EXAMPLES=1 python ci/replay_v9_smoke.py \
+            --evidence .runs/v9-native-original --output .runs/native-runtime/behavior --label source-behavior
       - name: Fetch official pinned-instance native runtime
         run: |
           mkdir -p repopilot/.runs/native-runtime
-          docker pull swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-22835:latest
-          docker image inspect swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-22835:latest \
+          docker pull swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-22835@sha256:ffe240330bab2ef382e4aba3e09fd624dccef459312defe3c815a58c4a0edd47
+          docker image inspect swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-22835@sha256:ffe240330bab2ef382e4aba3e09fd624dccef459312defe3c815a58c4a0edd47 \
             --format '{{json .RepoDigests}}' > repopilot/.runs/native-runtime/registry-digests.json
       - name: Verify exact checkout and native imports under restricted execution
         run: |
@@ -33,9 +58,36 @@ jobs:
             -e MPLCONFIGDIR=/tmp/mpl-config -e MPLBACKEND=Agg \
             -e PYTHONDONTWRITEBYTECODE=1 -w /testbed \
             --entrypoint /opt/miniconda3/envs/testbed/bin/python \
-            swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-22835:latest \
-            -c 'import subprocess,json,sys; p=subprocess.run(["git","-c","safe.directory=/testbed","rev-parse","HEAD"],capture_output=True,text=True,check=True); assert p.stdout.strip()=="c33557d120eefe3148ebfcf2e758ff2357966000"; import matplotlib,matplotlib._c_internal_utils,matplotlib._path; print(json.dumps({"base_commit":p.stdout.strip(),"python":sys.version.split()[0],"matplotlib_source":matplotlib.__file__,"native_extension":matplotlib._c_internal_utils.__file__}))' \
-            > repopilot/.runs/native-runtime/import-preflight.json
+            swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-22835@sha256:ffe240330bab2ef382e4aba3e09fd624dccef459312defe3c815a58c4a0edd47 \
+            -c 'import subprocess,json,sys; base="c33557d120eefe3148ebfcf2e758ff2357966000"; p=subprocess.run(["git","-c","safe.directory=/testbed","rev-parse","HEAD"],capture_output=True,text=True,check=True); diff=subprocess.run(["git","-c","safe.directory=/testbed","diff","--name-only",base,"--","lib/matplotlib","src","extern"],capture_output=True,text=True); print(json.dumps({"expected_base":base,"image_head":p.stdout.strip(),"source_diff_exit":diff.returncode,"changed_source_paths":diff.stdout.splitlines()[:30]}),flush=True); assert diff.returncode==0 and not diff.stdout.strip(); import matplotlib,matplotlib._c_internal_utils,matplotlib._path; print(json.dumps({"python":sys.version.split()[0],"matplotlib_source":matplotlib.__file__,"native_extension":matplotlib._c_internal_utils.__file__}))' \
+            > repopilot/.runs/native-runtime/import-preflight.jsonl
+      - name: Replay same proposals with verified native extensions and behavior probes
+        working-directory: repopilot
+        env:
+          REPOPILOT_CANDIDATE_SMOKE_IMAGE: repopilot-candidate-deps:py310
+          REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP: '1'
+          REPOPILOT_CANDIDATE_SOURCE_EXAMPLES: '1'
+          REPOPILOT_CANDIDATE_MATPLOTLIB_NATIVE: '1'
+        run: |
+          python ci/replay_v9_smoke.py --evidence .runs/v9-native-original \
+            --output .runs/native-runtime/native --label native-and-behavior
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('.runs/native-runtime')
+          summaries=[json.loads((root/name/'summary.json').read_text())
+                     for name in ('imports','behavior','native')]
+          for summary in summaries:
+              assert summary['model_calls']==0 and summary['officially_resolved'] is None
+              assert summary['selected_tasks']==summaries[0]['selected_tasks']
+              for base,row in zip(summaries[0]['records'],summary['records']):
+                  assert base['original_prediction_sha256']==row['original_prediction_sha256']
+                  assert base['base_commit']==row['base_commit']
+                  assert base['public_issue_sha256']==row['public_issue_sha256']
+              print(summary['label'], 'USABLE:',summary['usable_smoke_baselines'],
+                    'REGRESSIONS:',summary['confirmed_regressions'],
+                    'BEHAVIOR PROBES:',summary['behavior_probe_cases'])
+          PY
       - name: Preserve native runtime provenance
         if: always()
         uses: actions/upload-artifact@v4
