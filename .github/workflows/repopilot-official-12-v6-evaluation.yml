@@ -1,0 +1,232 @@
+name: RepoPilot official v6 12-task SWE-bench evaluation
+
+on:
+  # One-time authorized v6 retest when THIS workflow file is first merged.
+  # Ordinary source commits never trigger a multi-hour model evaluation.
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/repopilot-official-12-v6-evaluation.yml'
+  # Any later manual re-evaluation needs an explicit human dispatch.
+  workflow_dispatch:
+
+concurrency:
+  group: repopilot-official-swebench-v6-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  generate-predictions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 95
+    outputs:
+      prediction_count: ${{ steps.count.outputs.prediction_count }}
+    defaults:
+      run:
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install pinned manifest reader and dataset dependencies
+        run: |
+          python -m pip install -e .
+          python -m pip install 'datasets>=3.0,<5.0'
+      - name: Start local Ollama with smaller model
+        run: |
+          docker run -d --name repopilot-batch-ollama -p 127.0.0.1:11434:11434 ollama/ollama:latest
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
+          for attempt in 1 2 3; do
+            if docker exec repopilot-batch-ollama ollama pull qwen2.5-coder:3b; then break; fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep $((attempt*10))
+          done
+      # Keep per-call and whole-agent time budgets below the 300-second
+      # subprocess cap, so stalled CPU inference is reported as a failure.
+      - name: Run all 12 pinned tasks using actual model-generated patches
+        env:
+          REPOPILOT_MODEL: qwen2.5-coder:3b
+          REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
+          REPOPILOT_MAX_TOKENS: '1200'
+          REPOPILOT_OLLAMA_NATIVE: '1'
+          REPOPILOT_PROVIDER_TIMEOUT_SECONDS: '110'
+          REPOPILOT_AGENT_BUDGET_SECONDS: '270'
+          REPOPILOT_FINAL_CONTEXT_CHARS: '9000'
+        run: |
+          curl -fsS "${REPOPILOT_BASE_URL}/models" >/dev/null
+          # Warm the local model with a tiny request before the large issue prompts.
+          curl -fsS --retry 2 --max-time 120 \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"qwen2.5-coder:3b","prompt":"hello","stream":false,"options":{"num_predict":8}}' \
+            http://127.0.0.1:11434/api/generate >/dev/null
+          python -m repopilot.benchmark_batch \
+            --manifest benchmarks/swebench-lite-12.json \
+            --output .runs/swebench-batch \
+            --per-task-timeout 300 --max-steps 12
+      - id: count
+        name: Summarize attempted and unsubmitted tasks without inventing scores
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          path=Path('.runs/swebench-batch/summary.json')
+          summary=json.loads(path.read_text()) if path.exists() else {}
+          count=summary.get('model_predictions',0)
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output:
+              output.write(f'prediction_count={count}\n')
+          print('SELECTED:',summary.get('selected_tasks','setup failed'))
+          print('MODEL PREDICTIONS:',count)
+          print('OFFICIALLY EVALUATED: NO')
+          if count==0:
+              print('::warning::No valid model-generated predictions; official SWE-bench evaluation must be skipped.')
+          PY
+      - name: Save authentic attempts and prediction files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-12-model-attempts-v6-unscored
+          path: repopilot/.runs/swebench-batch/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Stop model
+        if: always()
+        run: docker rm -f repopilot-batch-ollama || true
+
+  score-predictions:
+    needs: generate-predictions
+    if: needs.generate-predictions.outputs.prediction_count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 320
+    defaults:
+      run:
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: repopilot-12-model-attempts-v6-unscored
+          path: repopilot/.runs/swebench-batch/
+      - name: Install official SWE-bench harness and RepoPilot result validator
+        run: |
+          python -m pip install -e .
+          python -m pip install 'swebench>=3.0,<5.0'
+      - name: Evaluate actual predictions for the pinned 12 instances
+        run: |
+          # Evaluate only actual model-submitted predictions. Other pinned
+          # tasks remain explicitly unsubmitted and must never be counted as
+          # officially resolved, unresolved, or evaluated.
+          mapfile -t INSTANCES < <(python - <<'PY'
+          import json
+          from pathlib import Path
+          selected={x['instance_id'] for x in json.loads(
+              Path('benchmarks/swebench-lite-12.json').read_text())['tasks']}
+          rows=[json.loads(line) for line in Path(
+              '.runs/swebench-batch/predictions.jsonl').read_text().splitlines()
+              if line.strip()]
+          ids=[row['instance_id'] for row in rows]
+          assert ids and len(ids)==len(set(ids)) and set(ids)<=selected
+          for instance in ids:
+              print(instance)
+          PY
+          )
+          test "${#INSTANCES[@]}" -gt 0
+          python -m swebench.harness.run_evaluation \
+            --dataset_name princeton-nlp/SWE-bench_Lite \
+            --split test \
+            --predictions_path .runs/swebench-batch/predictions.jsonl \
+            --instance_ids "${INSTANCES[@]}" \
+            --max_workers 1 \
+            --run_id repopilot-12-qwen3b-v6
+      - name: Package official results with portable filenames
+        if: always()
+        run: |
+          mkdir -p .runs/official-evidence
+          python - <<'PY'
+          import json,shutil,tarfile
+          from pathlib import Path
+          out=Path('.runs/official-evidence')
+          candidates=list(Path('.').glob('*repopilot-12-qwen3b-v6.json'))
+          candidates+=list(Path('logs/evaluation').rglob('results.json')) if Path('logs/evaluation').is_dir() else []
+          if candidates:
+              source=candidates[0]
+              json.loads(source.read_text())
+              shutil.copy2(source,out/'official-evaluation-result.json')
+          else:
+              print('No authoritative results JSON; evidence is incomplete')
+          if Path('logs/evaluation').is_dir():
+              with tarfile.open(out/'official-evaluation-logs.tar.gz','w:gz') as archive:
+                  archive.add('logs/evaluation',arcname='logs/evaluation')
+          shutil.copy2('.runs/swebench-batch/predictions.jsonl',out/'real-model-predictions.jsonl')
+          PY
+      - name: Validate official evaluator and write reproducible scorecard
+        run: |
+          test -s .runs/official-evidence/official-evaluation-result.json
+          python -m repopilot.swebench_results \
+            benchmarks/swebench-lite-12.json \
+            .runs/official-evidence/official-evaluation-result.json \
+            .runs/swebench-batch/predictions.jsonl \
+            --output .runs/official-evidence/official-summary.json
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          summary_file=Path('.runs/official-evidence/official-summary.json')
+          summary=json.loads(summary_file.read_text(encoding='utf-8'))
+          # A green evaluator job requires a result for every submitted
+          # prediction, but does not require twelve successful predictions.
+          if (not summary['submitted'] or
+              summary['evaluated'] != summary['submitted'] or
+              summary['submitted_but_unreported']):
+              raise SystemExit('Incomplete official SWE-bench evidence')
+          files={
+              'manifest': Path('benchmarks/swebench-lite-12.json'),
+              'model_predictions': Path('.runs/swebench-batch/predictions.jsonl'),
+              'official_results': Path('.runs/official-evidence/official-evaluation-result.json'),
+              'validated_summary': summary_file,
+          }
+          provenance={
+              'github_run_url': ('https://github.com/'+os.environ.get('GITHUB_REPOSITORY','')+
+                                 '/actions/runs/'+os.environ.get('GITHUB_RUN_ID','')),
+              'commit_sha': os.environ.get('GITHUB_SHA',''),
+              'harness_run_id': 'repopilot-12-qwen3b-v6',
+              'model': 'qwen2.5-coder:3b',
+              'dataset': 'princeton-nlp/SWE-bench_Lite',
+              'selected': summary['selected'],
+              'submitted': summary['submitted'],
+              'evaluated': summary['evaluated'],
+              'resolved': summary['resolved'],
+              'sha256': {name:hashlib.sha256(path.read_bytes()).hexdigest()
+                         for name,path in files.items()},
+          }
+          Path('.runs/official-evidence/provenance.json').write_text(
+              json.dumps(provenance,indent=2)+'\n', encoding='utf-8')
+          print('OFFICIAL RESOLVED:', summary['resolved'])
+          print('OFFICIAL SUBMITTED:', summary['submitted'])
+          print('SELECTED COHORT:', summary['selected'])
+          print('RESOLVED / SUBMITTED:',
+                f"{summary['resolved']}/{summary['submitted']}")
+          print('RESOLVED / SELECTED:',
+                f"{summary['resolved']}/{summary['selected']}")
+          PY
+      - name: Upload official reports without unsafe colon filenames
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-12-official-harness-v6
+          path: repopilot/.runs/official-evidence/
+          if-no-files-found: warn
+          retention-days: 30
