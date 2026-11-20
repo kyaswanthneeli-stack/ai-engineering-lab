@@ -77,7 +77,7 @@ def _candidate_paths(root: Path, issue: str, scan_limit: int):
     a separate bounded enumeration budget, so a traceback naming 'module.py'
     can still find 'pkg/module.py' beyond the normal scan limit.
     """
-    mentions = set(re.findall(r"[A-Za-z0-9_./-]+\\.py", issue[:12000]))
+    mentions = set(re.findall(r"[A-Za-z0-9_./-]+\.py", issue[:12000]))
     explicit = []
     basenames = set()
     for name in sorted(mentions):
