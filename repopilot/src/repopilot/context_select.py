@@ -70,6 +70,24 @@ def _bounded_python_walk(root: Path, *, entry_limit: int):
                 continue
 
 
+def _safe_python_paths(root: Path, max_files: int):
+    """Shared finite source iterator for agent tools and import-graph analysis.
+
+    Preserve the existing helper contract so model-directed list/search and
+    static import analysis benefit from the same guarded, bounded traversal.
+    """
+    if not 1 <= max_files <= 20000:
+        raise ValueError("Python source scan limit outside safe bounds")
+    root = root.resolve(strict=True)
+    count = 0
+    for path, relative in _bounded_python_walk(
+            root, entry_limit=max(500, max_files * 8)):
+        yield path, relative
+        count += 1
+        if count >= max_files:
+            break
+
+
 def _candidate_paths(root: Path, issue: str, scan_limit: int):
     """Prioritize explicit issue paths and nested basename matches.
 
