@@ -51,7 +51,14 @@ jobs:
             --format '{{json .RepoDigests}}' > repopilot/.runs/native-runtime/registry-digests.json
       - name: Verify exact source contents and native imports under restricted execution
         working-directory: repopilot
-        run: python ci/verify_native_runtime.py --output .runs/native-runtime/import-preflight.jsonl
+        run: |
+          python ci/verify_native_runtime.py --output .runs/native-runtime/import-preflight.jsonl
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for line in Path('.runs/native-runtime/import-preflight.jsonl').read_text().splitlines():
+              print(json.dumps(json.loads(line)))
+          PY
       - name: Replay same proposals with verified native extensions and behavior probes
         working-directory: repopilot
         env:
@@ -78,6 +85,12 @@ jobs:
               print(summary['label'], 'USABLE:',summary['usable_smoke_baselines'],
                     'REGRESSIONS:',summary['confirmed_regressions'],
                     'BEHAVIOR PROBES:',summary['behavior_probe_cases'])
+          final=summaries[-1]
+          assert final['usable_smoke_baselines']==4,final
+          sympy=next(r for r in final['records'] if r['instance_id']=='sympy__sympy-13773')
+          assert sympy['candidate_smoke']['status']=='regression',sympy
+          mpl=next(r for r in final['records'] if r['instance_id']=='matplotlib__matplotlib-22835')
+          assert mpl['candidate_smoke']['baseline_exit_code']==0,mpl
           PY
       - name: Preserve native runtime provenance
         if: always()
