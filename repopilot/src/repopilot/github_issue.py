@@ -7,6 +7,10 @@ ISSUE_URL = re.compile(r"^https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+
 class IssueFetchError(ValueError):
     pass
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self,req,fp,code,msg,headers,newurl):
+        raise IssueFetchError("GitHub issue API redirects are prohibited")
+
 def fetch_public_issue(url: str, transport=None) -> dict:
     match = ISSUE_URL.fullmatch(url)
     if not match or len(url) > 250:
@@ -15,7 +19,7 @@ def fetch_public_issue(url: str, transport=None) -> dict:
     endpoint = f"https://api.github.com/repos/{owner}/{repo}/issues/{number}"
     if transport is None:
         def transport(request):
-            with urllib.request.urlopen(request, timeout=12) as response:
+            with urllib.request.build_opener(_NoRedirect()).open(request, timeout=12) as response:
                 return response.read(150_001)
     request = urllib.request.Request(endpoint,headers={"Accept":"application/vnd.github+json","User-Agent":"RepoPilot/0.3"})
     try:

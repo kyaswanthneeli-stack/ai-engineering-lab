@@ -44,7 +44,7 @@ def run_issue(repo:Path,issue_url:str,output:Path,issue_reader=fetch_public_issu
         report["static_review"]=static_review
     except Exception as exc:
         record("pipeline_failed",type(exc).__name__)
-        report=report or {"issue_id":(issue_data or {}).get("issue_id","unknown"),"outcome":"failed","model_generated_proposal":bool(proposal_data),"error_type":type(exc).__name__,"error":str(exc)[:500],"draft_pr_created":False}
+        report=report or {"issue_id":(issue_data or {}).get("issue_id","unknown"),"outcome":"failed","model_generated_proposal":bool(proposal_data),"error_type":type(exc).__name__,"error":"Pipeline failed; consult the sanitized error type and CI checks","draft_pr_created":False}
     report["events"]=events
     report["elapsed_ms"]=round((time.monotonic()-start)*1000)
     (output/"run.json").write_text(json.dumps(report,indent=2)+"\n",encoding="utf-8")

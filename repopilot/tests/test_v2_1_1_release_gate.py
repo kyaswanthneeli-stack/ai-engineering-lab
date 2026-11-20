@@ -12,9 +12,11 @@ ROOT=Path(__file__).resolve().parents[2]
 class PatchReleaseGateTests(unittest.TestCase):
     def test_version_matches_runtime_and_distribution(self):
         pyproject=tomllib.loads((ROOT/"repopilot/pyproject.toml").read_text())
-        self.assertEqual(pyproject["project"]["version"], "2.1.1")
-        self.assertEqual(__version__, "2.1.1")
-        self.assertEqual(version("repopilot"), "2.1.1")
+        # Retain historic v2.1.1 release evidence without freezing the
+        # active distribution at the older version forever.
+        self.assertEqual(pyproject["project"]["version"], __version__)
+        self.assertEqual(version("repopilot"), __version__)
+        self.assertTrue((ROOT/"repopilot/RELEASE_NOTES_v2.1.1.md").is_file())
 
     def test_release_gated_on_evidence_tests_and_clean_wheel(self):
         workflow=(ROOT/".github/workflows/repopilot-v2-1-1-release.yml").read_text()
