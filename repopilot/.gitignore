@@ -1,0 +1,14 @@
+.venv/
+venv/
+.runs/
+dist/
+build/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.coverage
+.coverage.*
+.env
+.env.*
+*.pem
+*.key
