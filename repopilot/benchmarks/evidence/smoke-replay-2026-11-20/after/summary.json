@@ -1,0 +1,95 @@
+{
+  "kind": "preserved_v9_smoke_replay_not_official_evaluation",
+  "label": "after-import-setup",
+  "code_commit": "79441af05039f6d447b34f57401b5cd22a606c78",
+  "historical_prediction_source_commit": "5ffdcd5695fc2df32fef40d0e388a04798f4dee7",
+  "selected_tasks": [
+    "sympy__sympy-13773",
+    "django__django-12125",
+    "matplotlib__matplotlib-22835",
+    "django__django-12589"
+  ],
+  "records": [
+    {
+      "instance_id": "sympy__sympy-13773",
+      "base_commit": "7121bdf1facdd90d05b6994b4c2e5b2865a4638a",
+      "original_prediction_sha256": "62882d0ca6408ccc981da743cfcd38e9bc017436e7d36aa8419071d657d75d61",
+      "candidate_quality": {
+        "status": "changed_or_unknown",
+        "reason": "tokens_or_positions_differ"
+      },
+      "candidate_smoke": {
+        "status": "no_regression_observed",
+        "probe": "module_import",
+        "reason": "limited_probe_only",
+        "baseline_bootstrap_profile": "legacy_collections_import_setup",
+        "baseline_exit_code": 0,
+        "baseline_failure_category": null,
+        "candidate_exit_code": 0,
+        "candidate_failure_category": null
+      }
+    },
+    {
+      "instance_id": "django__django-12125",
+      "base_commit": "89d41cba392b759732ba9f1db4ff29ed47da6a56",
+      "original_prediction_sha256": "3cdb63eefa2d58503e714382bfcbd3a297eb632a7e8e05715a2e698764a39095",
+      "candidate_quality": {
+        "status": "changed_or_unknown",
+        "reason": "tokens_or_positions_differ"
+      },
+      "candidate_smoke": {
+        "status": "no_regression_observed",
+        "probe": "module_import",
+        "reason": "limited_probe_only",
+        "baseline_bootstrap_profile": "django_minimal_import_setup",
+        "baseline_exit_code": 0,
+        "baseline_failure_category": null,
+        "candidate_exit_code": 0,
+        "candidate_failure_category": null
+      }
+    },
+    {
+      "instance_id": "matplotlib__matplotlib-22835",
+      "base_commit": "c33557d120eefe3148ebfcf2e758ff2357966000",
+      "original_prediction_sha256": "7a990df62b24ae778bd6281a7390985001e5ecf9e66b8a7999bfa38391ae661f",
+      "candidate_quality": {
+        "status": "changed_or_unknown",
+        "reason": "tokens_or_positions_differ"
+      },
+      "candidate_smoke": {
+        "status": "inconclusive",
+        "probe": "issue_python_example",
+        "reason": "baseline_did_not_pass",
+        "baseline_bootstrap_profile": "none",
+        "baseline_exit_code": 1,
+        "baseline_failure_category": "native_extension_unavailable",
+        "fallback_bootstrap_profile": "source_layout_import_setup",
+        "fallback_baseline_exit_code": 1,
+        "fallback_baseline_failure_category": "native_extension_unavailable"
+      }
+    },
+    {
+      "instance_id": "django__django-12589",
+      "base_commit": "895f28f9cbed817c00ab68770433170d83132d90",
+      "original_prediction_sha256": "223dbcabf66ca924457074226eb44c58e528b31fdd9a7184407673f4c425306f",
+      "candidate_quality": {
+        "status": "changed_or_unknown",
+        "reason": "tokens_or_positions_differ"
+      },
+      "candidate_smoke": {
+        "status": "no_regression_observed",
+        "probe": "module_import",
+        "reason": "limited_probe_only",
+        "baseline_bootstrap_profile": "django_minimal_import_setup",
+        "baseline_exit_code": 0,
+        "baseline_failure_category": null,
+        "candidate_exit_code": 0,
+        "candidate_failure_category": null
+      }
+    }
+  ],
+  "model_calls": 0,
+  "officially_evaluated": false,
+  "officially_resolved": null,
+  "usable_smoke_baselines": 3
+}

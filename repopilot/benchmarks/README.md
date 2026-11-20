@@ -48,3 +48,10 @@ Inspect `logs/evaluation/<run_id>/results.json` and individual `report.json` fil
 Publish all twelve selected IDs. Show predictions submitted, tasks unattempted, official resolved/unresolved/error counts, reproducible run ID, model and cost. Do **not** treat model-suggested patches or RepoPilot's local tests as official SWE-bench resolutions.
 
 **Known limitation:** RepoPilot is a Python-focused prototype. Large Django/SymPy/Matplotlib SWE-bench tasks need broader context and dedicated dependencies. The **independent official harness** did evaluate six submitted model patches and resolved one; most selected issues remain unresolved or unsubmitted. The exporter alone does not establish a solve.
+## Controlled smoke validation replay
+
+The [four-case historical v9 replay](SMOKE_REPLAY_2026-11-20.md) diagnosed
+runtime blockers and measured usable smoke baselines increasing from **1/4 to
+3/4** with opt-in import setup. It reuses original patches with no model calls,
+and does not change the independently verified **1/12** resolution result.
+Matplotlib remains inconclusive because the native extension is unavailable.

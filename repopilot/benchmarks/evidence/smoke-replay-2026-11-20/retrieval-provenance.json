@@ -1,0 +1,12 @@
+{
+  "run_url": "https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44798561583",
+  "source_commit": "96d58064841f53d9c1a6975dc586148e8aa6d8ca",
+  "artifact_id": 14659378046,
+  "archive_sha256": "f0e19bed2828b84cad33cac195eb6782654358a25b472c22669a52b4da4da138",
+  "archive_digest_verified_against_github_metadata": true,
+  "files_sha256": {
+    "after/summary.json": "db973eca445dff522ab14703ffd51993327af10ac5bd0194ba2b091847af24a9",
+    "before/summary.json": "3004920497eee2da2a9ecd28def0c74dce387b8372fdf62f63d6eec51f68a602"
+  },
+  "notes": "Original before/after summaries copied byte-for-byte. This is smoke baseline coverage on four preserved v9 proposals, not a new official resolution score."
+}
