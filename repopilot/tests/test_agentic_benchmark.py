@@ -20,6 +20,42 @@ class AgentTests(unittest.TestCase):
             return {"choices":[{"message":{"content":json.dumps(next(it))}}],"usage":{"total_tokens":5}}
         return client
 
+    def test_agent_budget_exhaustion_does_not_call_model(self):
+        calls=[]
+        def client(*args):
+            calls.append(1)
+            raise AssertionError("Model must not be called after budget expiry")
+        with patch.dict("os.environ",{"REPOPILOT_AGENT_BUDGET_SECONDS":"10"}), patch(
+                "repopilot.agentic_benchmark.time.monotonic",
+                side_effect=[0.0,11.0]):
+            with self.assertRaisesRegex(AgentToolError,"budget exhausted"):
+                propose_agentic_benchmark(
+                    self.repo,"fix pricing","mock","http://127.0.0.1:11434/v1",
+                    client=client,max_steps=2,required_targets={"pricing.py"})
+        self.assertEqual(calls,[])
+
+    def test_agent_budget_allows_model_call_within_deadline(self):
+        answer={"action":"finish","edits":[{
+            "path":"pricing.py","old":"return sum(values)",
+            "new":"return round(sum(values), 2)"}]}
+        with patch.dict("os.environ",{"REPOPILOT_AGENT_BUDGET_SECONDS":"30"}), patch(
+                "repopilot.agentic_benchmark.time.monotonic",
+                side_effect=[0.0,1.0]):
+            candidate,_=propose_agentic_benchmark(
+                self.repo,"fix pricing","mock","http://127.0.0.1:11434/v1",
+                client=self.sequence([answer]),max_steps=2,
+                required_targets={"pricing.py"})
+        self.assertIn("round(sum(values), 2)",candidate.patch)
+
+    def test_agent_budget_rejects_invalid_config(self):
+        for value in ("bad","-1","1","3601","3.5"):
+            with self.subTest(value=value), patch.dict(
+                "os.environ",{"REPOPILOT_AGENT_BUDGET_SECONDS":value}):
+                with self.assertRaisesRegex(AgentToolError,"agent time budget|Agent time budget"):
+                    propose_agentic_benchmark(
+                        self.repo,"fix pricing","mock","http://127.0.0.1:11434/v1",
+                        client=lambda *args:None,max_steps=2)
+
     def test_opt_in_local_native_ollama_skips_compatible_api(self):
         with patch.dict("os.environ",{"REPOPILOT_OLLAMA_NATIVE":"1",
                                       "REPOPILOT_MAX_TOKENS":"512"}), patch(
