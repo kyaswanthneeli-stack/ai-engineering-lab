@@ -17,7 +17,9 @@ RUN python -m pip install --only-binary=:all: --no-cache-dir \
       asgiref==3.7.2 \
       sqlparse==0.4.4 \
       pytz==2023.3.post1 \
-      packaging==23.2 \
+      python-dateutil==2.9.0.post0 \
+      tzdata==2023.3 \
+      packaging==24.2 \
       numpy==1.23.5 \
       scipy==1.10.1 \
       pandas==1.5.3 \
