@@ -33,8 +33,8 @@ class RcDeploymentWorkflowTests(unittest.TestCase):
     def test_publish_only_on_protected_main_after_tests(self):
         flow=self.flow
         for token in (
-            "branches:",
-            "      - main",
+            "workflow_dispatch:",
+            "pull_request:",
             "github.event_name != 'pull_request' && github.ref == 'refs/heads/main'",
             "packages: write",
             "contents: write",
@@ -47,6 +47,7 @@ class RcDeploymentWorkflowTests(unittest.TestCase):
         ):
             with self.subTest(token=token):
                 self.assertIn(token,flow)
+        self.assertNotIn("\n  push:",flow)
         self.assertNotIn("docker.sock",flow)
         self.assertNotIn("docker push repopilot-cli:rc",flow)
         self.assertNotIn("repopilot:latest",flow)
