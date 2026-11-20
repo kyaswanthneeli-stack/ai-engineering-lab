@@ -27,6 +27,31 @@ _TRUSTED_OFFLINE_DEPS_IMAGE = "repopilot-candidate-deps:py310"
 _APPROVED_IMAGES = frozenset({_IMAGE, _TRUSTED_OFFLINE_DEPS_IMAGE})
 
 
+def _bootstrap(targets: list[str]) -> tuple[str, str]:
+    """Opt-in, developer-owned import setup, executed only inside Docker.
+
+    No target setup.py, migrations, app configuration or package install is
+    accepted from a model. Both original and candidate use this exact prefix.
+    These weak import profiles are not official SWE-bench environments.
+    """
+    if os.getenv("REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP", "0").strip() != "1":
+        return "", "none"
+    if any(name.startswith("sympy/") for name in targets):
+        return ("import collections, collections.abc\n"
+                "for _name in ('Mapping','MutableMapping','Iterable','Callable','Sequence'):\n"
+                "    if not hasattr(collections, _name):\n"
+                "        setattr(collections, _name, getattr(collections.abc, _name))\n",
+                "legacy_collections_import_setup")
+    if any(name.startswith("django/") for name in targets):
+        return ("from django.conf import settings\n"
+                "if not settings.configured:\n"
+                "    settings.configure(INSTALLED_APPS=['django.contrib.contenttypes'], "
+                "DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}, "
+                "SECRET_KEY='repopilot-offline-smoke-fixture')\n"
+                "import django\ndjango.setup()\n", "django_minimal_import_setup")
+    return "", "source_layout_import_setup"
+
+
 def _approved_image() -> str | None:
     """Images are selected only by trusted operator environment, never by issue.
 
@@ -38,7 +63,7 @@ def _approved_image() -> str | None:
 
 
 
-def _reproducer(issue: str, targets: list[str]) -> tuple[str, str]:
+def _reproducer(issue: str, targets: list[str], *, root: Path | None = None) -> tuple[str, str]:
     """Use a small, parseable public issue snippet or import the target.
 
     Tests can also exercise this with explicit assertion snippets; no
@@ -55,16 +80,25 @@ def _reproducer(issue: str, targets: list[str]) -> tuple[str, str]:
         return code + "\n", "issue_python_example"
     # Import is a weak smoke; both sides passing is not proof of correctness.
     names = []
-    for path in targets[:2]:
+    origins = []
+    for original_path in targets[:2]:
+        path = original_path
+        if (os.getenv("REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP", "0").strip() == "1"
+                and root is not None and path.startswith(("src/", "lib/"))
+                and not (root / path.split("/", 1)[0] / "__init__.py").exists()):
+            path = path.split("/", 1)[1]
         module = path[:-3].replace("/", ".")
         if module.endswith(".__init__"):
             module = module[:-9]
         if module and all(part.isidentifier() for part in module.split(".")):
             names.append(module)
+            origins.append("/workspace/" + original_path)
     if not names:
         return "", "none"
-    return ("import importlib\n" + "".join(
-        "importlib.import_module(" + repr(name) + ")\n" for name in names),
+    return ("import importlib\nfrom pathlib import Path\n" + "".join(
+        "_module = importlib.import_module(" + repr(name) + ")\n"
+        "assert Path(_module.__file__).resolve() == Path(" + repr(origin) + ").resolve(), 'unexpected_source_origin'\n"
+        for name, origin in zip(names, origins)),
         "module_import")
 
 
@@ -83,6 +117,13 @@ def _failure_category(code: int, stderr_tail: str) -> str | None:
     lines = stderr_tail[-4096:].splitlines()
     last = next((line for line in reversed(lines) if line.strip()), "")
     exception = last.split(":", 1)[0].strip()
+    if exception in {"ImportError", "AttributeError"} and re.search(
+            r"(?:cannot import name|has no attribute) ['\"](?:Mapping|MutableMapping|Iterable|Callable|Sequence)['\"]", last
+    ) and ("from 'collections'" in last or "module 'collections'" in last):
+        return "legacy_collections_api"
+    if exception in {"ImportError", "ModuleNotFoundError"} and re.search(
+            r"(?:matplotlib\.(?:_c_internal_utils|_path)|cannot import name ['\"](?:_c_internal_utils|_path)['\"])", last):
+        return "native_extension_unavailable"
     return {
         "ModuleNotFoundError": "import_error",
         "ImportError": "import_error",
@@ -125,7 +166,9 @@ def _run_docker(repo: Path, script: str, *, overlay: Path | None,
         "--memory=512m", "--cpus=1", "--read-only",
         "--tmpfs=/tmp:rw,nosuid,nodev,size=32m,mode=1777",
         "--user=65534:65534", "-e", "PYTHONDONTWRITEBYTECODE=1",
-        "-e", "PYTHONPATH=/workspace",
+        "-e", ("PYTHONPATH=/workspace:/workspace/src:/workspace/lib"
+               if os.getenv("REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP", "0").strip() == "1"
+               else "PYTHONPATH=/workspace"),
         "-v", str(repo) + ":/workspace:ro",
     ]
     if overlay is not None:
@@ -194,10 +237,17 @@ def smoke_candidate(repo: Path, patch: str, issue: str, *,
                     for n in range(1, len(Path(name).parts) + 1)) or
                 source.stat().st_size > 100_000):
             return {"status": "skipped", "reason": "unsafe_or_large_patch_target"}
-    script, kind = _reproducer(issue, targets)
+    script, kind = _reproducer(issue, targets, root=root)
     if not script:
         return {"status": "skipped", "reason": "no_probe"}
     diagnostics = {}
+    setup, profile = _bootstrap(targets)
+    diagnostics["baseline_bootstrap_profile"] = profile if kind == "module_import" else "none"
+    # Import setup is never prepended to public issue examples, which may
+    # intentionally configure their own runtime. It applies only to our
+    # developer-generated module-import probes (including import fallbacks).
+    if kind == "module_import":
+        script = setup + script
     def report(status, probe, reason):
         return {"status": status, "probe": probe, "reason": reason,
                 **diagnostics}
@@ -233,9 +283,11 @@ def smoke_candidate(repo: Path, patch: str, issue: str, *,
             # must not be judged by the example's failure alone. With
             # remaining budget, fall back to a weak import-only baseline
             # and report that distinct probe type transparently.
-            fallback_script, fallback_kind = _reproducer("", targets)
+            fallback_script, fallback_kind = _reproducer("", targets, root=root)
+            fallback_script = setup + fallback_script
             remaining = timeout - (time.monotonic() - started)
             if fallback_kind == "module_import" and remaining >= 9:
+                diagnostics["fallback_bootstrap_profile"] = profile
                 fallback_before, cleanup_failure = _run_docker(
                     root, fallback_script, overlay=None, targets=targets,
                     timeout=min(5, remaining / 2), diagnostics=diagnostics,

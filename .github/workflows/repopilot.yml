@@ -135,6 +135,35 @@ jobs:
               assert review_quote_only_patch(root,quote_patch)['status']=='quote_only'
               print('PASS: actual offline import failure diagnosed without raw stderr; quote-only proposal detected')
           PY
+      - name: Verify opt-in historical import setup in real offline Docker
+        env:
+          REPOPILOT_CANDIDATE_SMOKE_IMAGE: repopilot-candidate-deps:py310
+        run: |
+          python - <<'PY'
+          import os,tempfile
+          from pathlib import Path
+          from repopilot.candidate_smoke import smoke_candidate
+          with tempfile.TemporaryDirectory(prefix='repopilot-legacy-import-') as td:
+              root=Path(td)/'repo'
+              (root/'sympy').mkdir(parents=True,mode=0o755)
+              (root/'sympy/__init__.py').write_text('')
+              source='from collections import Mapping\nvalue = 1\n'
+              (root/'sympy/fixture.py').write_text(source)
+              patch=('diff --git a/sympy/fixture.py b/sympy/fixture.py\n'
+                     '--- a/sympy/fixture.py\n+++ b/sympy/fixture.py\n'
+                     '@@ -1,2 +1,2 @@\n from collections import Mapping\n'
+                     '-value = 1\n+raise RuntimeError("candidate import regression")\n')
+              os.environ['REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP']='0'
+              before=smoke_candidate(root,patch,'Import check',timeout=25)
+              assert before['status']=='inconclusive',before
+              assert before['baseline_failure_category']=='legacy_collections_api',before
+              os.environ['REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP']='1'
+              after=smoke_candidate(root,patch,'Import check',timeout=25)
+              assert after['status']=='regression',after
+              assert after['baseline_exit_code']==0,after
+              assert (root/'sympy/fixture.py').read_text()==source
+              print('PASS: historical import setup enables pristine baseline and detects actual candidate regression')
+          PY
       - name: Verify issue reproduction fallback in real offline Docker
         env:
           REPOPILOT_CANDIDATE_SMOKE_IMAGE: repopilot-candidate-deps:py310

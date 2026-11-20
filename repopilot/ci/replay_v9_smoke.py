@@ -34,6 +34,10 @@ def verified_inputs(manifest, evidence):
     score = official_summary(manifest, files["official_results"], files["model_predictions"])
     if tuple(score[k] for k in ("selected", "submitted", "evaluated", "resolved")) != (12, 6, 6, 1):
         raise ValueError("Unexpected historical v9 counts")
+    saved = json.loads(files["validated_summary"].read_text())
+    for key, value in score.items():
+        if key != "results_path" and saved.get(key) != value:
+            raise ValueError("Historical scorecard does not match official output")
     tasks = {row["instance_id"]: row for row in load_manifest(manifest)}
     predictions = {row["instance_id"]: row for row in (
         json.loads(line) for line in files["model_predictions"].read_text().splitlines())}

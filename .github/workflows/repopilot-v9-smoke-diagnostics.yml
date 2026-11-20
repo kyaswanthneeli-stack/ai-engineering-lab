@@ -35,14 +35,32 @@ jobs:
           path: repopilot/.runs/v9-replay-original
       - name: Build unchanged trusted offline dependency runtime
         run: docker build --pull -t repopilot-candidate-deps:py310 -f ci/Dockerfile.candidate-smoke ci
-      - name: Replay three failed baselines and one passing control without inference
+      - name: Replay same three failed baselines and control before and after import setup
         env:
           REPOPILOT_CANDIDATE_SMOKE_IMAGE: repopilot-candidate-deps:py310
         run: |
-          python ci/replay_v9_smoke.py \
+          REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP=0 python ci/replay_v9_smoke.py \
             --evidence .runs/v9-replay-original \
-            --output .runs/v9-smoke-diagnostics \
+            --output .runs/v9-smoke-diagnostics/before \
             --label before-runtime-fix
+          REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP=1 python ci/replay_v9_smoke.py \
+            --evidence .runs/v9-replay-original \
+            --output .runs/v9-smoke-diagnostics/after \
+            --label after-import-setup
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('.runs/v9-smoke-diagnostics')
+          before=json.loads((root/'before/summary.json').read_text())
+          after=json.loads((root/'after/summary.json').read_text())
+          assert before['selected_tasks']==after['selected_tasks']
+          for a,b in zip(before['records'],after['records']):
+              assert a['base_commit']==b['base_commit']
+              assert a['original_prediction_sha256']==b['original_prediction_sha256']
+          print('USABLE BASELINES BEFORE:',before['usable_smoke_baselines'])
+          print('USABLE BASELINES AFTER:',after['usable_smoke_baselines'])
+          print('NO MODEL CALLS OR OFFICIAL RESOLUTION CLAIM')
+          PY
       - name: Preserve sanitized replay diagnostics
         if: always()
         uses: actions/upload-artifact@v4
