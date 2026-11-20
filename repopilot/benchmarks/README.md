@@ -1,6 +1,6 @@
 # SWE-bench Lite: 12-task evaluation protocol
 
-**Current verified status (November 19, 2026):** 12 selected tasks attempted; six model-generated predictions officially evaluated; **one issue resolved, five unresolved, zero evaluator errors**. Another six tasks timed out without predictions. See [full official evidence](OFFICIAL_EVALUATION_2026-11-19.md), [predictions](official-predictions-2026-11-19.jsonl), and [official result JSON](official-score-2026-11-19.json). This is **1/6 evaluated**, not a full SWE-bench score.
+**Latest verified status (November 20, 2026):** 12 selected tasks attempted, six model-generated predictions officially evaluated; **one resolved, five unresolved, zero evaluator errors**. The six other attempts had three hard timeouts and three model-tool failures. The independent score is **1/6 submitted (16.7%)** and **1/12 selected (8.3%)**; this did not improve on the November 19 baseline. See [Nov 20 report](OFFICIAL_EVALUATION_2026-11-20.md), [model predictions](official-predictions-2026-11-20.jsonl), and [official result JSON](official-score-2026-11-20.json). The [Nov 19 report](OFFICIAL_EVALUATION_2026-11-19.md) remains preserved separately.
 
 This folder contains a deterministic sample of twelve real SWE-bench Lite issue IDs and their exact upstream base commits. The immutable selection manifest intentionally does not include outcomes; results are stored separately to avoid rewriting task provenance.
 
