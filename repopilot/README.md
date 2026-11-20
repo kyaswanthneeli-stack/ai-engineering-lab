@@ -4,7 +4,7 @@
 
 **For Upwork clients:** [Portfolio-ready project case study, deliverables and demonstration script](UPWORK_PORTFOLIO.md). This document distinguishes verified results from experimental capabilities and includes copy suitable for an Upwork portfolio item.
 
-**RepoPilot v2.0 portfolio handoff:** [Verified v2.0 release notes](RELEASE_NOTES_v2.0.0.md) summarize the merged implementation, **183 CI tests passed, 82% coverage**, official Nov 20 **1/6 submitted and 1/12 selected** benchmark score, and limits. Formal GitHub version tagging remains separate.
+**RepoPilot v2.0 portfolio handoff:** [Verified v2.0 release notes](RELEASE_NOTES_v2.0.0.md) summarize the merged implementation, **183 CI tests passed, 82% coverage**, official Nov 20 **1/6 submitted and 1/12 selected** benchmark score, and limits. The [one-time v2.0.0 release workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/workflows/repopilot-v2-release.yml) verifies official evidence, unit tests, restricted Docker and package files before it publishes the [immutable release](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.0.0). Check the workflow and release page to confirm publication.
 
 ## Current implementation status (verify before citing)
 
