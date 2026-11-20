@@ -101,7 +101,7 @@ class ContextSelectionTests(unittest.TestCase):
         for budget in (300, 500, 9000):
             with self.subTest(budget=budget):
                 selected = ranked_source_context(
-                    self.root, "calculate_invoice_tax", max_files=1,
+                    self.root, "Bug in large.py calculate_invoice_tax", max_files=1,
                     max_chars=budget)
                 self.assertEqual(len(selected), 1)
                 self.assertLessEqual(len(selected[0].text), budget)
