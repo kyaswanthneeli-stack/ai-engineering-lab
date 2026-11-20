@@ -2,7 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from repopilot.swebench_results import official_summary, EvaluationError
+from repopilot.swebench_results import official_summary, EvaluationError, main as summary_main
 
 
 class OfficialSummaryTests(unittest.TestCase):
@@ -41,6 +41,31 @@ class OfficialSummaryTests(unittest.TestCase):
         self.assertFalse(data["is_complete_12_task_evaluation"])
         self.assertEqual(data["resolved_over_evaluated"], 0.3333)
         self.assertEqual(data["resolved_over_selected"], 0.0833)
+
+    def test_official_scorecard_cli_writes_validated_json(self):
+        output=self.results.parent / "official-summary.json"
+        summary_main([str(self.manifest), str(self.results),
+                      str(self.predictions), "--output", str(output)])
+        result=json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(result["selected"],12)
+        self.assertEqual(result["submitted"],3)
+        self.assertEqual(result["evaluated"],3)
+        self.assertEqual(result["resolved"],1)
+        self.assertEqual(result["not_submitted"],9)
+
+    def test_official_workflow_publishes_validated_scoring_provenance(self):
+        workflow=(Path(__file__).resolve().parents[2] /
+                  ".github/workflows/repopilot-official-12-evaluation.yml")
+        content=workflow.read_text(encoding="utf-8")
+        for required in (
+                "python -m repopilot.swebench_results",
+                "official-summary.json",
+                "provenance.json",
+                "Incomplete official SWE-bench evidence",
+                "sha256",
+                "if: always()"):
+            with self.subTest(required=required):
+                self.assertIn(required,content)
 
     def test_unreported_submitted_tasks(self):
         self.set_results([self.ids[0]], [], [])
