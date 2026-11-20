@@ -1,0 +1,15 @@
+{
+  "instance_id": "pytest-dev__pytest-11148",
+  "repo": "pytest-dev/pytest",
+  "base_commit": "2f7415cfbc4b6ca62f9013f1abd27136f46b9653",
+  "status": "failed_model_attempt",
+  "officially_evaluated": false,
+  "officially_resolved": null,
+  "is_reference_patch": false,
+  "issue_context_limit_chars": 6500,
+  "issue_context_chars": 3188,
+  "issue_context_trimmed": false,
+  "error_type": "TransientOllamaError",
+  "error": "Local Ollama native chat failed or timed out",
+  "elapsed_ms": 270726
+}

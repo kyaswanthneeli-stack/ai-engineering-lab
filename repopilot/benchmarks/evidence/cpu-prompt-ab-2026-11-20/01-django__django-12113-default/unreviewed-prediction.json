@@ -1,0 +1,8 @@
+{
+  "instance_id": "django__django-12113",
+  "base_commit": "62254c5202e80a68f4fe6572a2be46a3d953de1a",
+  "model_name_or_path": "qwen2.5-coder:3b",
+  "model_patch": "diff --git a/django/contrib/contenttypes/fields.py b/django/contrib/contenttypes/fields.py\n--- a/django/contrib/contenttypes/fields.py\n+++ b/django/contrib/contenttypes/fields.py\n@@ -42,7 +42,7 @@\n     remote_field = None\n \n     def __init__(self, ct_field='content_type', fk_field='object_id', for_concrete_model=True):\n-        self.ct_field = ct_field\n+        self.ct_field = ct_field or 'content_type'\n         self.fk_field = fk_field\n         self.for_concrete_model = for_concrete_model\n         self.editable = False\n",
+  "generated_by_model": true,
+  "human_reviewed": false
+}

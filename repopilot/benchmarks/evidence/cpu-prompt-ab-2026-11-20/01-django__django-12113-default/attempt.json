@@ -1,0 +1,53 @@
+{
+  "instance_id": "django__django-12113",
+  "repo": "django/django",
+  "base_commit": "62254c5202e80a68f4fe6572a2be46a3d953de1a",
+  "status": "model_patch_proposed",
+  "officially_evaluated": false,
+  "officially_resolved": null,
+  "is_reference_patch": false,
+  "issue_context_limit_chars": 6500,
+  "issue_context_chars": 4774,
+  "issue_context_trimmed": false,
+  "model": "qwen2.5-coder:3b",
+  "agent_steps": 1,
+  "inspected_files": [
+    "django/contrib/contenttypes/fields.py",
+    "django/db/models/base.py"
+  ],
+  "tool_trace": [
+    {
+      "step": 0,
+      "action": "ranked_initial_preinspect",
+      "target": "django/db/models/base.py",
+      "rank_score": 180,
+      "result_items": 120
+    },
+    {
+      "step": 0,
+      "action": "ranked_initial_preinspect",
+      "target": "django/contrib/contenttypes/fields.py",
+      "rank_score": 160,
+      "result_items": 120
+    },
+    {
+      "step": 1,
+      "action": "candidate_smoke",
+      "status": "inconclusive",
+      "reason": "baseline_did_not_pass"
+    }
+  ],
+  "provider_usage": [
+    {
+      "prompt_tokens": 2702,
+      "completion_tokens": 46
+    }
+  ],
+  "candidate_smoke": {
+    "status": "inconclusive",
+    "probe": "module_import",
+    "reason": "baseline_did_not_pass"
+  },
+  "model_generated": true,
+  "elapsed_ms": 87906
+}

@@ -1,0 +1,15 @@
+{
+  "instance_id": "django__django-12113",
+  "repo": "django/django",
+  "base_commit": "62254c5202e80a68f4fe6572a2be46a3d953de1a",
+  "status": "failed_model_attempt",
+  "officially_evaluated": false,
+  "officially_resolved": null,
+  "is_reference_patch": false,
+  "issue_context_limit_chars": 2500,
+  "issue_context_chars": 2500,
+  "issue_context_trimmed": true,
+  "error_type": "AgentToolError",
+  "error": "Remaining agent model deadline expired before native retry",
+  "elapsed_ms": 272746
+}
