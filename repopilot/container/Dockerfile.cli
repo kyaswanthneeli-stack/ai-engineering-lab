@@ -16,7 +16,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 COPY --from=builder /wheels /tmp/wheels
 RUN python -m pip install --no-index --no-deps --find-links=/tmp/wheels \
-        'repopilot==2.2.0rc1' \
+        'repopilot==2.2.0' \
     && rm -rf /tmp/wheels \
     && mkdir -p /workspace \
     && chmod 0755 /workspace

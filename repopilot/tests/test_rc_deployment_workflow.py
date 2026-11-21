@@ -36,6 +36,7 @@ class RcDeploymentWorkflowTests(unittest.TestCase):
             "workflow_dispatch:",
             "pull_request:",
             "github.event_name != 'pull_request' && github.ref == 'refs/heads/main'",
+            "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'",
             "packages: write",
             "contents: write",
             "docker/login-action@v3",

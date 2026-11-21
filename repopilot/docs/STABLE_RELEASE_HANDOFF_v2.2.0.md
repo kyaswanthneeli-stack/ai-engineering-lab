@@ -14,9 +14,9 @@ Review and merge [PR #63](https://github.com/kyaswanthneeli-stack/ai-engineering
 
 ## Gate C — version and release workflow
 
-Review and merge this separate staging release PR **after** PR #63 and its final score notes. Bump the package, runtime version and read-only Docker image pin from `2.2.0rc1` to `2.2.0` in a follow-up revision. Leave the historical immutable release workflows and v2.2.0rc1 tag intact.
+Review and merge this separate staging release PR **after** PR #63 and its final score notes. The staging branch has already bumped `pyproject.toml`, the runtime `__version__`, and the read-only CLI Docker image to `2.2.0`; reconfirm the merged version identity and rerun all tests after PR #63 lands. Leave the historical immutable release workflows and v2.2.0rc1 tag intact.
 
-The [version-specific stable-release workflow](../../.github/workflows/repopilot-v2-2-stable-release.yml) is **manual-only and main-only**. Its runtime identity check intentionally fails until the version bump is complete. It builds tests, restricted Docker checks, the wheel/sdist, a clean offline install and the sandboxed non-root CLI image before any GHCR or GitHub Release mutation. The GHCR image is commit-SHA-tagged; existing tags/releases are refused.
+The [version-specific stable-release workflow](../../.github/workflows/repopilot-v2-2-stable-release.yml) is **manual-only and main-only**. Its runtime identity check requires the consistent `2.2.0` version; the separate draft-release-notes guard still blocks publication until final score evidence and notes are ready. It builds tests, restricted Docker checks, the wheel/sdist, a clean offline install and the sandboxed non-root CLI image before any GHCR or GitHub Release mutation. The GHCR image is commit-SHA-tagged; existing tags/releases are refused.
 
 ## Gate D — final verification
 
