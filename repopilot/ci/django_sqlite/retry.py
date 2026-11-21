@@ -93,7 +93,7 @@ def run(manifest, previous, out):
                 # Pin only the human-selected backend file for this assisted retry.
                 prompt = issue.splitlines()[0] + "\n" + feedback
                 return propose_agentic_benchmark(checkout, prompt, model, url, token,
-                    max_steps=2, required_targets={"django/db/backends/sqlite3/creation.py"})
+                    max_steps=2, native_exact_edits=True, required_targets={"django/db/backends/sqlite3/creation.py"})
 
             record = attempt_one(manifest, INSTANCE, directory, model_proposer=propose)
             row = {"attempt": attempt, "status": record["status"]}
