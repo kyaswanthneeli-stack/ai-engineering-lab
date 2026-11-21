@@ -33,3 +33,30 @@ class NativeFinishTests(unittest.TestCase):
         self.assertEqual(edits["properties"]["path"]["enum"], ["prices.py"])
         self.assertEqual(edits["properties"]["old"]["enum"], ["return cents"])
         self.assertEqual(edits["required"], ["path", "old", "new"])
+
+    def test_longer_retry_budget_uses_exact_edits_on_first_model_call(self):
+        calls = []
+        action = {"action": "finish", "edits": [
+            {"path": "prices.py", "old": "return cents",
+             "new": "return cents / 100"}]}
+
+        def provider(url, model, token, messages, **kwargs):
+            calls.append(kwargs)
+            return {"choices": [{"message": {"content": json.dumps(action)}}]}
+
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {
+            "REPOPILOT_OLLAMA_NATIVE": "1", "REPOPILOT_CANDIDATE_SMOKE": "0",
+        }), patch("repopilot.agentic_benchmark._provider", side_effect=provider):
+            root = Path(temp)
+            (root / "prices.py").write_text(
+                "def dollars(cents):\\n    return cents\\n".replace("\\n", "\n")
+            )
+            proposal, _ = propose_agentic_benchmark(
+                root, "Return dollars", "fixture", "http://localhost:11434/v1",
+                required_targets={"prices.py"}, max_steps=4,
+                native_exact_edits=True, exact_edit_anchors=("return cents",)
+            )
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["finish_paths"], ("prices.py",))
+        self.assertEqual(calls[0]["old_choices"], ("return cents",))
+        self.assertIn("return cents / 100", proposal.patch)
