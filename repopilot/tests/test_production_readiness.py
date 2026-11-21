@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from repopilot.github_issue import _NoRedirect, IssueFetchError, fetch_public_issue
 from repopilot.pipeline import run_issue
+import repopilot
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -77,7 +78,7 @@ class ProductionReadinessTests(unittest.TestCase):
             'ENTRYPOINT ["python", "-m", "repopilot.cli"]',
             "COPY src/ ./src/",
             "PIP_DISABLE_PIP_VERSION_CHECK=1",
-            f"repopilot=={__import__('repopilot').__version__}",
+            f"repopilot=={repopilot.__version__}",
         ):
             self.assertIn(expected, dockerfile)
         for forbidden in (

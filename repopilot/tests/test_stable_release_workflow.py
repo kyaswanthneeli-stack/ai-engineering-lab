@@ -23,6 +23,8 @@ class StableReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("gh release create v2.2.0", flow)
         self.assertNotIn("gh release create v2.2.0rc1", flow)
         self.assertNotIn("--prerelease", flow)
+        self.assertIn("Release notes are still a draft", flow)
+        self.assertIn("assert p['project']['version']=='2.2.0'", flow)
         self.assertNotIn("repopilot:latest", flow)
 
     def test_release_requires_version_test_and_sandbox_gates(self):
