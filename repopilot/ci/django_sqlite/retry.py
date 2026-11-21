@@ -4,6 +4,7 @@ import ast
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import tempfile
@@ -21,6 +22,7 @@ ALIAS_PATCH = "49f194d5ae5cc3e7e869105bd0b350e19cb9700b81fe39dffdaab195b2aef17f"
 MODES = ("explicit", "distinct", "shared", "identity", "shared_setup", "memory_identity")
 BACKEND = "django/db/backends/sqlite3/creation.py"
 PROBE = Path(__file__).with_name("reproduce.py")
+KNOWN_FAILED = Path(__file__).with_name("known_failed_patches.json")
 FEEDBACK = (
     "An independent SQLite regression ran setup_databases(keepdb=True) for two "
     "aliases with distinct persistent TEST['NAME'] filenames and no normal NAME. "
@@ -65,6 +67,41 @@ def method_anchors(repo):
 
 def digest(patch):
     return hashlib.sha256(patch.encode()).hexdigest()
+
+
+def known_failed_hashes(path=KNOWN_FAILED):
+    """Load documented prior failures; never allow their exact patch in a rerun.
+
+    The operator-maintained ledger contains *measured* failed predictions,
+    not model-authored fixes or evaluator success claims.
+    """
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if (not isinstance(data, dict) or set(data) != {"instance_id", "base_commit", "failed"}
+            or data["instance_id"] != INSTANCE
+            or data["base_commit"] != "62254c5202e80a68f4fe6572a2be46a3d953de1a"
+            or not isinstance(data["failed"], list)
+            or not 2 <= len(data["failed"]) <= 64):
+        raise ValueError("Invalid known-failed patch history")
+    hashes = set()
+    for entry in data["failed"]:
+        if not isinstance(entry, dict) or set(entry) != {"sha256", "evidence_url"}:
+            raise ValueError("Invalid known-failed patch evidence")
+        sha, evidence = entry["sha256"], entry["evidence_url"]
+        if (not isinstance(sha, str) or re.fullmatch(r"[0-9a-f]{64}", sha) is None
+                or not isinstance(evidence, str)
+                or not evidence.startswith("https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/")
+                or sha in hashes):
+            raise ValueError("Invalid known-failed patch evidence")
+        hashes.add(sha)
+    if not {OLD_PATCH, ALIAS_PATCH} <= hashes:
+        raise ValueError("Required prior failed patches missing")
+    return hashes
+
+
+def eligible_for_official_scoring(outcomes):
+    """Only submit a new model patch after every independent local probe passes."""
+    failure_clues(outcomes)  # Validate exact six-probe schema and exit codes.
+    return all(code == 0 for code in outcomes.values())
 
 
 def write(path, data):
@@ -148,7 +185,9 @@ def run(manifest, previous, out):
             raise RuntimeError("Both positive controls and the specific original failure are required")
         feedback = FEEDBACK
         report["human_supplied_feedback"] = feedback
-        seen = {OLD_PATCH, ALIAS_PATCH}
+        seen = known_failed_hashes()
+        report["known_failed_patch_count"] = len(seen)
+        write(path, report)
         for attempt in (1, 2):
             directory = out / f"attempt-{attempt}"
 
@@ -186,13 +225,21 @@ def run(manifest, previous, out):
                 write(path, report)
                 continue
             row["reproduction"] = check_patch(repo, patch, work)
-            fields = ("instance_id", "model_name_or_path", "model_patch")
-            (directory / "predictions.jsonl").write_text(
-                json.dumps({k: proposal[k] for k in fields}) + "\n")
             seen.add(sha)
-            write(path, report)
-            if all(code == 0 for code in row["reproduction"].values()):
+            row["local_regression_passed"] = eligible_for_official_scoring(row["reproduction"])
+            row["official_submission_eligible"] = row["local_regression_passed"]
+            if row["local_regression_passed"]:
+                fields = ("instance_id", "model_name_or_path", "model_patch")
+                (directory / "predictions.jsonl").write_text(
+                    json.dumps({k: proposal[k] for k in fields}) + "\n")
+                row["status"] = "passed_local_regression"
+                write(path, report)
                 break
+            # Retain the generated prediction as unreviewed evidence; avoid
+            # spending official SWE-bench compute on a candidate already shown
+            # wrong by the independent pinned SQLite regression.
+            row["status"] = "failed_local_regression"
+            write(path, report)
             feedback = (FEEDBACK + "\nYour preceding candidate was tested in isolation. "
                         "Probe exit codes (0 = correct, 42 = failed): " +
                         json.dumps(row["reproduction"]) + ". " +

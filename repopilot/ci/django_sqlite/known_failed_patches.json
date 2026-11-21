@@ -1,0 +1,22 @@
+{
+  "instance_id": "django__django-12113",
+  "base_commit": "62254c5202e80a68f4fe6572a2be46a3d953de1a",
+  "failed": [
+    {
+      "sha256": "8f0793674377dc0f57c8f86a05f703e68a932adbb290e0df7d702a3816ffeb23",
+      "evidence_url": "https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44901377377"
+    },
+    {
+      "sha256": "49f194d5ae5cc3e7e869105bd0b350e19cb9700b81fe39dffdaab195b2aef17f",
+      "evidence_url": "https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44901377377"
+    },
+    {
+      "sha256": "dcaf81fce5816994f424914a5e725432f4cadb82deefc63d85a838447b23d405",
+      "evidence_url": "https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44905604862"
+    },
+    {
+      "sha256": "884b0715d12d694ad65682b9971fdeba5a6781b36881422c6bbc088a8db2bcbe",
+      "evidence_url": "https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44906220917"
+    }
+  ]
+}

@@ -3,7 +3,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ci.django_sqlite.retry import MODES, failure_clues, method_anchors
+from ci.django_sqlite.retry import (
+    ALIAS_PATCH, MODES, OLD_PATCH, eligible_for_official_scoring,
+    failure_clues, known_failed_hashes, method_anchors,
+)
 
 
 class DjangoSQLiteRetryScopeTests(unittest.TestCase):
@@ -75,4 +78,35 @@ class DjangoSQLiteRetryScopeTests(unittest.TestCase):
             failure_clues({"distinct": 42})
         with self.assertRaisesRegex(ValueError, "Invalid SQLite"):
             failure_clues({mode: "0" for mode in MODES})
+
+    def test_history_contains_prior_independently_failed_patches(self):
+        hashes = known_failed_hashes()
+        self.assertIn(OLD_PATCH, hashes)
+        self.assertIn(ALIAS_PATCH, hashes)
+        self.assertEqual(len(hashes), 4)
+
+    def test_history_fails_closed_when_a_confirmed_failure_is_missing(self):
+        import json
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as temp:
+            ledger = Path(temp) / "failed.json"
+            original = json.loads(
+                (Path(__file__).parents[1] /
+                 "ci/django_sqlite/known_failed_patches.json").read_text()
+            )
+            original["failed"] = original["failed"][1:]
+            ledger.write_text(json.dumps(original))
+            with self.assertRaisesRegex(ValueError, "Required prior failed"):
+                known_failed_hashes(ledger)
+
+    def test_only_six_clean_probes_are_officially_eligible(self):
+        clean = {mode: 0 for mode in MODES}
+        self.assertTrue(eligible_for_official_scoring(clean))
+        for mode in MODES:
+            with self.subTest(mode=mode):
+                failed = {**clean, mode: 42}
+                self.assertFalse(eligible_for_official_scoring(failed))
+        with self.assertRaisesRegex(ValueError, "Invalid SQLite"):
+            eligible_for_official_scoring({"distinct": 0})
 

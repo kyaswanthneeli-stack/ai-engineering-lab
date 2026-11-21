@@ -94,7 +94,7 @@ jobs:
           shopt -s nullglob
           predictions=(.runs/*/predictions.jsonl)
           if [ "${#predictions[@]}" -eq 0 ]; then
-            echo "No eligible model patch was generated." >> "$GITHUB_STEP_SUMMARY"
+            echo "No candidate passed every pinned SQLite regression probe; no official submission." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           python -m pip install -e . 'swebench>=3.0,<5.0'
