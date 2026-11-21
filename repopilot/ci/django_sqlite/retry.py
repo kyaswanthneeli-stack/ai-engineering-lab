@@ -126,7 +126,8 @@ def run(manifest, previous, out):
                           "\nChoose old verbatim from this list of unique original statements. "
                           "Write new yourself.\n" + json.dumps(anchors))
                 return propose_agentic_benchmark(checkout, prompt, model, url, token,
-                    max_steps=2, native_exact_edits=True, required_targets={BACKEND}, exact_edit_anchors=anchors)
+                    max_steps=2, native_exact_edits=True, required_targets={BACKEND},
+                    exact_edit_anchors=anchors, rejected_patch_sha256s=seen.copy())
 
             record = attempt_one(manifest, INSTANCE, directory, model_proposer=propose)
             row = {"attempt": attempt, "status": record["status"]}
@@ -138,12 +139,18 @@ def run(manifest, previous, out):
             patch = proposal["model_patch"]
             sha = digest(patch)
             row["patch_sha256"] = sha
+            # Defensive second guard: no Docker reproduction or official
+            # submission if a caller bypasses the agent-level hash filter.
+            if sha in seen:
+                row["status"] = "duplicate_failed_patch"
+                row["rejected_before_reproduction"] = True
+                write(path, report)
+                continue
             row["reproduction"] = check_patch(repo, patch, work)
-            if sha not in seen:
-                fields = ("instance_id", "model_name_or_path", "model_patch")
-                (directory / "predictions.jsonl").write_text(
-                    json.dumps({k: proposal[k] for k in fields}) + "\n")
-                seen.add(sha)
+            fields = ("instance_id", "model_name_or_path", "model_patch")
+            (directory / "predictions.jsonl").write_text(
+                json.dumps({k: proposal[k] for k in fields}) + "\n")
+            seen.add(sha)
             write(path, report)
             if all(code == 0 for code in row["reproduction"].values()):
                 break
