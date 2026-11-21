@@ -27,6 +27,24 @@ class StableReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("assert p['project']['version']=='2.2.0'", flow)
         self.assertNotIn("repopilot:latest", flow)
 
+    def test_stable_pr_preflight_has_no_publish_privileges(self):
+        flow = (ROOT.parent /
+                ".github/workflows/repopilot-v2-2-stable-preflight.yml"
+               ).read_text(encoding="utf-8")
+        self.assertIn("  pull_request:", flow)
+        self.assertIn("permissions:\n  contents: read", flow)
+        self.assertIn("persist-credentials: false", flow)
+        self.assertIn("repo.full_name == github.repository", flow)
+        self.assertIn("repopilot-2.2.0-*.whl", flow)
+        self.assertIn("--read-only --network none --cap-drop ALL", flow)
+        self.assertIn("test -f dist/repopilot-2.2.0.tar.gz", flow)
+        self.assertIn("sha256sum dist/*", flow)
+        self.assertNotIn("packages: write", flow)
+        self.assertNotIn("contents: write", flow)
+        self.assertNotIn("gh release create", flow)
+        self.assertNotIn("docker push", flow)
+        self.assertNotIn("secrets.GITHUB_TOKEN", flow)
+
     def test_release_requires_version_test_and_sandbox_gates(self):
         flow = self.text
         for expected in (
