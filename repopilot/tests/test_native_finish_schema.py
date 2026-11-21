@@ -6,7 +6,7 @@ from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
-from repopilot.agentic_benchmark import propose_agentic_benchmark
+from repopilot.agentic_benchmark import propose_agentic_benchmark, _local_ollama_chat
 
 
 class NativeFinishTests(unittest.TestCase):
@@ -60,3 +60,19 @@ class NativeFinishTests(unittest.TestCase):
         self.assertEqual(calls[0]["finish_paths"], ("prices.py",))
         self.assertEqual(calls[0]["old_choices"], ("return cents",))
         self.assertIn("return cents / 100", proposal.patch)
+
+    def test_opt_in_native_nonthinking_does_not_change_default_requests(self):
+        payloads = []
+
+        def respond(request, *, timeout):
+            payloads.append(json.loads(request.data))
+            return BytesIO(b'{"message":{"content":"{}"}}')
+
+        with patch("repopilot.agentic_benchmark.urllib.request.build_opener") as opener:
+            opener.return_value.open.side_effect = respond
+            with patch.dict(os.environ, {"REPOPILOT_OLLAMA_DISABLE_THINKING": ""}):
+                _local_ollama_chat("http://localhost:11434/v1", "fixture", [], 256)
+            with patch.dict(os.environ, {"REPOPILOT_OLLAMA_DISABLE_THINKING": "1"}):
+                _local_ollama_chat("http://localhost:11434/v1", "fixture", [], 256)
+        self.assertNotIn("think", payloads[0])
+        self.assertIs(payloads[1]["think"], False)
