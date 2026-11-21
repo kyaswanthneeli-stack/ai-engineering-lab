@@ -76,12 +76,8 @@ def digest(patch):
     return hashlib.sha256(patch.encode()).hexdigest()
 
 
-def known_failed_hashes(path=KNOWN_FAILED):
-    """Load documented prior failures; never allow their exact patch in a rerun.
-
-    The operator-maintained ledger contains *measured* failed predictions,
-    not model-authored fixes or evaluator success claims.
-    """
+def known_failed_modes(path=KNOWN_FAILED):
+    """Validate the run-linked, operator-maintained failed-patch ledger."""
     data = json.loads(path.read_text(encoding="utf-8"))
     if (not isinstance(data, dict) or set(data) != {"instance_id", "base_commit", "failed"}
             or data["instance_id"] != INSTANCE
@@ -89,20 +85,31 @@ def known_failed_hashes(path=KNOWN_FAILED):
             or not isinstance(data["failed"], list)
             or not 2 <= len(data["failed"]) <= 64):
         raise ValueError("Invalid known-failed patch history")
-    hashes = set()
+    failures = {}
     for entry in data["failed"]:
-        if not isinstance(entry, dict) or set(entry) != {"sha256", "evidence_url"}:
+        if not isinstance(entry, dict) or set(entry) != {"sha256", "evidence_url", "failed_modes"}:
             raise ValueError("Invalid known-failed patch evidence")
-        sha, evidence = entry["sha256"], entry["evidence_url"]
+        sha, evidence, modes = entry["sha256"], entry["evidence_url"], entry["failed_modes"]
         if (not isinstance(sha, str) or re.fullmatch(r"[0-9a-f]{64}", sha) is None
                 or not isinstance(evidence, str)
                 or not evidence.startswith("https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/")
-                or sha in hashes):
+                or not isinstance(modes, list) or not 1 <= len(modes) <= len(MODES)
+                or any(not isinstance(m, str) or m not in MODES for m in modes)
+                or len(modes) != len(set(modes)) or sha in failures):
             raise ValueError("Invalid known-failed patch evidence")
-        hashes.add(sha)
-    if not {OLD_PATCH, ALIAS_PATCH} <= hashes:
+        failures[sha] = tuple(modes)
+    if not {OLD_PATCH, ALIAS_PATCH} <= failures.keys():
         raise ValueError("Required prior failed patches missing")
-    return hashes
+    return failures
+
+
+def known_failed_hashes(path=KNOWN_FAILED):
+    return set(known_failed_modes(path))
+
+
+def known_failed_feedback(path=KNOWN_FAILED):
+    return {sha: failure_clues({mode: 42 if mode in modes else 0 for mode in MODES})
+            for sha, modes in known_failed_modes(path).items()}
 
 
 def eligible_for_official_scoring(outcomes):
@@ -193,6 +200,7 @@ def run(manifest, previous, out):
         feedback = FEEDBACK
         report["human_supplied_feedback"] = feedback
         seen = known_failed_hashes()
+        failed_reasons = known_failed_feedback()
         report["known_failed_patch_count"] = len(seen)
         write(path, report)
         for attempt in (1, 2):
@@ -207,7 +215,8 @@ def run(manifest, previous, out):
                           "Write new yourself.\n" + json.dumps(anchors))
                 return propose_agentic_benchmark(checkout, prompt, model, url, token,
                     max_steps=6, native_exact_edits=True, required_targets={BACKEND},
-                    exact_edit_anchors=anchors, rejected_patch_sha256s=seen.copy())
+                    exact_edit_anchors=anchors, rejected_patch_sha256s=seen.copy(),
+                    rejected_patch_feedback=failed_reasons.copy())
 
             record = attempt_one(manifest, INSTANCE, directory, model_proposer=propose)
             row = {"attempt": attempt, "status": record["status"]}
@@ -233,6 +242,8 @@ def run(manifest, previous, out):
                 continue
             row["reproduction"] = check_patch(repo, patch, work)
             seen.add(sha)
+            if not eligible_for_official_scoring(row["reproduction"]):
+                failed_reasons[sha] = failure_clues(row["reproduction"])
             row["local_regression_passed"] = eligible_for_official_scoring(row["reproduction"])
             row["official_submission_eligible"] = row["local_regression_passed"]
             if row["local_regression_passed"]:

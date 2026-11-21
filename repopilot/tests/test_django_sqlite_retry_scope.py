@@ -5,7 +5,7 @@ from pathlib import Path
 
 from ci.django_sqlite.retry import (
     ALIAS_PATCH, MODES, OLD_PATCH, eligible_for_official_scoring,
-    failure_clues, known_failed_hashes, method_anchors,
+    failure_clues, known_failed_hashes, known_failed_feedback, method_anchors,
 )
 
 
@@ -83,7 +83,7 @@ class DjangoSQLiteRetryScopeTests(unittest.TestCase):
         hashes = known_failed_hashes()
         self.assertIn(OLD_PATCH, hashes)
         self.assertIn(ALIAS_PATCH, hashes)
-        self.assertEqual(len(hashes), 5)
+        self.assertEqual(len(hashes), 6)
         self.assertIn("71abf48b6514d36af5ca9d4ab665bdc978549b1647a119c736f7488a42ee02fa", hashes)
 
     def test_history_fails_closed_when_a_confirmed_failure_is_missing(self):
@@ -117,4 +117,12 @@ class DjangoSQLiteRetryScopeTests(unittest.TestCase):
         self.assertIn("unconditional filename", FEEDBACK)
         self.assertIn("two aliases sharing one persistent file", FEEDBACK)
         self.assertIn("different persistent files", FEEDBACK)
+
+    def test_historical_feedback_contains_measured_reasons(self):
+        feedback = known_failed_feedback()
+        self.assertEqual(set(feedback), known_failed_hashes())
+        self.assertIn("In-memory aliases", feedback[
+            "71abf48b6514d36af5ca9d4ab665bdc978549b1647a119c736f7488a42ee02fa"])
+        self.assertIn("initialized twice", feedback[ALIAS_PATCH])
+        self.assertIn("Different persistent", feedback[OLD_PATCH])
 

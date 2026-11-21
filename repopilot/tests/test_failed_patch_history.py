@@ -32,7 +32,7 @@ class FailedPatchHistoryTests(unittest.TestCase):
         }], allowed_files={"pricing.py"})
         return hashlib.sha256(generated.encode("utf-8")).hexdigest()
 
-    def agent(self, choices, hashes, *, max_steps=3):
+    def agent(self, choices, hashes, *, max_steps=3, feedback=None):
         call_history = []
         actions = iter(choices)
 
@@ -48,6 +48,7 @@ class FailedPatchHistoryTests(unittest.TestCase):
                 "http://127.0.0.1:11434/v1", client=model,
                 max_steps=max_steps, required_targets={"pricing.py"},
                 rejected_patch_sha256s=hashes,
+                rejected_patch_feedback=feedback,
             )
         return result, call_history
 
@@ -82,3 +83,25 @@ class FailedPatchHistoryTests(unittest.TestCase):
     def test_invalid_prior_hash_fails_before_model_request(self):
         with self.assertRaisesRegex(AgentToolError, "Invalid previously failed patch SHA-256"):
             self.agent([], {"not-a-sha256"})
+
+    def test_repeated_patch_gets_specific_measured_failure_reason(self):
+        failed = self.fingerprint("return sum(values) + 1")
+        (candidate, metadata), messages = self.agent(
+            [self.candidate("return sum(values) + 1"),
+             self.candidate("return sum(values) + 2")],
+            {failed}, feedback={failed: "Distinct file signatures collapsed."}
+        )
+        self.assertIn("+ 2", candidate.patch)
+        self.assertTrue(any(
+            "Observed regression failures: Distinct file signatures collapsed." in m["content"]
+            for m in messages[1]))
+
+    def test_unknown_or_invalid_failure_reason_is_rejected(self):
+        failed = self.fingerprint("return sum(values) + 1")
+        for feedback in ({failed: ""}, {failed: "bad\nnewline"},
+                         {"0" * 64: "unverified patch"},
+                         {failed: "X" * 851}):
+            with self.subTest(feedback=feedback):
+                with self.assertRaisesRegex(AgentToolError, "Invalid previously failed patch feedback"):
+                    self.agent([], {failed}, feedback=feedback)
+

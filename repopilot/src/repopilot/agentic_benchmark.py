@@ -375,7 +375,8 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                               client=None,max_steps:int=8,required_targets:set[str]|None=None,
                               auto_issue_paths:bool=False, native_exact_edits:bool=False,
                               exact_edit_anchors:tuple[str,...]=(),
-                              rejected_patch_sha256s:tuple[str,...]|set[str]|frozenset[str]=())->tuple[BenchmarkPatch,dict]:
+                              rejected_patch_sha256s:tuple[str,...]|set[str]|frozenset[str]=(),
+                              rejected_patch_feedback:dict[str,str]|None=None)->tuple[BenchmarkPatch,dict]:
     if not model or not url or not issue_text.strip() or not 2<=max_steps<=24:
         raise AgentToolError("Model, issue and bounded step count required")
     # An optional whole-agent wall-clock budget prevents another model request
@@ -396,6 +397,20 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             not isinstance(sha,str) or re.fullmatch(r"[0-9a-f]{64}",sha) is None
             for sha in rejected_hashes):
         raise AgentToolError("Invalid previously failed patch SHA-256")
+    # Optional trusted, measured feedback belongs only to already blocked
+    # fingerprints. No free-form external prompt text is permitted here.
+    if rejected_patch_feedback is None:
+        failed_reasons={}
+    elif not isinstance(rejected_patch_feedback,dict):
+        raise AgentToolError("Invalid previously failed patch feedback")
+    else:
+        failed_reasons=dict(rejected_patch_feedback)
+    if len(failed_reasons)>128 or any(
+            sha not in rejected_hashes or not isinstance(reason,str)
+            or not 1<=len(reason)<=850 or not reason.strip()
+            or "\x00" in reason or "\r" in reason or "\n" in reason
+            for sha,reason in failed_reasons.items()):
+        raise AgentToolError("Invalid previously failed patch feedback")
     started_at=time.monotonic()
     root=repo.resolve(strict=True)
     messages=[{"role":"system","content":SYSTEM},
@@ -944,9 +959,12 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 trace.append({"step":index+1,
                               "action":"duplicate_failed_patch_rejected",
                               "patch_sha256":candidate_sha})
+                measured_reason=failed_reasons.get(candidate_sha,"")
                 last_candidate_reason=(
                     "This exact source patch was already tried and failed "
                     "independent verification. It was NOT submitted again. "
+                    + ("Observed regression failures: "+measured_reason+" " if
+                       measured_reason else "") +
                     "Keep the inspected files, but propose a materially "
                     "different source fix that preserves existing behavior.")
                 if index==max_steps-1:
