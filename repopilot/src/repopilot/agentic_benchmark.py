@@ -589,6 +589,15 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
     # full patch. Preserve the normal final-stage token budget.
     compact_discovery = (os.getenv("REPOPILOT_COMPACT_DISCOVERY", "").strip()=="1"
                          and confirm_ranked_source)
+    # The CPU experiment may use the existing exact-edit JSON grammar for
+    # its ordinary unassisted final phase. Only model-inspected paths are
+    # allowed; no preselected old-text anchors or task-specific hints.
+    compact_final = (
+        os.getenv("REPOPILOT_COMPACT_FINAL", "").strip()=="1"
+        and auto_issue_paths and not required and not exact_edit_anchors
+        and client is None
+        and os.getenv("REPOPILOT_OLLAMA_NATIVE", "").strip()=="1"
+    )
     provider_metrics=[]
     provider_options = {}
     for index in range(max_steps):
@@ -678,8 +687,10 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 " Output action=finish with complete corrected source for small files or exact edits for long files."+
 
                 (" Previous candidate error: "+last_candidate_reason if last_candidate_reason else "")}]
-            if native_exact_edits and client is None and os.getenv("REPOPILOT_OLLAMA_NATIVE", "").strip() == "1":
+            if (native_exact_edits or compact_final) and client is None and os.getenv("REPOPILOT_OLLAMA_NATIVE", "").strip() == "1":
                 provider_options = {"finish_paths": tuple(phase_files)}
+                if compact_final:
+                    provider_options["token_cap"] = 512
                 if exact_edit_anchors:
                     if len(required) != 1 or not 1 <= len(exact_edit_anchors) <= 20:
                         raise AgentToolError("Exact anchors require one completely inspected source file")

@@ -76,3 +76,29 @@ class NativeFinishTests(unittest.TestCase):
                 _local_ollama_chat("http://localhost:11434/v1", "fixture", [], 256)
         self.assertNotIn("think", payloads[0])
         self.assertIs(payloads[1]["think"], False)
+
+
+    def test_unassisted_compact_final_constrains_inspected_paths_and_budget(self):
+        calls = []
+        action = {"action": "finish", "edits": [
+            {"path": "pricing.py", "old": "return cents",
+             "new": "return cents / 100"}]}
+        def provider(url, model, token, messages, **kwargs):
+            calls.append(kwargs)
+            return {"choices": [{"message": {"content": json.dumps(action)}}]}
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {
+            "REPOPILOT_OLLAMA_NATIVE": "1", "REPOPILOT_CANDIDATE_SMOKE": "0",
+            "REPOPILOT_CONFIRM_RANKED_SOURCE": "1", "REPOPILOT_COMPACT_DISCOVERY": "1",
+            "REPOPILOT_COMPACT_FINAL": "1",
+        }), patch("repopilot.agentic_benchmark._provider", side_effect=provider):
+            root = Path(temp)
+            (root / "pricing.py").write_text("def dollars(cents):\n    return cents\n")
+            proposal, meta = propose_agentic_benchmark(
+                root, "Pricing dollars conversion returns cents",
+                "fixture", "http://localhost:11434/v1",
+                max_steps=4, auto_issue_paths=True)
+        self.assertEqual([call.get("token_cap") for call in calls], [256, 256, 512])
+        self.assertEqual(calls[-1]["finish_paths"], ("pricing.py",))
+        self.assertNotIn("old_choices", calls[-1])
+        self.assertIn("return cents / 100", proposal.patch)
+        self.assertIn("final_phase_started", [event["action"] for event in meta["tool_trace"]])
