@@ -1,0 +1,190 @@
+name: RepoPilot v2.2.0 stable CLI distribution
+
+on:
+  # Manual, one-time release from main only. PRs cannot publish artifacts.
+  # This workflow may be dispatched only AFTER the version bump and
+  # independently verified release gates are merged into main.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repopilot-cli-stable-2-2-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-test-and-publish:
+    if: github.repository == 'kyaswanthneeli-stack/ai-engineering-lab' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    permissions:
+      contents: write
+      packages: write
+    defaults:
+      run:
+        shell: bash
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install package and release test tools
+        run: |
+          python -m pip install -e .
+          python -m pip install 'coverage>=7,<9' 'build>=1,<3'
+      - name: Check stable release identity and security manifests
+        run: |
+          python - <<'PY'
+          import tomllib
+          import repopilot
+          from importlib.metadata import version
+          from pathlib import Path
+          p=tomllib.loads(Path('pyproject.toml').read_text())
+          assert p['project']['version']=='2.2.0'
+          assert repopilot.__version__=='2.2.0'
+          assert version('repopilot')=='2.2.0'
+          for doc in ['SECURITY.md','docs/DEPLOYMENT.md','docs/OPERATIONS.md',
+                      'RELEASE_NOTES_v2.2.0.md','.env.example']:
+              assert Path(doc).is_file(),doc
+          print('VERSION AND DOCUMENT CONTRACT: PASS')
+          PY
+      - name: Compile and run full Python suite with coverage
+        run: |
+          python -m compileall -q src/repopilot tests
+          python -m coverage run --source=repopilot -m unittest discover -s tests -v
+          python -m coverage report --show-missing
+          mkdir -p .runs
+          python -m coverage xml -o .runs/coverage-release.xml
+      - name: Pull fixed sandbox test image
+        run: docker pull python:3.12-alpine
+      - name: Verify original failing and patched passing tests in restricted Docker
+        run: |
+          python -m repopilot.cli verify \
+            fixtures/calculator-buggy examples/issue.json \
+            --output .runs/rc-reference-verification.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path('.runs/rc-reference-verification.json').read_text())
+          assert report['outcome']=='verified_in_sandbox'
+          assert report['baseline']['exit_code']==0
+          assert report['before']['exit_code']!=0
+          assert report['after']['exit_code']==0
+          assert report['draft_pr_created'] is False
+          print('SANDBOX FAIL-BEFORE/PASS-AFTER: VERIFIED')
+          PY
+      - name: Build offline dependency image and test candidate regression
+        run: |
+          docker build --pull -t repopilot-candidate-deps:py310 \
+            -f ci/Dockerfile.candidate-smoke ci
+          REPOPILOT_CANDIDATE_SMOKE_IMAGE=repopilot-candidate-deps:py310 python - <<'PY'
+          import tempfile
+          from pathlib import Path
+          from repopilot.candidate_smoke import smoke_candidate
+          with tempfile.TemporaryDirectory(prefix='repopilot-rc-deps-') as temp:
+              repo=Path(temp)/'repo'
+              repo.mkdir(mode=0o755)
+              source=repo/'math_fixture.py'
+              original='from mpmath import mp\ndef value(): return mp.sqrt(9)\n'
+              source.write_text(original)
+              diff=('diff --git a/math_fixture.py b/math_fixture.py\n'
+                    '--- a/math_fixture.py\n+++ b/math_fixture.py\n'
+                    '@@ -1,2 +1,2 @@\n'
+                    ' from mpmath import mp\n'
+                    '-def value(): return mp.sqrt(9)\n'
+                    '+def value(): raise RuntimeError("regression")\n')
+              issue='Expected:\n```python\nfrom math_fixture import value\nassert int(value())==3\n```'
+              report=smoke_candidate(repo,diff,issue,timeout=22)
+              assert report['status']=='regression',report
+              assert source.read_text()==original
+              print('OFFLINE CANDIDATE REGRESSION CHECK: VERIFIED')
+          PY
+      - name: Build versioned wheel and source archive
+        run: |
+          python -m build --sdist --wheel --outdir dist .
+          python - <<'PY'
+          from pathlib import Path
+          wheels=list(Path('dist').glob('repopilot-2.2.0-*.whl'))
+          source=list(Path('dist').glob('repopilot-2.2.0.tar.gz'))
+          assert len(wheels)==1 and len(source)==1, (wheels,source)
+          print('DISTRIBUTIONS:',wheels[0],source[0])
+          PY
+          sha256sum dist/* | tee .runs/dist-sha256.txt
+      - name: Verify clean offline wheel installation
+        run: |
+          python -m venv .runs/clean-install
+          .runs/clean-install/bin/python -m pip install --no-index --no-deps dist/repopilot-2.2.0-*.whl
+          .runs/clean-install/bin/python -m repopilot.cli --help
+          .runs/clean-install/bin/python -m repopilot.cli doctor
+      - name: Build and smoke-test nonroot networkless OCI CLI image
+        run: |
+          docker build --pull -f container/Dockerfile.cli -t repopilot-cli:stable .
+          docker image inspect repopilot-cli:stable --format '{{json .Config.User}}' | grep -F '"65532:65532"'
+          docker run --rm --read-only --network none --cap-drop ALL \
+            --security-opt no-new-privileges --pids-limit 64 \
+            --memory 512m --cpus 1 --user 65532:65532 \
+            -v "$PWD/examples/calculator:/workspace/example:ro" \
+            repopilot-cli:stable index /workspace/example \
+            > .runs/oci-index-evidence.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path('.runs/oci-index-evidence.json').read_text())
+          assert isinstance(data,list) and data, 'Expected actual source index'
+          print('NONROOT OFFLINE OCI CLI INDEX: VERIFIED')
+          PY
+      - name: Save stable release distribution and test evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-v2.2.0-stable-release
+          path: |
+            repopilot/dist/
+            repopilot/.runs/dist-sha256.txt
+            repopilot/.runs/coverage-release.xml
+            repopilot/.runs/rc-reference-verification.json
+            repopilot/.runs/oci-index-evidence.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Authenticate to GitHub Container Registry (main only)
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish commit-scoped GHCR CLI image only after all gates pass
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          ref="ghcr.io/kyaswanthneeli-stack/repopilot:sha-${GITHUB_SHA:0:12}"
+          if docker manifest inspect "$ref" >/dev/null 2>&1; then
+            echo "::error::Commit image tag already exists. Refusing overwrite."
+            exit 1
+          fi
+          docker tag repopilot-cli:stable "$ref"
+          docker push "$ref"
+          docker buildx imagetools inspect "$ref" | tee .runs/published-image-evidence.txt
+          echo "PUBLISHED CLI IMAGE: $ref"
+          echo "COMMIT: $GITHUB_SHA"
+      - name: Publish immutable stable GitHub Release after registry push
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view v2.2.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release v2.2.0 exists. Refusing overwrite."
+            exit 1
+          fi
+          gh release create v2.2.0 \
+            dist/repopilot-2.2.0-*.whl \
+            dist/repopilot-2.2.0.tar.gz \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+                        --title "RepoPilot 2.2.0 — Supervised repair CLI stable release" \
+            --notes-file RELEASE_NOTES_v2.2.0.md
+          gh release view v2.2.0 --repo "$GITHUB_REPOSITORY" --json url,tagName,isPrerelease
