@@ -144,6 +144,26 @@ class ImplementationLocalizationTests(unittest.TestCase):
         self.assertEqual(meta["agent_steps"], 3)
         self.assertIn("final_phase_started", [e["action"] for e in meta["tool_trace"]])
 
+    def test_rare_term_ranking_discounts_broad_common_symbol_overlap(self):
+        # A synthetic repository: common application words saturate the
+        # broad module, but a rare identifier is repeated in the issue.
+        root = self.root / "rank_fixture"
+        root.mkdir()
+        (root / "a_general.py").write_text(
+            "def application(): pass\ndef request(): pass\ndef response(): pass\n"
+            "def result(): pass\ndef model(): pass\ndef value(): pass\n")
+        for i in range(12):
+            (root / f"general_{i}.py").write_text(
+                "# application request response result model value\n")
+        (root / "quorumsync.py").write_text("def quorumsync(): pass\n")
+        issue = "application request response result model value quorumsync"
+        with patch.dict("os.environ", {"REPOPILOT_WEIGHT_RARE_TERMS": "0"}):
+            ordinary = ranked_source_context(root, issue, max_files=2)
+        with patch.dict("os.environ", {"REPOPILOT_WEIGHT_RARE_TERMS": "1"}):
+            weighted = ranked_source_context(root, issue, max_files=2)
+        self.assertEqual(ordinary[0].path, "a_general.py")
+        self.assertEqual(weighted[0].path, "quorumsync.py")
+
     def test_explicit_test_runner_change_remains_legal(self):
         runner = self.root / "tests" / "runtests.py"
         runner.parent.mkdir()

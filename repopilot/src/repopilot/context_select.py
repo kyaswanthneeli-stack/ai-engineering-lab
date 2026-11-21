@@ -7,7 +7,8 @@ before limiting the index. All discovery is partial and read-only.
 from __future__ import annotations
 
 import ast
-from collections import deque
+from collections import Counter, deque
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -176,6 +177,8 @@ def ranked_source_context(repo: Path, issue: str, *, max_files: int = 8,
     terms = _tokens(issue[:12000])
     test_infrastructure = is_test_infrastructure_issue(issue)
     candidates = []
+    weighted = os.getenv("REPOPILOT_WEIGHT_RARE_TERMS", "").strip() == "1"
+    frequencies = Counter()
     for path, rel in _candidate_paths(root, issue, scan_limit):
         try:
             source = path.read_text(encoding="utf-8")
@@ -201,11 +204,34 @@ def ranked_source_context(repo: Path, issue: str, *, max_files: int = 8,
             not test_infrastructure and not is_test_path(rel) and
             path_score + symbol_score > 0)
         priority = 0 if implementation_match else 1
-        candidates.append((priority, score, rel, source, symbols))
+        # Document frequencies are computed only over the bounded, safely
+        # parsed source index. Generic words that occur throughout a project
+        # should contribute less than distinctive issue/path/symbol terms.
+        path_hits = terms & path_terms
+        symbol_hits = terms & symbol_terms
+        body_hits = terms & _tokens(source[:15000])
+        if weighted:
+            frequencies.update(path_hits | symbol_hits | body_hits)
+        candidates.append((priority, score, rel, source, symbols,
+                           path_hits, symbol_hits, body_hits))
+    if weighted:
+        count = len(candidates)
+        def rarity(hit):
+            return math.log1p(count / max(1, frequencies[hit]))
+        def rerank(item):
+            priority, _, rel, source, symbols, paths, names, body = item
+            # Normalize the symbol contribution so very broad modules do not
+            # win solely by exposing hundreds of unrelated declarations.
+            name_score = sum(sorted((rarity(h) for h in names), reverse=True)[:8])
+            path_score = sum(rarity(h) for h in paths)
+            body_score = sum(sorted((rarity(h) for h in body), reverse=True)[:8])
+            score = round(12 * path_score + 8 * name_score + 2 * body_score)
+            return priority, score, rel, source, symbols, paths, names, body
+        candidates = [rerank(item) for item in candidates]
     candidates.sort(key=lambda x: (x[0], -x[1], x[2]))
     selected = []
     remaining = max_chars
-    for _, score, rel, source, symbols in candidates:
+    for _, score, rel, source, symbols, _, _, _ in candidates:
         if len(selected) >= max_files or remaining < 300:
             break
         max_per_file = min(9000, remaining)
