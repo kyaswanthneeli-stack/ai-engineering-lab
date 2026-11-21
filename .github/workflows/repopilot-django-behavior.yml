@@ -13,7 +13,7 @@ jobs:
   reproduce-and-retry:
     if: github.event_name == 'workflow_dispatch' || (github.head_ref == 'bench/repopilot-django-behavior' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: repopilot
@@ -28,7 +28,7 @@ jobs:
           python -m pip install 'datasets>=3.0,<5.0'
       - name: Build trusted offline candidate smoke runtime before inference
         run: docker build --pull -t repopilot-candidate-deps:py310 -f ci/Dockerfile.candidate-smoke ci
-      - name: Start local Ollama with alternate 4B model
+      - name: Start local Ollama with dedicated 7B coding model
         run: |
           docker run -d --name repopilot-batch-ollama -p 127.0.0.1:11434:11434 ollama/ollama:latest
           for i in $(seq 1 60); do
@@ -37,19 +37,19 @@ jobs:
           done
           curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
           for attempt in 1 2 3; do
-            if docker exec repopilot-batch-ollama ollama pull qwen3.5:4b; then break; fi
+            if docker exec repopilot-batch-ollama ollama pull qwen2.5-coder:7b; then break; fi
             if [ "$attempt" -eq 3 ]; then exit 1; fi
             sleep $((attempt*10))
           done
       - name: Reproduce SQLite cross-database visibility and retry with observed behavior
         env:
-          REPOPILOT_MODEL: qwen3.5:4b
+          REPOPILOT_MODEL: qwen2.5-coder:7b
           REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
-          REPOPILOT_MAX_TOKENS: '512'
+          REPOPILOT_MAX_TOKENS: '768'
           REPOPILOT_OLLAMA_NATIVE: '1'
           REPOPILOT_OLLAMA_DISABLE_THINKING: '1'
-          REPOPILOT_PROVIDER_TIMEOUT_SECONDS: '110'
-          REPOPILOT_AGENT_BUDGET_SECONDS: '360'
+          REPOPILOT_PROVIDER_TIMEOUT_SECONDS: '180'
+          REPOPILOT_AGENT_BUDGET_SECONDS: '600'
           REPOPILOT_FINAL_CONTEXT_CHARS: '9000'
           REPOPILOT_CANDIDATE_SMOKE: '1'
           REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP: '1'
@@ -60,9 +60,9 @@ jobs:
           # Warm the local model with a tiny request before the large issue prompts.
           curl -fsS --retry 2 --max-time 120 \
             -H 'Content-Type: application/json' \
-            -d '{"model":"qwen3.5:4b","prompt":"hello","stream":false,"think":false,"options":{"num_predict":8}}' \
+            -d '{"model":"qwen2.5-coder:7b","prompt":"hello","stream":false,"think":false,"options":{"num_predict":8}}' \
             http://127.0.0.1:11434/api/generate >/dev/null
-          timeout 1050s python ci/django_sqlite/retry.py \
+          timeout 1650s python ci/django_sqlite/retry.py \
             --previous benchmarks/evidence/cpu-prompt-ab-2026-11-20/01-django__django-12113-default/unreviewed-prediction.json \
             --output .runs/retry
       - uses: actions/upload-artifact@v4
