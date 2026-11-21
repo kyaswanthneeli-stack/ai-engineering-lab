@@ -562,6 +562,25 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             # Shift earlier to patch mode before tiny CPU models exhaust their
             # bounded model calls on repeated source discovery.
             inspection_budget=min(3,max_steps-2)
+    # Lexical ranking identifies candidates, not causal proof. Experimentally
+    # reserve one bounded model-directed discovery turn when all initial reads
+    # came from heuristic ranking, rather than directly named issue paths.
+    # Explicit operator-scoped experiments and existing default behavior
+    # are unchanged. No task-specific paths or reference solutions are used.
+    confirm_ranked_source = (
+        os.getenv("REPOPILOT_CONFIRM_RANKED_SOURCE", "").strip() == "1"
+        and auto_issue_paths and not required and not test_focus
+        and max_steps >= 4 and bool(read_files)
+        and any(e["action"] == "ranked_initial_preinspect" for e in trace)
+        and not any(e["action"] == "issue_path_preinspect" for e in trace)
+    )
+    if confirm_ranked_source:
+        messages.append({"role":"user","content":
+            "The ranked source candidates are only starting points. Before "
+            "finishing, use a literal search or read to inspect the execution "
+            "path that could produce the reported behavior. Consider setup, "
+            "configuration, callers or shared state when relevant; do not "
+            "assume the first symptom-related source is the root cause."})
     provider_options = {}
     for index in range(max_steps):
         if budget_seconds and time.monotonic()-started_at>=budget_seconds:
@@ -715,6 +734,19 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 "for small source or exact edits for long source. No tool actions."})
             continue
         if name=="finish":
+            if (confirm_ranked_source and index < inspection_budget and
+                    not any(e["action"] in {"search", "read"} and
+                            e.get("result_items", 0) > 0 for e in trace)):
+                # Reject premature finish without inspecting or applying its
+                # edit. Keep final-phase fallback and existing deadlines intact.
+                trace.append({"step":index+1,
+                              "action":"ranked_finish_deferred_for_discovery"})
+                messages.append({"role":"user","content":
+                    "Do not edit yet. The initial ranked snippets alone "
+                    "do not identify the cause. Use action=search with a "
+                    "literal identifier or action=read on an existing file "
+                    "to investigate the execution path, then propose a new fix."})
+                continue
             missing=sorted(required-read_files)
             if missing:
                 trace.append({"step":index+1,"action":"finish_deferred","missing_read_files":missing})

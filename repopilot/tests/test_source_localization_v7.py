@@ -7,6 +7,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from repopilot.agentic_benchmark import propose_agentic_benchmark
 from repopilot.context_select import (
@@ -103,6 +104,45 @@ class ImplementationLocalizationTests(unittest.TestCase):
         self.assertNotIn("diff --git a/xarray/tests", patch_spec.patch)
         self.assertIn("test_only_patch_rejected",
                       [event["action"] for event in meta["tool_trace"]])
+
+    def test_opt_in_defers_ranked_finish_until_model_directed_read(self):
+        path = "xarray/core/variable.py"
+        proposal = {"action": "finish", "edits": [{
+            "path": path, "old": "return indexes[:1]", "new": "return indexes[:2]",
+        }]}
+        scripted = iter((proposal, {"action": "read", "path": path,
+                                    "start": 1, "count": 20}, proposal))
+        with patch.dict("os.environ", {"REPOPILOT_CONFIRM_RANKED_SOURCE": "1",
+                                        "REPOPILOT_CANDIDATE_SMOKE": "0"}):
+            spec, meta = propose_agentic_benchmark(
+                self.root, "Variable.indexing drops a selected value, wrong length",
+                "mock", "http://127.0.0.1:11434/v1",
+                client=lambda *args: self.response(next(scripted)),
+                max_steps=6, auto_issue_paths=True)
+        self.assertIn("indexes[:2]", spec.patch)
+        actions = [e["action"] for e in meta["tool_trace"]]
+        self.assertIn("ranked_finish_deferred_for_discovery", actions)
+        self.assertIn("read", actions)
+        self.assertLess(actions.index("ranked_finish_deferred_for_discovery"),
+                        actions.index("read"))
+        self.assertEqual(meta["agent_steps"], 3)
+        self.assertIn("return indexes[:1]", (self.root / path).read_text())
+
+    def test_opt_in_preserves_final_phase_when_model_refuses_discovery(self):
+        proposal = {"action": "finish", "edits": [{
+            "path": "xarray/core/variable.py", "old": "return indexes[:1]",
+            "new": "return indexes[:2]",
+        }]}
+        with patch.dict("os.environ", {"REPOPILOT_CONFIRM_RANKED_SOURCE": "1",
+                                        "REPOPILOT_CANDIDATE_SMOKE": "0"}):
+            spec, meta = propose_agentic_benchmark(
+                self.root, "Variable.indexing incorrect selected values",
+                "mock", "http://127.0.0.1:11434/v1",
+                client=lambda *args: self.response(proposal),
+                max_steps=4, auto_issue_paths=True)
+        self.assertIn("indexes[:2]", spec.patch)
+        self.assertEqual(meta["agent_steps"], 3)
+        self.assertIn("final_phase_started", [e["action"] for e in meta["tool_trace"]])
 
     def test_explicit_test_runner_change_remains_legal(self):
         runner = self.root / "tests" / "runtests.py"
