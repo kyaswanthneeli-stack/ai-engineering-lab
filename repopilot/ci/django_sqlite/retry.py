@@ -43,6 +43,13 @@ FEEDBACK = (
     "The replacement must handle BOTH branches: alias identity is for in-memory tests, "
     "and the configured persistent test filename identifies file-backed tests. "
     "Retain distinct in-memory aliases even when their memory URI matches. "
+    "A measured recent attempt used the test database filename for EVERY case, "
+    "which passed the persistent-file checks but collapsed aliases using the SAME "
+    "in-memory URI. Reject unconditional filename or unconditional alias identity: "
+    "the correct discriminator DEPENDS ON memory versus persistent storage. "
+    "Before finishing, mentally check three pairs: different persistent files, "
+    "two aliases sharing one persistent file, and two aliases using the same "
+    "in-memory URI. Preserve the original working in-memory behavior. "
     "Return a minimal exact edit."
 )
 
@@ -199,7 +206,7 @@ def run(manifest, previous, out):
                           "\nChoose old verbatim from this list of unique original statements. "
                           "Write new yourself.\n" + json.dumps(anchors))
                 return propose_agentic_benchmark(checkout, prompt, model, url, token,
-                    max_steps=4, native_exact_edits=True, required_targets={BACKEND},
+                    max_steps=6, native_exact_edits=True, required_targets={BACKEND},
                     exact_edit_anchors=anchors, rejected_patch_sha256s=seen.copy())
 
             record = attempt_one(manifest, INSTANCE, directory, model_proposer=propose)

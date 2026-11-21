@@ -17,6 +17,10 @@
     {
       "sha256": "884b0715d12d694ad65682b9971fdeba5a6781b36881422c6bbc088a8db2bcbe",
       "evidence_url": "https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44906220917"
+    },
+    {
+      "sha256": "71abf48b6514d36af5ca9d4ab665bdc978549b1647a119c736f7488a42ee02fa",
+      "evidence_url": "https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44907287707"
     }
   ]
 }
