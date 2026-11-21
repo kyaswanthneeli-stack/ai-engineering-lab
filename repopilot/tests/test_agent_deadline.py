@@ -86,6 +86,47 @@ class DeadlineAwareCallsTests(unittest.TestCase):
                     _provider("https://example.org/v1", "coder", None, [],
                               request_timeout_seconds=value)
 
+    def test_slow_discovery_leaves_a_full_native_call_to_write_patch(self):
+        from repopilot.agentic_benchmark import TransientOllamaError
+        clock = [0.0]
+        budgets = []
+        def provider(url, model, token, messages, *, request_timeout_seconds):
+            budgets.append(request_timeout_seconds)
+            if len(budgets) == 1:
+                clock[0] += request_timeout_seconds
+                raise TransientOllamaError("Local Ollama native chat failed or timed out")
+            self.assertIn("Allowed inspected files:", messages[-1]["content"])
+            action = {"action": "finish", "edits": [{"path": "pricing.py",
+                      "old": "return sum(values)", "new": "return round(sum(values), 2)"}]}
+            return {"choices": [{"message": {"content": json.dumps(action)}}]}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pricing.py").write_text("def subtotal(values):\n    return sum(values)\n")
+            with patch.dict("os.environ", {"REPOPILOT_OLLAMA_NATIVE": "1",
+                            "REPOPILOT_RESERVE_PATCH_TIME": "1", "REPOPILOT_AGENT_BUDGET_SECONDS": "90",
+                            "REPOPILOT_PROVIDER_TIMEOUT_SECONDS": "40"}), \
+                 patch("repopilot.agentic_benchmark.time.monotonic", side_effect=lambda: clock[0]), \
+                 patch("repopilot.agentic_benchmark._provider", side_effect=provider):
+                spec, meta = propose_agentic_benchmark(root, "Round the subtotal in pricing.py",
+                    "coder", "http://localhost:11434/v1", max_steps=8, auto_issue_paths=True)
+        self.assertEqual(budgets, [48, 40])
+        self.assertIn("round(sum(values), 2)", spec.patch)
+        self.assertIn("discovery_deadline_reached", [row["action"] for row in meta["tool_trace"]])
+
+    def test_retry_timings_survive_failure_without_recording_messages(self):
+        from repopilot.agentic_benchmark import collect_native_call_timings, TransientOllamaError
+        with collect_native_call_timings() as calls, \
+             patch.dict("os.environ", {"REPOPILOT_OLLAMA_NATIVE": "1"}), \
+             patch("repopilot.agentic_benchmark._local_ollama_chat",
+                   side_effect=TransientOllamaError("private diagnostic")), \
+             patch("repopilot.agentic_benchmark.time.sleep"):
+            with self.assertRaises(TransientOllamaError):
+                _provider("http://localhost:11434/v1", "coder", None, [])
+        self.assertEqual([row["attempt"] for row in calls], [1, 2])
+        for row in calls:
+            self.assertEqual(set(row), {"attempt", "elapsed_ms", "timeout_ms", "error_type"})
+            self.assertEqual(row["error_type"], "TransientOllamaError")
+
     def test_agent_passes_remaining_time_to_provider(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)

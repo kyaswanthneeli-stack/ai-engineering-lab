@@ -17,6 +17,7 @@ from pathlib import Path
 import re
 import tempfile
 import time
+from .agentic_benchmark import collect_native_call_timings
 from .checkout import pinned_checkout
 from .benchmark_planner import propose_benchmark
 from .swebench_export import load_manifest
@@ -101,10 +102,12 @@ def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
             # the issue statement is read from the official pinned dataset.
             work=checkout(f"https://github.com/{owner}/{repo}/issues/1",
                           task["base_commit"],Path(tmp)/"repo")
-            spec,meta=model_proposer(work,issue_context,
-                                     model or os.getenv("REPOPILOT_MODEL",""),
-                                     url or os.getenv("REPOPILOT_BASE_URL",""),
-                                     token if token is not None else os.getenv("REPOPILOT_API_KEY"))
+            with collect_native_call_timings() as timings:
+                report["native_model_calls"] = timings
+                spec,meta=model_proposer(work,issue_context,
+                                         model or os.getenv("REPOPILOT_MODEL",""),
+                                         url or os.getenv("REPOPILOT_BASE_URL",""),
+                                         token if token is not None else os.getenv("REPOPILOT_API_KEY"))
         report["model"]=meta.get("model","")
         report["agent_steps"]=meta.get("agent_steps")
         report["inspected_files"]=meta.get("inspected_files",[])
