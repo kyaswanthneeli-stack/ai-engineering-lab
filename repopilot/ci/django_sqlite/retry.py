@@ -33,7 +33,10 @@ FEEDBACK = (
     "Another candidate used the connection alias for all databases. Distinct files were then isolated, "
     "but setup_databases() initialized the SAME configured test file twice for two aliases. "
     "A persistent test file determines sharing even when the aliases differ. In-memory databases "
-    "retain their current behavior. Return a minimal exact edit."
+    "retain their current behavior. Two aliases with the SAME on-disk test filename must have "
+    "the SAME signature, whereas DIFFERENT disk filenames must have different signatures even "
+    "with blank normal NAME. In-memory aliases must stay distinct. Preserve the signature prefix "
+    "and edit only the memory-versus-file branch. Return a minimal exact edit."
 )
 
 
@@ -43,11 +46,15 @@ def method_anchors(repo):
     cls = next(n for n in ast.parse(source).body if isinstance(n, ast.ClassDef)
                and n.name == "DatabaseCreation")
     method = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "test_db_signature")
-    stmts = [node for node in method.body if not isinstance(node, ast.Expr)]
-    anchors = [ast.get_source_segment(source, node) for node in stmts]
-    eligible = [value for value in anchors if value and source.count(value) == 1]
-    if not eligible:
-        raise ValueError("No unique source anchor in the diagnosed method")
+    # Constrain this assisted retry to the source branch that makes the
+    # memory-vs-file decision. Previously proposed unconditional alias changes
+    # broke shared file initialization. The model must write the replacement.
+    branches = [node for node in method.body if isinstance(node, ast.If)]
+    anchors = [ast.get_source_segment(source, node) for node in branches]
+    eligible = [value for value in anchors if value and source.count(value) == 1
+                and "is_in_memory_db" in value]
+    if len(eligible) != 1:
+        raise ValueError("Expected one unique in-memory branch in the diagnosed method")
     return tuple(eligible)
 
 
@@ -126,7 +133,7 @@ def run(manifest, previous, out):
                           "\nChoose old verbatim from this list of unique original statements. "
                           "Write new yourself.\n" + json.dumps(anchors))
                 return propose_agentic_benchmark(checkout, prompt, model, url, token,
-                    max_steps=2, native_exact_edits=True, required_targets={BACKEND},
+                    max_steps=4, native_exact_edits=True, required_targets={BACKEND},
                     exact_edit_anchors=anchors, rejected_patch_sha256s=seen.copy())
 
             record = attempt_one(manifest, INSTANCE, directory, model_proposer=propose)
@@ -134,6 +141,11 @@ def run(manifest, previous, out):
             report["attempts"].append(row)
             write(path, report)
             if record["status"] != "model_patch_proposed":
+                row["error_type"] = record.get("error_type", "Unknown")
+                row["duplicate_failed_patch_blocked"] = (
+                    record.get("error") == "Previously failed patch repeated after model step budget"
+                )
+                write(path, report)
                 continue
             proposal = json.loads((directory / "unreviewed-prediction.json").read_text())
             patch = proposal["model_patch"]
