@@ -115,11 +115,17 @@ def _local_ollama_chat(url,model,messages,token_budget,request_timeout_seconds=N
         raise AgentToolError("Native model fallback is restricted to local Ollama")
     endpoint=urllib.parse.urlunsplit(
         (parts.scheme,parts.netloc,"/api/chat","",""))
-    body=json.dumps({
+    payload={
         "model":model,"stream":False,"format":response_format,
         "options":{"temperature":0,"num_predict":token_budget},
         "messages":messages,
-    }).encode("utf-8")
+    }
+    # Some local reasoning models spend their entire token allowance on
+    # hidden analysis rather than returning the required patch JSON.
+    # This opt-in applies only to the already authorized loopback Ollama API.
+    if os.getenv("REPOPILOT_OLLAMA_DISABLE_THINKING","").strip()=="1":
+        payload["think"]=False
+    body=json.dumps(payload).encode("utf-8")
     request=urllib.request.Request(
         endpoint,data=body,method="POST",
         headers={"Content-Type":"application/json"})
