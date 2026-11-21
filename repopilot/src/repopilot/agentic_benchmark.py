@@ -16,6 +16,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextvars import ContextVar
+from contextlib import contextmanager
 from pathlib import Path
 
 from .benchmark_planner import BenchmarkPatch,BenchmarkProposalError
@@ -48,6 +50,37 @@ class AgentToolError(BenchmarkProposalError):
 class TransientOllamaError(AgentToolError):
     """Retryable failure of the explicitly approved local Ollama endpoint."""
     pass
+
+
+_native_call_log = ContextVar("repopilot_native_call_log", default=None)
+
+
+@contextmanager
+def collect_native_call_timings():
+    calls = []
+    token = _native_call_log.set(calls)
+    try:
+        yield calls
+    finally:
+        _native_call_log.reset(token)
+
+
+@contextmanager
+def _time_native_call(attempt, timeout):
+    calls = _native_call_log.get()
+    if calls is None:
+        yield
+        return
+    record = {"attempt": attempt, "timeout_ms": round(1000 * timeout)}
+    calls.append(record)
+    started = time.perf_counter()
+    try:
+        yield
+    except Exception as exc:
+        record["error_type"] = type(exc).__name__
+        raise
+    finally:
+        record["elapsed_ms"] = round(1000 * (time.perf_counter() - started))
 
 
 def _safe_candidate_feedback(exc:Exception)->str:
@@ -192,11 +225,12 @@ def _provider(url,model,token,messages,*,request_timeout_seconds=None):
                     raise AgentToolError("Remaining agent model deadline expired")
                 timeout=min(request_timeout,remaining)
             try:
-                if timeout is None:
-                    return _local_ollama_chat(url,model,messages,token_budget)
-                return _local_ollama_chat(
-                    url,model,messages,token_budget,
-                    request_timeout_seconds=timeout)
+                with _time_native_call(attempt + 1, request_timeout if timeout is None else timeout):
+                    if timeout is None:
+                        return _local_ollama_chat(url,model,messages,token_budget)
+                    return _local_ollama_chat(
+                        url,model,messages,token_budget,
+                        request_timeout_seconds=timeout)
             except TransientOllamaError:
                 if attempt==1:
                     raise
@@ -510,9 +544,18 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             # Shift earlier to patch mode before tiny CPU models exhaust their
             # bounded model calls on repeated source discovery.
             inspection_budget=min(3,max_steps-2)
+    reserve_patch_time = (budget_seconds and auto_issue_paths and not required
+                          and client is None and os.getenv("REPOPILOT_OLLAMA_NATIVE") == "1"
+                          and os.getenv("REPOPILOT_RESERVE_PATCH_TIME") == "1")
+    if reserve_patch_time:
+        # Leave one provider call for exact edits and two seconds for validation.
+        discovery_deadline = started_at + budget_seconds - _provider_timeout_seconds() - 2
     for index in range(max_steps):
         if budget_seconds and time.monotonic()-started_at>=budget_seconds:
             raise AgentToolError("Agent time budget exhausted before next model call")
+        if reserve_patch_time and index < inspection_budget and read_files:
+            if discovery_deadline - time.monotonic() < 1:
+                inspection_budget = index
         if index==inspection_budget:
             if not read_files:
                 # Bad tool paths must not consume every available model call.
@@ -605,11 +648,32 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             # This is a best-effort request timeout; the outer subprocess
             # still enforces the independent absolute per-task limit.
             remaining=budget_seconds-(time.monotonic()-started_at)-2
-            if remaining<=0:
+            if remaining < 1:
                 raise AgentToolError("Agent time budget exhausted before model request")
-            response=_provider(
-                url,model,token,messages,
-                request_timeout_seconds=remaining)
+            discovery_call = reserve_patch_time and index < inspection_budget and bool(read_files)
+            if discovery_call:
+                available = discovery_deadline - time.monotonic()
+                if available < 1:
+                    inspection_budget = index + 1
+                    continue
+                remaining = min(remaining, available)
+            calls = _native_call_log.get()
+            first_call = len(calls) if calls is not None else 0
+            try:
+                response = _provider(url, model, token, messages, request_timeout_seconds=remaining)
+            except AgentToolError as exc:
+                exhausted = (isinstance(exc, TransientOllamaError) or
+                             str(exc) == "Remaining agent model deadline expired before native retry" or
+                             str(exc) == "Remaining agent model deadline expired")
+                if not (discovery_call and exhausted and discovery_deadline - time.monotonic() <= 3):
+                    raise
+                inspection_budget = index + 1
+                trace.append({"step": index + 1, "action": "discovery_deadline_reached"})
+                continue
+            finally:
+                if calls is not None:
+                    for call in calls[first_call:]:
+                        call.update(step=index + 1, phase="discovery" if index < inspection_budget else "patch")
         else:
             response=_provider(url,model,token,messages)
         usage.append(response.get("usage",{}))
