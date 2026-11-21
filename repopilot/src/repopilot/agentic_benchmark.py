@@ -148,19 +148,21 @@ def _local_ollama_chat(url,model,messages,token_budget,request_timeout_seconds=N
             "usage":{"prompt_tokens":result.get("prompt_eval_count"),
                      "completion_tokens":result.get("eval_count")}}
 
-def _finish_schema(paths):
+def _finish_schema(paths, old_choices=None):
     edit = {"type": "object", "additionalProperties": False,
             "properties": {"path": {"type": "string", "enum": list(paths)},
                            "old": {"type": "string", "minLength": 1},
                            "new": {"type": "string"}},
             "required": ["path", "old", "new"]}
+    if old_choices:
+        edit["properties"]["old"]["enum"] = list(old_choices)
     return {"type": "object", "additionalProperties": False,
             "properties": {"action": {"type": "string", "enum": ["finish"]},
                            "edits": {"type": "array", "minItems": 1, "maxItems": 4, "items": edit}},
             "required": ["action", "edits"]}
 
 
-def _provider(url,model,token,messages,*,request_timeout_seconds=None,finish_paths=None):
+def _provider(url,model,token,messages,*,request_timeout_seconds=None,finish_paths=None,old_choices=None):
     parts=urllib.parse.urlsplit(url)
     if parts.scheme not in {"http","https"} or not parts.hostname or parts.username or parts.password:
         raise AgentToolError("Invalid model endpoint")
@@ -195,7 +197,7 @@ def _provider(url,model,token,messages,*,request_timeout_seconds=None,finish_pat
         # error. Retry at most once, without changing the approved localhost
         # destination or exceeding the shared whole-agent deadline. Protocol
         # and client errors are not retried; they need a real correction.
-        native_options = {"response_format": _finish_schema(finish_paths)} if finish_paths else {}
+        native_options = {"response_format": _finish_schema(finish_paths, old_choices)} if finish_paths else {}
         for attempt in range(2):
             if provider_deadline is None:
                 timeout=None
@@ -364,7 +366,8 @@ def _compact_final_context(chunks:list[str],max_chars:int)->list[str]:
 
 def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:str|None=None,
                               client=None,max_steps:int=8,required_targets:set[str]|None=None,
-                              auto_issue_paths:bool=False, native_exact_edits:bool=False)->tuple[BenchmarkPatch,dict]:
+                              auto_issue_paths:bool=False, native_exact_edits:bool=False,
+                              exact_edit_anchors:tuple[str,...]=())->tuple[BenchmarkPatch,dict]:
     if not model or not url or not issue_text.strip() or not 2<=max_steps<=24:
         raise AgentToolError("Model, issue and bounded step count required")
     # An optional whole-agent wall-clock budget prevents another model request
@@ -613,6 +616,15 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 (" Previous candidate error: "+last_candidate_reason if last_candidate_reason else "")}]
             if native_exact_edits and client is None and os.getenv("REPOPILOT_OLLAMA_NATIVE", "").strip() == "1":
                 provider_options = {"finish_paths": tuple(phase_files)}
+                if exact_edit_anchors:
+                    if len(required) != 1 or not 1 <= len(exact_edit_anchors) <= 20:
+                        raise AgentToolError("Exact anchors require one completely inspected source file")
+                    source = (root / phase_files[0]).read_text(encoding="utf-8")
+                    if any(not isinstance(a, str) or not 1 <= len(a) <= 1800
+                           or source.count(a) != 1 or not any(a in chunk for chunk in final_context)
+                           for a in exact_edit_anchors):
+                        raise AgentToolError("An exact anchor is absent or ambiguous in the inspected source")
+                    provider_options["old_choices"] = exact_edit_anchors
                 messages[0]["content"] = (
                     "Return a finish action with only minimal exact edits to inspected source. "
                     "Each old snippet must match the original exactly once. Use the shortest "

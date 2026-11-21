@@ -1,5 +1,6 @@
 """One human-assisted, public-issue retry. The official evaluator runs separately."""
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -16,7 +17,8 @@ from repopilot.swebench_export import load_manifest
 
 INSTANCE = "django__django-12113"
 OLD_PATCH = "8f0793674377dc0f57c8f86a05f703e68a932adbb290e0df7d702a3816ffeb23"
-MODES = ("explicit", "distinct", "shared")
+MODES = ("explicit", "distinct", "shared", "identity")
+BACKEND = "django/db/backends/sqlite3/creation.py"
 PROBE = Path(__file__).with_name("reproduce.py")
 FEEDBACK = (
     "An independent SQLite regression ran setup_databases(keepdb=True) for two "
@@ -24,10 +26,25 @@ FEEDBACK = (
     "A table created through 'default' was visible through 'other', but it must be isolated. "
     "With explicit distinct normal names the table was isolated. With a shared test filename "
     "the table was visible as expected. The previous contenttypes change reproduced the bug. "
-    "Inspect the SQLite backend's test database creation code in "
+    "The diagnostic confirmed that the two distinct files received equal database identities from "
+    "DatabaseCreation.test_db_signature(). Inspect that method in "
     "django/db/backends/sqlite3/creation.py. Preserve intentional sharing and in-memory behavior. "
     "Return a finish action with an exact old/new edit. Keep the change minimal."
 )
+
+
+def method_anchors(repo):
+    # Extract literal choices only from the public pinned source, never a reference patch.
+    source = (repo / BACKEND).read_text()
+    cls = next(n for n in ast.parse(source).body if isinstance(n, ast.ClassDef)
+               and n.name == "DatabaseCreation")
+    method = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "test_db_signature")
+    stmts = [node for node in method.body if not isinstance(node, ast.Expr)]
+    anchors = [ast.get_source_segment(source, node) for node in stmts]
+    eligible = [value for value in anchors if value and source.count(value) == 1]
+    if not eligible:
+        raise ValueError("No unique source anchor in the diagnosed method")
+    return tuple(eligible)
 
 
 def digest(patch):
@@ -79,7 +96,7 @@ def run(manifest, previous, out):
         report["original"] = results(repo)
         report["prior_patch"] = check_patch(repo, old["model_patch"], work)
         write(path, report)
-        expected = {"explicit": 0, "distinct": 42, "shared": 0}
+        expected = {"explicit": 0, "distinct": 42, "shared": 0, "identity": 42}
         if report["original"] != expected or report["prior_patch"] != expected:
             raise RuntimeError("Both positive controls and the specific original failure are required")
         feedback = FEEDBACK
@@ -91,9 +108,12 @@ def run(manifest, previous, out):
             def propose(checkout, issue, model, url, token):
                 # The original issue was already reduced to the measured failing behavior.
                 # Pin only the human-selected backend file for this assisted retry.
-                prompt = issue.splitlines()[0] + "\n" + feedback
+                anchors = method_anchors(checkout)
+                prompt = (issue.splitlines()[0] + "\n" + feedback +
+                          "\nChoose old verbatim from this list of unique original statements. "
+                          "Write new yourself.\n" + json.dumps(anchors))
                 return propose_agentic_benchmark(checkout, prompt, model, url, token,
-                    max_steps=2, native_exact_edits=True, required_targets={"django/db/backends/sqlite3/creation.py"})
+                    max_steps=2, native_exact_edits=True, required_targets={BACKEND}, exact_edit_anchors=anchors)
 
             record = attempt_one(manifest, INSTANCE, directory, model_proposer=propose)
             row = {"attempt": attempt, "status": record["status"]}

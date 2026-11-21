@@ -25,6 +25,14 @@ def exercise(mode):
         from django.db import connections
         from django.test.utils import setup_databases
 
+        if mode == "identity":
+            default = connections["default"]
+            other = connections["other"]
+            assert default.settings_dict["TEST"]["NAME"] != other.settings_dict["TEST"]["NAME"]
+            if default.creation.test_db_signature() == other.creation.test_db_signature():
+                raise SystemExit(42)
+            return
+
         setup_databases(verbosity=0, interactive=False, keepdb=True)
         try:
             with connections["default"].cursor() as writer:

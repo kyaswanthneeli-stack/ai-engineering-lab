@@ -26,9 +26,10 @@ class NativeFinishTests(unittest.TestCase):
             for enabled in (False, True):
                 proposal, _ = propose_agentic_benchmark(root, "Return dollars", "fixture",
                     "http://localhost:11434/v1", required_targets={"prices.py"}, max_steps=2,
-                    native_exact_edits=enabled)
+                    native_exact_edits=enabled, exact_edit_anchors=("return cents",) if enabled else ())
                 self.assertIn("return cents / 100", proposal.patch)
         self.assertEqual(formats[0], "json")
         edits = formats[1]["properties"]["edits"]["items"]
         self.assertEqual(edits["properties"]["path"]["enum"], ["prices.py"])
+        self.assertEqual(edits["properties"]["old"]["enum"], ["return cents"])
         self.assertEqual(edits["required"], ["path", "old", "new"])
