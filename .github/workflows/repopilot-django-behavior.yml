@@ -1,0 +1,130 @@
+name: RepoPilot Django SQLite behavior retry
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths: [".github/workflows/repopilot-django-behavior.yml", "repopilot/ci/django_sqlite/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce-and-retry:
+    if: github.event_name == 'workflow_dispatch' || (github.head_ref == 'bench/repopilot-django-behavior' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install pinned manifest reader and dataset dependencies
+        run: |
+          python -m pip install -e .
+          python -m pip install 'datasets>=3.0,<5.0'
+      - name: Build trusted offline candidate smoke runtime before inference
+        run: docker build --pull -t repopilot-candidate-deps:py310 -f ci/Dockerfile.candidate-smoke ci
+      - name: Start local Ollama with dedicated 7B coding model
+        run: |
+          docker run -d --name repopilot-batch-ollama -p 127.0.0.1:11434:11434 ollama/ollama:latest
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
+          for attempt in 1 2 3; do
+            if docker exec repopilot-batch-ollama ollama pull qwen2.5-coder:7b; then break; fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep $((attempt*10))
+          done
+      - name: Reproduce SQLite cross-database visibility and retry with observed behavior
+        env:
+          REPOPILOT_MODEL: qwen2.5-coder:7b
+          REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
+          REPOPILOT_MAX_TOKENS: '768'
+          REPOPILOT_OLLAMA_NATIVE: '1'
+          REPOPILOT_OLLAMA_DISABLE_THINKING: '1'
+          REPOPILOT_PROVIDER_TIMEOUT_SECONDS: '120'
+          REPOPILOT_AGENT_BUDGET_SECONDS: '600'
+          REPOPILOT_FINAL_CONTEXT_CHARS: '9000'
+          REPOPILOT_CANDIDATE_SMOKE: '1'
+          REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP: '1'
+          REPOPILOT_CANDIDATE_SOURCE_EXAMPLES: '1'
+          REPOPILOT_CANDIDATE_SMOKE_IMAGE: repopilot-candidate-deps:py310
+        run: |
+          curl -fsS "${REPOPILOT_BASE_URL}/models" >/dev/null
+          # Warm the local model with a tiny request before the large issue prompts.
+          curl -fsS --retry 2 --max-time 120 \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"qwen2.5-coder:7b","prompt":"hello","stream":false,"think":false,"options":{"num_predict":8}}' \
+            http://127.0.0.1:11434/api/generate >/dev/null
+          timeout 1650s python ci/django_sqlite/retry.py \
+            --previous benchmarks/evidence/cpu-prompt-ab-2026-11-20/01-django__django-12113-default/unreviewed-prediction.json \
+            --output .runs/retry
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: django-sqlite-behavior-attempts
+          path: repopilot/.runs/retry/
+          include-hidden-files: true
+          if-no-files-found: error
+
+  score:
+    needs: reproduce-and-retry
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: django-sqlite-behavior-attempts
+          path: repopilot/.runs/
+      - name: Score every genuine submission separately
+        run: |
+          shopt -s nullglob
+          predictions=(.runs/*/predictions.jsonl)
+          if [ "${#predictions[@]}" -eq 0 ]; then
+            echo "No candidate passed every pinned SQLite regression probe; no official submission." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          python -m pip install -e . 'swebench>=3.0,<5.0'
+          for file in "${predictions[@]}"; do
+            dir=$(dirname "$file")
+            mode=$(basename "$dir")
+            run_id="django-sqlite-behavior-$mode"
+            python -m swebench.harness.run_evaluation --dataset_name princeton-nlp/SWE-bench_Lite \
+              --split test --predictions_path "$file" --instance_ids django__django-12113 \
+              --max_workers 1 --run_id "$run_id"
+            reports=( *"$run_id".json )
+            test "${#reports[@]}" -eq 1
+            cp "${reports[0]}" "$dir/official.json"
+            MODE="$mode" python - <<'PYTHON'
+          import json, os
+          from pathlib import Path
+          from repopilot.swebench_results import official_summary
+          mode = os.environ["MODE"]
+          directory = Path(".runs") / mode
+          score = official_summary(Path("benchmarks/swebench-lite-12.json"), directory / "official.json",
+                                   directory / "predictions.jsonl")
+          assert score["evaluated"] == score["submitted"] == 1 and score["error"] == 0
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              print(f"{mode}: {score['resolved']}/1 resolved on the Django subset.", file=summary)
+          PYTHON
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: django-sqlite-behavior-official-results
+          path: repopilot/.runs/*/official.json
+          include-hidden-files: true
+          if-no-files-found: ignore

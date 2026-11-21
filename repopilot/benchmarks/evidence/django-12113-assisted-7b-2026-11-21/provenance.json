@@ -1,0 +1,33 @@
+{
+  "evidence_type": "independent_official_evaluation_of_human_assisted_single_task",
+  "instance_id": "django__django-12113",
+  "base_commit": "62254c5202e80a68f4fe6572a2be46a3d953de1a",
+  "source_branch_commit": "6aaf3fa1e9ad0780ac5a5e7c4aed1ee930d2bee0",
+  "model": "qwen2.5-coder:7b",
+  "run_id": 44910644263,
+  "workflow_url": "https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44910644263",
+  "attempt_artifact_url": "https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44910644263/artifacts/14709597715",
+  "official_artifact_url": "https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44910644263/artifacts/14710205697",
+  "official_result_sha256": "f7c26f0d6882d8653737df520c251df2cc7fa5c5385ed9c2fd982f20fa52d0fa",
+  "prediction_sha256": "5541238a84a286cc2cc3f91747882376005d80d6bcef8b72b1e449886be5e0fd",
+  "local_report_sha256": "8fe7e4c35a988dbe6a1ecb885bb5f6ed11ec533f6f089e3610f4277e190c96e5",
+  "patch_sha256": "547f5479d6406f25b604f36bf1a1069b8b8e8a5b37ca5da9b50d59fbfb61a238",
+  "local_probes": {
+    "explicit": 0,
+    "distinct": 0,
+    "shared": 0,
+    "identity": 0,
+    "shared_setup": 0,
+    "memory_identity": 0
+  },
+  "local_probe_success": true,
+  "official_subset_result": {
+    "submitted": 1,
+    "completed": 1,
+    "resolved": 1,
+    "unresolved": 0,
+    "error": 0
+  },
+  "methodology": "Human-supplied source diagnosis, behavioral probes and failed-candidate guidance; the final patch itself was model generated.",
+  "comparable_full_cohort_result": "Not rerun; last 12-task autonomous v10 score remains 1/12."
+}
