@@ -766,9 +766,11 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
         if index>=inspection_budget and name!="finish" and read_files:
             trace.append({"step":index+1,"action":"exploration_rejected_in_final_phase"})
             messages.append({"role":"user","content":
-                "Discovery is finished. The inspected files are above. "
-                "Your next response MUST use action=finish with files "
-                "for small source or exact edits for long source. No tool actions."})
+                "Discovery is finished. The inspected files are above. "+
+                ("Your next response MUST use action=finish with exact edits only. No tool actions."
+                 if "finish_paths" in provider_options else
+                 "Your next response MUST use action=finish with files "
+                 "for small source or exact edits for long source. No tool actions.")})
             continue
         if name=="finish":
             if (confirm_ranked_source and index < inspection_budget and
@@ -1004,12 +1006,26 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 trace.append({"step":index+1,"action":"finish_rejected",
                               "error_type":type(exc).__name__,
                               "reason":reason})
-                messages.append({"role":"assistant","content":content})
-                messages.append({"role":"user","content":
-                    "Fix this specific error: "+reason+" "+
-                    "Return action=finish with files: [{path, content}] "+
-                    "containing COMPLETE corrected Python source for EVERY "+
-                    "required file. Do not repeat the rejected candidate."})
+                if "finish_paths" in provider_options:
+                    # Exact-edit grammar cannot emit the files format. Retry
+                    # from the original bounded source, not an expanding
+                    # transcript of invalid old snippets. Never auto-repair
+                    # an ambiguous old snippet or relax canonical validation.
+                    messages=messages[:2]
+                    messages.append({"role":"user","content":
+                        "Your previous exact-edit proposal was rejected. "
+                        "Return action=finish with edits only, not files or patch. "
+                        "Copy old text verbatim from the visible source above, "
+                        "including whitespace and indentation. Choose a short "
+                        "unique existing snippet and a concrete corrected new string. "
+                        "Do not invent original text or repeat the rejected edit."})
+                else:
+                    messages.append({"role":"assistant","content":content})
+                    messages.append({"role":"user","content":
+                        "Fix this specific error: "+reason+" "+
+                        "Return action=finish with files: [{path, content}] "+
+                        "containing COMPLETE corrected Python source for EVERY "+
+                        "required file. Do not repeat the rejected candidate."})
                 continue
             missing_targets=sorted(required-set(targets))
             if missing_targets:
@@ -1170,7 +1186,10 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
         if entry.get("action")=="finish_rejected":
             reason=entry.get("reason","unknown")
             reasons[reason]=reasons.get(reason,0)+1
-    raise AgentToolError(
+    failure=AgentToolError(
         "Agent exhausted bounded model-tool calls without a valid patch; "
         "action_counts="+json.dumps(summary,sort_keys=True)+
         "; rejection_reasons="+json.dumps(reasons,sort_keys=True)[:1100])
+    if provider_metrics:
+        failure.provider_metrics=list(provider_metrics)
+    raise failure

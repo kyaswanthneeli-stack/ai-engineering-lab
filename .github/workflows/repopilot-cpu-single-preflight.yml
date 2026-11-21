@@ -35,6 +35,7 @@ jobs:
       REPOPILOT_COMPACT_DISCOVERY: '1'
       REPOPILOT_COMPACT_FINAL: '1'
       REPOPILOT_WEIGHT_RARE_TERMS: '1'
+      # Retry feedback now respects the exact-edit output schema.
       REPOPILOT_CANDIDATE_SMOKE: '1'
       REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP: '1'
       REPOPILOT_CANDIDATE_SOURCE_EXAMPLES: '1'
