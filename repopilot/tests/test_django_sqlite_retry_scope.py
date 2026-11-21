@@ -118,6 +118,26 @@ class DjangoSQLiteRetryScopeTests(unittest.TestCase):
         self.assertIn("two aliases sharing one persistent file", FEEDBACK)
         self.assertIn("different persistent files", FEEDBACK)
 
+    def test_django_benchmark_workflow_uses_bounded_provider_timeout(self):
+        """Catch unsupported inference settings before expensive Docker/model startup."""
+        import re
+        from unittest.mock import patch
+        from repopilot.agentic_benchmark import _provider_timeout_seconds
+
+        workflow = (
+            Path(__file__).parents[2] /
+            ".github/workflows/repopilot-django-behavior.yml"
+        ).read_text(encoding="utf-8")
+        match = re.search(
+            r"^\s*REPOPILOT_PROVIDER_TIMEOUT_SECONDS:\s*['\"]?(\d+)['\"]?\s*$",
+            workflow, flags=re.MULTILINE,
+        )
+        self.assertIsNotNone(match, "Explicit provider timeout must be present")
+        seconds = int(match.group(1))
+        with patch.dict("os.environ", {"REPOPILOT_PROVIDER_TIMEOUT_SECONDS": str(seconds)}):
+            self.assertEqual(_provider_timeout_seconds(), seconds)
+        self.assertLessEqual(seconds, 120)
+
     def test_historical_feedback_contains_measured_reasons(self):
         feedback = known_failed_feedback()
         self.assertEqual(set(feedback), known_failed_hashes())
