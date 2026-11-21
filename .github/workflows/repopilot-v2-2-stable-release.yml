@@ -1,9 +1,14 @@
 name: RepoPilot v2.2.0 stable CLI distribution
 
 on:
-  # Manual, one-time release from main only. PRs cannot publish artifacts.
-  # This workflow may be dispatched only AFTER the version bump and
-  # independently verified release gates are merged into main.
+  # The new workflow's FIRST merge into protected main triggers this
+  # one-time stable-release job. Subsequent edits fail closed on an existing
+  # immutable tag; manual dispatch also remains available for recovery.
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/repopilot-v2-2-stable-release.yml'
   workflow_dispatch:
 
 permissions:
@@ -15,7 +20,7 @@ concurrency:
 
 jobs:
   build-test-and-publish:
-    if: github.repository == 'kyaswanthneeli-stack/ai-engineering-lab' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: github.repository == 'kyaswanthneeli-stack/ai-engineering-lab' && (github.event_name == 'workflow_dispatch' || github.event_name == 'push') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 50
     permissions:
@@ -32,6 +37,19 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+      - name: Reject existing stable release and tag before build or publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view v2.2.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Stable v2.2.0 release exists. Refusing overwrite."
+            exit 1
+          fi
+          if git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}.git" refs/tags/v2.2.0 | grep -q .; then
+            echo "::error::Stable v2.2.0 tag exists. Refusing overwrite."
+            exit 1
+          fi
       - name: Install package and release test tools
         run: |
           python -m pip install -e .

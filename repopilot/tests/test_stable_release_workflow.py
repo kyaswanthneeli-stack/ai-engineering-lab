@@ -12,13 +12,18 @@ class StableReleaseWorkflowTests(unittest.TestCase):
     def setUpClass(cls):
         cls.text = WORKFLOW.read_text(encoding="utf-8")
 
-    def test_stable_release_is_manual_main_only_and_immutable(self):
+    def test_stable_release_main_only_initial_push_or_manual_and_immutable(self):
         flow = self.text
         self.assertIn("  workflow_dispatch:", flow)
-        self.assertNotIn("\n  push:", flow)
+        self.assertIn("\n  push:", flow)
+        self.assertIn("branches:\n      - main", flow)
+        self.assertIn("'.github/workflows/repopilot-v2-2-stable-release.yml'", flow)
         self.assertNotIn("\n  pull_request:", flow)
         self.assertIn("github.ref == 'refs/heads/main'", flow)
         self.assertIn("github.event_name == 'workflow_dispatch'", flow)
+        self.assertIn("github.event_name == 'push'", flow)
+        self.assertIn("Reject existing stable release and tag before build", flow)
+        self.assertIn("git ls-remote --tags", flow)
         self.assertIn("Refusing overwrite.", flow)
         self.assertIn("gh release create v2.2.0", flow)
         self.assertNotIn("gh release create v2.2.0rc1", flow)

@@ -1,8 +1,9 @@
 # RepoPilot v2.2.0 — supervised Python repair CLI
 
-**Release stage:** prepared, **not yet published**. This document is a release
-candidate draft for an eventual stable `v2.2.0` tag; it is not evidence that
-the tag, wheel, source archive, or container image has been released.
+**Scope:** Stable supervised CLI release. Distribution, versioned assets and
+container-image digest must be verified on the published
+[GitHub release page](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.2.0).
+These notes alone do not prove that publication succeeded.
 
 RepoPilot is a human-supervised, Python-focused issue-to-patch coding harness.
 The CLI supports bounded repository inspection, genuine model-suggested patch
@@ -35,13 +36,14 @@ resolved **1/1** in the official harness. The latter used operator-supplied
 diagnostics and an explicitly scoped source edit. These outcomes **must not
 be added** into a fabricated 2/12 autonomous score.
 
-The new **unassisted 12-task v11 7B** run
-[GitHub Actions #44914670302](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44914670302)
-must complete with independently validated predictions, full-cohort
-denominators, evaluator errors and preserved SHA-256 provenance before a new
-autonomous score can be claimed. Update the benchmark evidence with its
-actual outcome **before publication**. A green GitHub workflow is not a
-positive SWE-bench resolution on its own.
+The **unassisted v11 7B** [12-task run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44914670302)
+completed with **zero valid predictions**. Ten attempts failed due to
+local Ollama communication/timeouts; two expired the agent deadline.
+The official evaluator **did not run** (skipped, zero submissions). Therefore
+v11 has **no independent resolution score** and cannot support a 2/12
+improvement. [Audited failure report](benchmarks/OFFICIAL_V11_7B_2026-11-21.md)
+retains exact original artifact links and hashes. The last real full-cohort
+official result remains **1/12 (8.3%)**, measured on v10.
 
 ## Stable-release gates
 
@@ -51,9 +53,11 @@ positive SWE-bench resolution on its own.
    `container/Dockerfile.cli` dependency to `2.2.0` in a reviewed commit.
 3. Run the entire unit, restricted-Docker, clean-install packaging,
    unprivileged offline image and source-provenance gates on protected `main`.
-4. Manually dispatch the **new version-specific** stable release workflow
-   `.github/workflows/repopilot-v2-2-stable-release.yml` from `main`.
-   It must refuse an existing tag or image; never overwrite immutable evidence.
+4. The **new version-specific** stable release workflow
+   `.github/workflows/repopilot-v2-2-stable-release.yml` triggers once
+   when first merged into protected `main`, after every gate above.
+   Manual dispatch is a recovery option; any preexisting tag or release
+   makes the workflow fail closed, without overwriting immutable evidence.
 5. Publish the versioned wheel, sdist and SHA-addressed CLI image only after
    successful gates. Record the final CI URL, asset SHA-256 and GHCR digest.
 6. Verify the published release, GitHub Pages demonstration, deployment
