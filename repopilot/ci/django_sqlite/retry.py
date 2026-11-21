@@ -26,7 +26,7 @@ FEEDBACK = (
     "the table was visible as expected. The previous contenttypes change reproduced the bug. "
     "Inspect the SQLite backend's test database creation code in "
     "django/db/backends/sqlite3/creation.py. Preserve intentional sharing and in-memory behavior. "
-    "Find the cause and propose a minimal implementation change."
+    "Return a finish action with an exact old/new edit. Keep the change minimal."
 )
 
 
@@ -89,8 +89,11 @@ def run(manifest, previous, out):
             directory = out / f"attempt-{attempt}"
 
             def propose(checkout, issue, model, url, token):
-                return propose_agentic_benchmark(checkout, feedback + "\n\nPublic issue:\n" + issue,
-                    model, url, token, max_steps=8, auto_issue_paths=True)
+                # The original issue was already reduced to the measured failing behavior.
+                # Pin only the human-selected backend file for this assisted retry.
+                prompt = issue.splitlines()[0] + "\n" + feedback
+                return propose_agentic_benchmark(checkout, prompt, model, url, token,
+                    max_steps=2, required_targets={"django/db/backends/sqlite3/creation.py"})
 
             record = attempt_one(manifest, INSTANCE, directory, model_proposer=propose)
             row = {"attempt": attempt, "status": record["status"]}

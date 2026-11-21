@@ -45,7 +45,7 @@ jobs:
         env:
           REPOPILOT_MODEL: qwen2.5-coder:3b
           REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
-          REPOPILOT_MAX_TOKENS: '1200'
+          REPOPILOT_MAX_TOKENS: '512'
           REPOPILOT_OLLAMA_NATIVE: '1'
           REPOPILOT_PROVIDER_TIMEOUT_SECONDS: '110'
           REPOPILOT_AGENT_BUDGET_SECONDS: '360'
