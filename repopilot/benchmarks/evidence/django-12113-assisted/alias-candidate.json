@@ -1,0 +1,8 @@
+{
+  "instance_id": "django__django-12113",
+  "base_commit": "62254c5202e80a68f4fe6572a2be46a3d953de1a",
+  "model_name_or_path": "qwen2.5-coder:3b",
+  "model_patch": "diff --git a/django/db/backends/sqlite3/creation.py b/django/db/backends/sqlite3/creation.py\n--- a/django/db/backends/sqlite3/creation.py\n+++ b/django/db/backends/sqlite3/creation.py\n@@ -95,7 +95,7 @@\n         TEST NAME. See https://www.sqlite.org/inmemorydb.html\n         \"\"\"\n         test_database_name = self._get_test_db_name()\n-        sig = [self.connection.settings_dict['NAME']]\n+        sig = [self.connection.settings_dict['NAME'], self.connection.alias]\n         if self.is_in_memory_db(test_database_name):\n             sig.append(self.connection.alias)\n         return tuple(sig)\n",
+  "generated_by_model": true,
+  "human_reviewed": false
+}
