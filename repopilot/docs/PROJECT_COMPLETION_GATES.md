@@ -6,8 +6,8 @@
 
 - **Portfolio release:** [v2.1.1 stable](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.1.1) and [v2.2.0rc1 prerelease](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.2.0rc1), including the constrained read-only CLI image, operator documentation, security boundaries and rollback guidance.
 - **Live issue-to-patch:** A pinned public issue was fetched and a model-generated patch verified against the seeded fixture in restricted Docker. Draft pull requests remain human-approved.
-- **CI:** RepoPilot checks and packaging workflow passed for commit `7b8926b9`, including **338 Python unit tests**; verify newer commits separately.
-- **Independent benchmark:** Last *fixed full 12-task cohort* official v10 result is **1/12 selected resolved (8.3%)**; four genuine model submissions independently evaluated. See [benchmark evidence](../benchmarks/README.md). This number must not be raised by local probes, submitted patch count, human-written reference fixes or a successful Actions workflow.
+- **CI:** RepoPilot checks and packaging workflow passed for commit `6aaf3fa1`, including **339 Python unit tests**; verify newer commits separately.
+- **Independent benchmark:** An assisted 7B single-case Django patch passed **6/6** local regressions and was **officially resolved 1/1**; see [Django official evidence](../benchmarks/DJANGO_ASSISTED_7B_2026-11-21.md). The last *comparable full 12-task cohort* v10 remains **1/12 (8.3%)**. Different models and human-assisted subsets cannot be combined into a new autonomous cohort score.
 
 ## Open gates before closing the active Django investigation
 
@@ -18,18 +18,18 @@
 5. Rerun the identical fixed **12-task** cohort without per-case hand-fed source locations or solution hints before claiming a comparable `2/12` autonomous improvement.
 6. Verify the final PR head's repository tests, packaging, security and Docker gates before merging. Keep draft PR approval human-controlled.
 
-## Current next experiment: dedicated coding model
+## Completed assisted 7B result and the next experiment
 
-Replace the repeated small-general-model retry with a *single controlled* local Ollama `qwen2.5-coder:7b` assisted attempt. Keep the six pinned probes, known failed-patch fingerprints, independent evaluator and output schema unchanged. Increase bounded request and agent timeouts to account for CPU inference.
+The dedicated local Ollama `qwen2.5-coder:7b` model produced a valid two-line Django patch that passed all six pinned SQLite probes and the independent official evaluator: **1/1 resolved** on this assisted subset. Original prediction and evaluator output with SHA-256 checks are preserved in the evidence folder linked above.
 
-**Decision rule:** If the 7B model fails the local probes, preserve the run evidence and stop treating the same issue as ready for final release. Diagnose candidate generation or choose another benchmark task with reliable behavior tests. Do not run a full 12-task benchmark solely to inflate a percentage.
+**Next decision:** Prepare an unassisted, comparable **fixed 12-task** run using a consistent model configuration and original issue text, without the task-specific hand-fed source diagnosis or solution hints. Inspect the outcome independently and report all attempted, submitted, resolved and missing tasks. An additional 12-task benchmark should be launched only with adequate CPU/runner budget and its own bounded timeout/provenance plan.
 
 ## Definition of done by scope
 
 | Target scope | Readiness | Unfinished evidence |
 |---|---|---|
 | **Portfolio / demo prototype** | Already demonstrable as prerelease; stable v2.1.1 is published | Final PR review and promotion if the experimental changes are to ship |
-| **Higher independently verified bug-solving accuracy** | **Incomplete** | New genuinely resolved official issue; then comparable full-cohort rerun for any improved autonomous score |
+| **Higher independently verified bug-solving accuracy** | **Assisted Django subset independently resolved; full-cohort improvement still unproven** | Comparable unassisted fixed-cohort rerun before claiming 2/12 |
 | **Unattended production service** | **Not delivered** | Authenticated API/tenant isolation, durable queues, secrets and worker isolation, abuse/rate controls, observability, availability, recovery and deployment verification |
 
-The open Django research PR is not a blocker to *showing the already published portfolio prototype*, but it remains a blocker to claiming the tested six-probe repair improvement or `2/12` independent resolution.
+The Django six-probe repair is now demonstrated and independently resolved as an assisted single-case result. The research PR is not a blocker to *showing the already published portfolio prototype*. Review and merge verified changes as appropriate; **do not claim a new 2/12 autonomous result** without the comparable full-cohort run.

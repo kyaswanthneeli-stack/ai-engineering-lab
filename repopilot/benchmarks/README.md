@@ -1,5 +1,9 @@
 # SWE-bench Lite: 12-task evaluation protocol
 
+## New assisted Django subset (November 21, 2026)
+
+[Qwen2.5-Coder 7B assisted Django evaluation](DJANGO_ASSISTED_7B_2026-11-21.md) generated a model patch for `django__django-12113`, passed **six/six** trusted SQLite probes, and received an official independent **1/1 resolved** verdict with zero evaluator errors. The full original prediction and official result are preserved with digest-verified provenance. **This does not change the 1/12 fixed-cohort autonomous benchmark below:** the local model was different and this Django retry used operator-supplied diagnostic guidance and exact source constraints.
+
 ## Official v10 results · November 20, 2026 UTC
 
 **RepoPilot resolved 1 of 12 selected issues (8.3%).** The model attempted all 12 pinned SWE-bench Lite tasks and submitted four patches. The official harness evaluated all four, resolving one (25% of submissions). Eight attempts produced no submission. The harness recorded zero evaluator errors.
