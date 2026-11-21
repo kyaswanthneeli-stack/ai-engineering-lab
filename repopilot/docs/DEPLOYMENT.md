@@ -1,4 +1,4 @@
-# RepoPilot 2.2.0 release-candidate deployment guide
+# RepoPilot 2.2.0 stable deployment guide
 
 This is an **operator-supervised CLI**, not an always-on hosted web service.
 The container below is for read-only commands. Model-driven patching and
@@ -36,12 +36,12 @@ Build the same image locally without needing a registry:
 
 ```bash
 cd repopilot
-docker build -f container/Dockerfile.cli -t repopilot-cli:2.2.0rc1 .
+docker build -f container/Dockerfile.cli -t repopilot-cli:2.2.0 .
 docker run --rm --read-only --network none --cap-drop ALL \
   --security-opt no-new-privileges --pids-limit 64 --memory 512m \
   --cpus 1 --user 65532:65532 \
   -v "$PWD/examples/calculator:/workspace/example:ro" \
-  repopilot-cli:2.2.0rc1 index /workspace/example
+  repopilot-cli:2.2.0 index /workspace/example
 ```
 
 This read-only image intentionally does **not** include Docker access, a model
@@ -49,10 +49,7 @@ or a GitHub token; therefore `doctor --live` will not report readiness for
 end-to-end repair. **Never mount `/var/run/docker.sock`** into this image.
 For a full repair run, use the separate worker mode below.
 
-To inspect the published image, use the *exact SHA tag from CI*, e.g.
-`ghcr.io/kyaswanthneeli-stack/repopilot:sha-<commit-prefix>` (replace
-`<commit-prefix>` with the digest shown by the deployment workflow).
-The human-readable release-candidate version is not a mutable `latest` tag.
+The published v2.2.0 image is `ghcr.io/kyaswanthneeli-stack/repopilot:sha-5669ea72162c`, digest `sha256:52bae5592314f51e2bf860a98d6ebb8e49ad92142fb7c3e331c26f72c7deade6`. See [release evidence](RELEASE_EVIDENCE_v2.2.0.md) for provenance. Authenticate if registry visibility requires it. Do not assume a mutable `latest` tag.
 
 ## B. Full, human-supervised repair on a trusted operator worker
 
@@ -100,13 +97,9 @@ write credentials to the Docker test container.
 ## C. CI, registry publishing and provenance
 
 * `.github/workflows/repopilot.yml` provides Python, Docker, and fixture gates.
-* `.github/workflows/repopilot-cli-container.yml` builds and tests the
-  deployable CLI image and, only on `main` after its checks pass, publishes
-  an immutable `sha-<12-character-commit>` GHCR tag. It never publishes on PRs.
-* `repopilot/RELEASE_NOTES_v2.2.0rc1.md` lists shipped changes and limitations.
-* Full SWE-bench accuracy remains **1/12 officially resolved (8.3%)** on
-  the fixed selected cohort at v9. The unscored prompt A/B experiment is not
-  official evidence of greater repair accuracy.
+* `.github/workflows/repopilot-v2-2-stable-release.yml` published the stable distribution from main after verification; it refuses existing release or image tags. `.github/workflows/repopilot-v2-2-stable-preflight.yml` provides read-only PR packaging checks.
+* [Stable release notes](../RELEASE_NOTES_v2.2.0.md) and [published evidence](RELEASE_EVIDENCE_v2.2.0.md) describe the shipped scope.
+* Full SWE-bench accuracy remains **1/12 officially resolved (8.3%)** from v10. v11 was unscored; the human-assisted Django subset cannot improve the full-cohort numerator.
 
 ## D. Rollback and incident response
 
@@ -126,4 +119,4 @@ write credentials to the Docker test container.
 Authenticated API / tenant isolation, queue durability, rate limits, supply
 chain scanning, observability, disaster recovery drills, live deployment
 availability measurements, and a higher independent real-issue solve rate
-are **not** demonstrated by this release candidate. Do not claim these exist.
+are **not** demonstrated by this stable CLI release. Do not claim these exist.

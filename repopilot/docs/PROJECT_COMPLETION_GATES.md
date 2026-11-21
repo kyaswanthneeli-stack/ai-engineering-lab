@@ -4,7 +4,7 @@
 
 ## Working and evidenced now
 
-- **Portfolio release:** [v2.1.1 stable](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.1.1) and [v2.2.0rc1 prerelease](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.2.0rc1), including the constrained read-only CLI image, operator documentation, security boundaries and rollback guidance.
+- **Current portfolio release:** [v2.2.0 stable](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.2.0) — [348 passing release tests and published evidence](RELEASE_EVIDENCE_v2.2.0.md). Historical releases: [v2.1.1 stable](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.1.1) and [v2.2.0rc1 prerelease](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.2.0rc1), including the constrained read-only CLI image, operator documentation, security boundaries and rollback guidance.
 - **Live issue-to-patch:** A pinned public issue was fetched and a model-generated patch verified against the seeded fixture in restricted Docker. Draft pull requests remain human-approved.
 - **CI:** RepoPilot checks and packaging workflow passed for commit `6aaf3fa1`, including **339 Python unit tests**; verify newer commits separately.
 - **Independent benchmark:** An assisted 7B single-case Django patch passed **6/6** local regressions and was **officially resolved 1/1**; see [Django official evidence](../benchmarks/DJANGO_ASSISTED_7B_2026-11-21.md). The last *comparable full 12-task cohort* v10 remains **1/12 (8.3%)**. Different models and human-assisted subsets cannot be combined into a new autonomous cohort score.
@@ -40,7 +40,7 @@ The complete v11 unassisted Qwen2.5-Coder 7B trial generated no patches for all 
 
 | Target scope | Readiness | Unfinished evidence |
 |---|---|---|
-| **Portfolio / demo prototype** | Already demonstrable as prerelease; stable v2.1.1 is published | Final PR review and promotion if the experimental changes are to ship |
+| **Portfolio / demo prototype** | Stable v2.2.0 published, main CI and Pages deployment passed | No outstanding release gate for this scope |
 | **Higher independently verified bug-solving accuracy** | **Assisted Django subset independently resolved; full-cohort improvement still unproven** | Comparable unassisted fixed-cohort rerun before claiming 2/12 |
 | **Unattended production service** | **Not delivered** | Authenticated API/tenant isolation, durable queues, secrets and worker isolation, abuse/rate controls, observability, availability, recovery and deployment verification |
 
