@@ -11,7 +11,7 @@ assert Path(django.__file__).resolve() == Path("/workspace/django/__init__.py")
 def exercise(mode):
     with TemporaryDirectory() as temp:
         def configuration(alias):
-            filename = "shared" if mode == "shared" else alias
+            filename = "shared" if mode in ("shared", "shared_setup") else alias
             db = {"ENGINE": "django.db.backends.sqlite3",
                   "TEST": {"NAME": str(Path(temp) / (filename + ".sqlite3")),
                            "SERIALIZE": False}}
@@ -33,7 +33,14 @@ def exercise(mode):
                 raise SystemExit(42)
             return
 
-        setup_databases(verbosity=0, interactive=False, keepdb=True)
+        configured = setup_databases(verbosity=0, interactive=False, keepdb=True)
+        if mode == "shared_setup":
+            # Entries marked primary received create_test_db(); the other aliases are mirrors.
+            # Table visibility alone can pass even if Django sets up the same file twice.
+            connections.close_all()
+            if sum(is_primary for _, _, is_primary in configured) != 1:
+                raise SystemExit(42)
+            return
         try:
             with connections["default"].cursor() as writer:
                 writer.execute("CREATE TABLE repopilot_marker (id INTEGER)")

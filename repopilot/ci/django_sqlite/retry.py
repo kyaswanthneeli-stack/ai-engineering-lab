@@ -17,7 +17,8 @@ from repopilot.swebench_export import load_manifest
 
 INSTANCE = "django__django-12113"
 OLD_PATCH = "8f0793674377dc0f57c8f86a05f703e68a932adbb290e0df7d702a3816ffeb23"
-MODES = ("explicit", "distinct", "shared", "identity")
+ALIAS_PATCH = "49f194d5ae5cc3e7e869105bd0b350e19cb9700b81fe39dffdaab195b2aef17f"
+MODES = ("explicit", "distinct", "shared", "identity", "shared_setup")
 BACKEND = "django/db/backends/sqlite3/creation.py"
 PROBE = Path(__file__).with_name("reproduce.py")
 FEEDBACK = (
@@ -29,7 +30,10 @@ FEEDBACK = (
     "The diagnostic confirmed that the two distinct files received equal database identities from "
     "DatabaseCreation.test_db_signature(). Inspect that method in "
     "django/db/backends/sqlite3/creation.py. Preserve intentional sharing and in-memory behavior. "
-    "Return a finish action with an exact old/new edit. Keep the change minimal."
+    "Another candidate used the connection alias for all databases. Distinct files were then isolated, "
+    "but setup_databases() initialized the SAME configured test file twice for two aliases. "
+    "A persistent test file determines sharing even when the aliases differ. In-memory databases "
+    "retain their current behavior. Return a minimal exact edit."
 )
 
 
@@ -96,12 +100,21 @@ def run(manifest, previous, out):
         report["original"] = results(repo)
         report["prior_patch"] = check_patch(repo, old["model_patch"], work)
         write(path, report)
-        expected = {"explicit": 0, "distinct": 42, "shared": 0, "identity": 42}
+        alias_candidate = json.loads((manifest.parent / "evidence/django-12113-assisted/alias-candidate.json").read_text())
+        if (alias_candidate["instance_id"] != INSTANCE or alias_candidate["base_commit"] != task["base_commit"]
+                or alias_candidate.get("generated_by_model") is not True or digest(alias_candidate["model_patch"]) != ALIAS_PATCH):
+            raise ValueError("Unexpected prior assisted candidate")
+        report["alias_candidate_sha256"] = ALIAS_PATCH
+        report["alias_candidate"] = check_patch(repo, alias_candidate["model_patch"], work)
+        write(path, report)
+        expected = {"explicit": 0, "distinct": 42, "shared": 0, "identity": 42, "shared_setup": 0}
+        if report["alias_candidate"] != {**expected, "distinct": 0, "identity": 0, "shared_setup": 42}:
+            raise RuntimeError("The earlier candidate must exhibit the shared-file setup regression")
         if report["original"] != expected or report["prior_patch"] != expected:
             raise RuntimeError("Both positive controls and the specific original failure are required")
         feedback = FEEDBACK
         report["human_supplied_feedback"] = feedback
-        seen = {OLD_PATCH}
+        seen = {OLD_PATCH, ALIAS_PATCH}
         for attempt in (1, 2):
             directory = out / f"attempt-{attempt}"
 
