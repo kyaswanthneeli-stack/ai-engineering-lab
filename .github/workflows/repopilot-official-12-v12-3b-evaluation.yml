@@ -1,0 +1,343 @@
+name: RepoPilot official v12 3B 12-task SWE-bench evaluation
+
+on:
+  # The full 12-case evaluation is expensive; only rerun after a deliberate
+  # model-throughput preflight and manual operator approval.
+  workflow_dispatch:
+    inputs:
+      preflight_run_id:
+        description: 'Successful unassisted single-task CPU preflight run ID'
+        required: true
+        type: string
+        default: '44929854824'
+
+concurrency:
+  group: repopilot-official-swebench-v12-3b-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify-preflight:
+    # Never scale an unscored or unresolved experiment to the whole cohort.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      model_digest: ${{ steps.verify.outputs.model_digest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify prior independent result and exact experiment source
+        id: verify
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$PREFLIGHT_RUN_ID" =~ ^[0-9]+$ ]]
+          mkdir -p "$RUNNER_TEMP/repopilot-gate/source" "$RUNNER_TEMP/repopilot-gate/score"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREFLIGHT_RUN_ID" > "$RUNNER_TEMP/repopilot-gate/run.json"
+          head_sha=$(python - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          result=json.loads((Path(os.environ["RUNNER_TEMP"])/"repopilot-gate/run.json").read_text())
+          assert result["status"]=="completed" and result["conclusion"]=="success"
+          assert result["path"].split("@")[0]==".github/workflows/repopilot-cpu-single-preflight.yml"
+          assert re.fullmatch("[a-f0-9]{40}",result["head_sha"])
+          print(result["head_sha"])
+          PY
+          )
+          git cat-file -e "$head_sha^{commit}"
+          git diff --exit-code "$head_sha" HEAD -- repopilot/src repopilot/benchmarks/swebench-lite-12.json .github/workflows/repopilot-cpu-single-preflight.yml
+          gh run download "$PREFLIGHT_RUN_ID" --repo "$GITHUB_REPOSITORY" --name repopilot-cpu-preflight-unscored --dir "$RUNNER_TEMP/repopilot-gate/source"
+          gh run download "$PREFLIGHT_RUN_ID" --repo "$GITHUB_REPOSITORY" --name repopilot-cpu-preflight-official-subset --dir "$RUNNER_TEMP/repopilot-gate/score"
+          python - <<'PY'
+          import hashlib, json, os, re
+          from pathlib import Path
+          root=Path(os.environ["RUNNER_TEMP"])/"repopilot-gate"
+          source=root/"source"
+          score=root/"score"
+          result=json.loads((score/"official.json").read_text())
+          summary=json.loads((score/"official-subset-summary.json").read_text())
+          actual=json.loads((source/"preflight-summary.json").read_text())
+          provider=json.loads((source/"provider.json").read_text())
+          pred=(source/"predictions.jsonl").read_bytes()
+          assert pred==(score/"predictions.jsonl").read_bytes()
+          rows=[json.loads(line) for line in pred.splitlines() if line.strip()]
+          assert len(rows)==1 and rows[0]["instance_id"]=="django__django-12113"
+          assert rows[0]["model_name_or_path"]=="qwen2.5-coder:3b"
+          assert actual["status"]=="model_patch_proposed" and actual["eligible_for_official_subset_scoring"] is True
+          assert actual["prediction_sha256"]==hashlib.sha256(pred).hexdigest()
+          assert summary["submitted"]==summary["evaluated"]==summary["resolved"]==1 and summary["error"]==0
+          assert result["resolved_ids"]==["django__django-12113"] and result["unresolved_ids"]==result["error_ids"]==[]
+          assert summary["official_sha256"]==hashlib.sha256((score/"official.json").read_bytes()).hexdigest()
+          assert provider["model"]=="qwen2.5-coder:3b"
+          digest=provider["model_digest"]
+          assert isinstance(digest,str) and re.fullmatch("(?:sha256:)?[a-f0-9]{64}",digest)
+          with open(os.environ["GITHUB_OUTPUT"],"a") as stream:
+              stream.write("model_digest="+digest+"\n")
+          print("Verified unassisted subset resolution and matching source. Subset is not added to the full-cohort score.")
+          PY
+
+  generate-predictions:
+    needs: verify-preflight
+    if: needs.verify-preflight.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 165
+    outputs:
+      prediction_count: ${{ steps.count.outputs.prediction_count }}
+    defaults:
+      run:
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install pinned manifest reader and dataset dependencies
+        run: |
+          python -m pip install -e .
+          python -m pip install 'datasets>=3.0,<5.0'
+      - name: Build trusted offline candidate smoke runtime before inference
+        run: docker build --pull -t repopilot-candidate-deps:py310 -f ci/Dockerfile.candidate-smoke ci
+      - name: Verify pinned Matplotlib build and headless rendering
+        run: |
+          docker pull swebench/sweb.eval.x86_64.matplotlib_1776_matplotlib-22835@sha256:ffe240330bab2ef382e4aba3e09fd624dccef459312defe3c815a58c4a0edd47
+          python ci/verify_native_runtime.py --output .runs/native-preflight.jsonl
+      - name: Start local Ollama with dedicated 3B coding model
+        run: |
+          docker run -d --name repopilot-batch-ollama -p 127.0.0.1:11434:11434 ollama/ollama:latest
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
+          for attempt in 1 2 3; do
+            if docker exec repopilot-batch-ollama ollama pull qwen2.5-coder:3b; then break; fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep $((attempt*10))
+          done
+      # Each provider call is bounded to 120 seconds; the whole agent is
+      # bounded to 420 seconds, below the 510-second per-task subprocess cap.
+      # All 12 tasks use the original issue statement and general-purpose
+      # agentic source discovery. Do not supply hand-selected Django source,
+      # source anchors, previous failed patches or task-specific solution hints.
+      - name: Run all 12 original pinned tasks unassisted with uniform 3B settings
+        env:
+          REPOPILOT_MODEL: qwen2.5-coder:3b
+          REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
+          REPOPILOT_MAX_TOKENS: '1024'
+          REPOPILOT_OLLAMA_NATIVE: '1'
+          REPOPILOT_CONFIRM_RANKED_SOURCE: '1'
+          REPOPILOT_COMPACT_DISCOVERY: '1'
+          REPOPILOT_COMPACT_FINAL: '1'
+          EXPECTED_MODEL_DIGEST: ${{ needs.verify-preflight.outputs.model_digest }}
+          REPOPILOT_PROVIDER_TIMEOUT_SECONDS: '120'
+          REPOPILOT_AGENT_BUDGET_SECONDS: '420'
+          REPOPILOT_FINAL_CONTEXT_CHARS: '9000'
+          REPOPILOT_CANDIDATE_SMOKE: '1'
+          REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP: '1'
+          REPOPILOT_CANDIDATE_SOURCE_EXAMPLES: '1'
+          REPOPILOT_CANDIDATE_MATPLOTLIB_NATIVE: '1'
+          REPOPILOT_CANDIDATE_SMOKE_IMAGE: repopilot-candidate-deps:py310
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          tags=json.load(urllib.request.urlopen('http://127.0.0.1:11434/api/tags',timeout=15))
+          model=next(m for m in tags['models'] if m['name']=='qwen2.5-coder:3b')
+          assert model['digest']==os.environ['EXPECTED_MODEL_DIGEST'], 'Model digest changed since verified preflight'
+          PY
+          curl -fsS "${REPOPILOT_BASE_URL}/models" >/dev/null
+          # Warm the local model with a tiny request before the large issue prompts.
+          curl -fsS --retry 2 --max-time 120 \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"qwen2.5-coder:3b","prompt":"hello","stream":false,"options":{"num_predict":8}}' \
+            http://127.0.0.1:11434/api/generate >/dev/null
+          python -m repopilot.benchmark_batch \
+            --manifest benchmarks/swebench-lite-12.json \
+            --output .runs/swebench-batch \
+            --per-task-timeout 510 --max-steps 12
+      - id: count
+        name: Summarize attempted and unsubmitted tasks without inventing scores
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          path=Path('.runs/swebench-batch/summary.json')
+          summary=json.loads(path.read_text()) if path.exists() else {}
+          assert summary.get('selected_tasks')==12 and len(summary.get('tasks',[]))==12, 'Incomplete attempt evidence'
+          count=summary.get('model_predictions',0)
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output:
+              output.write(f'prediction_count={count}\n')
+          print('SELECTED:',summary.get('selected_tasks','setup failed'))
+          print('MODEL PREDICTIONS:',count)
+          print('OFFICIALLY EVALUATED: NO')
+          if count==0:
+              print('::warning::No valid model-generated predictions; official SWE-bench evaluation must be skipped.')
+          PY
+      - name: Save authentic attempts and prediction files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-12-model-attempts-v12-3b-unscored
+          path: repopilot/.runs/swebench-batch/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Stop model
+        if: always()
+        run: docker rm -f repopilot-batch-ollama || true
+      # Upload evidence before marking a zero-patch experiment failed.
+      # A green workflow must not imply an official resolution when scoring
+      # was skipped and no valid model prediction was produced.
+      - name: Fail empty prediction experiment without inventing a score
+        if: always()
+        env:
+          PREDICTION_COUNT: ${{ steps.count.outputs.prediction_count }}
+        run: |
+          if [ "${PREDICTION_COUNT:-0}" -eq 0 ]; then
+            echo "::error::No genuine model patches generated; official scorer skipped."
+            exit 1
+          fi
+
+  score-predictions:
+    needs: [verify-preflight, generate-predictions]
+    if: needs.generate-predictions.result == 'success' && needs.generate-predictions.outputs.prediction_count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 320
+    defaults:
+      run:
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: repopilot-12-model-attempts-v12-3b-unscored
+          path: repopilot/.runs/swebench-batch/
+      - name: Install official SWE-bench harness and RepoPilot result validator
+        run: |
+          python -m pip install -e .
+          python -m pip install 'swebench>=3.0,<5.0'
+      - name: Evaluate actual predictions for the pinned 12 instances
+        run: |
+          # Evaluate only actual model-submitted predictions. Other pinned
+          # tasks remain explicitly unsubmitted and must never be counted as
+          # officially resolved, unresolved, or evaluated.
+          mapfile -t INSTANCES < <(python - <<'PY'
+          import json
+          from pathlib import Path
+          selected={x['instance_id'] for x in json.loads(
+              Path('benchmarks/swebench-lite-12.json').read_text())['tasks']}
+          rows=[json.loads(line) for line in Path(
+              '.runs/swebench-batch/predictions.jsonl').read_text().splitlines()
+              if line.strip()]
+          ids=[row['instance_id'] for row in rows]
+          assert ids and len(ids)==len(set(ids)) and set(ids)<=selected
+          for instance in ids:
+              print(instance)
+          PY
+          )
+          test "${#INSTANCES[@]}" -gt 0
+          python -m swebench.harness.run_evaluation \
+            --dataset_name princeton-nlp/SWE-bench_Lite \
+            --split test \
+            --predictions_path .runs/swebench-batch/predictions.jsonl \
+            --instance_ids "${INSTANCES[@]}" \
+            --max_workers 1 \
+            --run_id repopilot-12-qwen3b-v12
+      - name: Package official results with portable filenames
+        if: always()
+        run: |
+          mkdir -p .runs/official-evidence
+          python - <<'PY'
+          import json,shutil,tarfile
+          from pathlib import Path
+          out=Path('.runs/official-evidence')
+          candidates=list(Path('.').glob('*repopilot-12-qwen3b-v12.json'))
+          candidates+=list(Path('logs/evaluation').rglob('results.json')) if Path('logs/evaluation').is_dir() else []
+          if candidates:
+              source=candidates[0]
+              json.loads(source.read_text())
+              shutil.copy2(source,out/'official-evaluation-result.json')
+          else:
+              print('No authoritative results JSON; evidence is incomplete')
+          if Path('logs/evaluation').is_dir():
+              with tarfile.open(out/'official-evaluation-logs.tar.gz','w:gz') as archive:
+                  archive.add('logs/evaluation',arcname='logs/evaluation')
+          shutil.copy2('.runs/swebench-batch/predictions.jsonl',out/'real-model-predictions.jsonl')
+          PY
+      - name: Validate official evaluator and write reproducible scorecard
+        env:
+          EXPECTED_MODEL_DIGEST: ${{ needs.verify-preflight.outputs.model_digest }}
+          PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
+        run: |
+          test -s .runs/official-evidence/official-evaluation-result.json
+          python -m repopilot.swebench_results \
+            benchmarks/swebench-lite-12.json \
+            .runs/official-evidence/official-evaluation-result.json \
+            .runs/swebench-batch/predictions.jsonl \
+            --output .runs/official-evidence/official-summary.json
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          summary_file=Path('.runs/official-evidence/official-summary.json')
+          summary=json.loads(summary_file.read_text(encoding='utf-8'))
+          # A green evaluator job requires a result for every submitted
+          # prediction, but does not require twelve successful predictions.
+          if (not summary['submitted'] or
+              summary['evaluated'] != summary['submitted'] or
+              summary['submitted_but_unreported'] or summary['error'] or summary['selected'] != 12):
+              raise SystemExit('Incomplete official SWE-bench evidence')
+          files={
+              'manifest': Path('benchmarks/swebench-lite-12.json'),
+              'model_predictions': Path('.runs/swebench-batch/predictions.jsonl'),
+              'official_results': Path('.runs/official-evidence/official-evaluation-result.json'),
+              'validated_summary': summary_file,
+          }
+          provenance={
+              'github_run_url': ('https://github.com/'+os.environ.get('GITHUB_REPOSITORY','')+
+                                 '/actions/runs/'+os.environ.get('GITHUB_RUN_ID','')),
+              'commit_sha': os.environ.get('GITHUB_SHA',''),
+              'harness_run_id': 'repopilot-12-qwen3b-v12',
+              'model': 'qwen2.5-coder:3b',
+              'model_digest': os.environ['EXPECTED_MODEL_DIGEST'],
+              'preflight_run_id': os.environ['PREFLIGHT_RUN_ID'],
+              'dataset': 'princeton-nlp/SWE-bench_Lite',
+              'selected': summary['selected'],
+              'submitted': summary['submitted'],
+              'evaluated': summary['evaluated'],
+              'resolved': summary['resolved'],
+              'sha256': {name:hashlib.sha256(path.read_bytes()).hexdigest()
+                         for name,path in files.items()},
+          }
+          Path('.runs/official-evidence/provenance.json').write_text(
+              json.dumps(provenance,indent=2)+'\n', encoding='utf-8')
+          print('OFFICIAL RESOLVED:', summary['resolved'])
+          print('OFFICIAL SUBMITTED:', summary['submitted'])
+          print('SELECTED COHORT:', summary['selected'])
+          print('RESOLVED / SUBMITTED:',
+                f"{summary['resolved']}/{summary['submitted']}")
+          print('RESOLVED / SELECTED:',
+                f"{summary['resolved']}/{summary['selected']}")
+          PY
+      - name: Upload official reports without unsafe colon filenames
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-12-official-harness-v12-3b
+          path: repopilot/.runs/official-evidence/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 30
