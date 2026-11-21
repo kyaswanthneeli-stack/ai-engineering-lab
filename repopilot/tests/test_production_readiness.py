@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from repopilot.github_issue import _NoRedirect, IssueFetchError, fetch_public_issue
 from repopilot.pipeline import run_issue
+import repopilot
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -66,8 +67,9 @@ class ProductionReadinessTests(unittest.TestCase):
         import tomllib
         import repopilot
         config = tomllib.loads((ROOT / "pyproject.toml").read_text())
-        self.assertEqual(config["project"]["version"], "2.2.0rc1")
-        self.assertEqual(repopilot.__version__, "2.2.0rc1")
+        from importlib.metadata import version
+        self.assertEqual(config["project"]["version"], repopilot.__version__)
+        self.assertEqual(version("repopilot"), repopilot.__version__)
 
     def test_container_contract_no_root_or_public_server(self):
         dockerfile = (ROOT / "container/Dockerfile.cli").read_text()
@@ -76,7 +78,7 @@ class ProductionReadinessTests(unittest.TestCase):
             'ENTRYPOINT ["python", "-m", "repopilot.cli"]',
             "COPY src/ ./src/",
             "PIP_DISABLE_PIP_VERSION_CHECK=1",
-            "repopilot==2.2.0rc1",
+            f"repopilot=={repopilot.__version__}",
         ):
             self.assertIn(expected, dockerfile)
         for forbidden in (
