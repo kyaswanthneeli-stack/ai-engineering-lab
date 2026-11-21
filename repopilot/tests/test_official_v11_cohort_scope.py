@@ -32,7 +32,7 @@ class OfficialV11CohortScopeTests(unittest.TestCase):
 
     def test_uniform_model_budget_is_within_supported_bounds(self):
         settings = dict(re.findall(
-            r"^\s+(REPOPILOT_[A-Z_]+):\s*'([^']+)'\s*$",
+            r"""^[ \t]*(REPOPILOT_[A-Z_]+):[ \t]*['"]?([^'"\r\n]+)['"]?[ \t]*$""",
             self.workflow, re.MULTILINE))
         self.assertEqual(settings["REPOPILOT_MODEL"], "qwen2.5-coder:7b")
         self.assertEqual(settings["REPOPILOT_PROVIDER_TIMEOUT_SECONDS"], "120")
