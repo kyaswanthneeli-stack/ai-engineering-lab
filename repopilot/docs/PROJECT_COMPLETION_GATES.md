@@ -24,6 +24,12 @@ The dedicated local Ollama `qwen2.5-coder:7b` model produced a valid two-line Dj
 
 **Next decision:** Prepare an unassisted, comparable **fixed 12-task** run using a consistent model configuration and original issue text, without the task-specific hand-fed source diagnosis or solution hints. Inspect the outcome independently and report all attempted, submitted, resolved and missing tasks. An additional 12-task benchmark should be launched only with adequate CPU/runner budget and its own bounded timeout/provenance plan.
 
+## Next independent whole-cohort benchmark: v11
+
+[Unassisted Qwen2.5-Coder 7B workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/blob/bench/repopilot-django-behavior/.github/workflows/repopilot-official-12-v11-7b-evaluation.yml) attempts **all the same 12 pinned SWE-bench Lite issues** with uniform model settings and the general `repopilot.benchmark_batch --agentic` path, not the task-specific Django assisted retry. It preserves original problem statements (with the existing bounded context reduction), the ordinary autonomous source inspection policy, each attempt record, raw model predictions, and evaluator/provenance hashes. Candidate submissions must still pass the independent official SWE-bench harness, which records failures and absent patches.
+
+**Acceptance condition:** Only the v11 official evidence can support a new full-cohort score; 2/12 is a target, not an achieved result. A changed model is an explicit experimental variable relative to the v10 3B baseline. Generation on a CPU runner can take substantial runtime; a workflow that merely completes, reports zero predictions, or skips scoring is not a verified resolution result.
+
 ## Definition of done by scope
 
 | Target scope | Readiness | Unfinished evidence |
