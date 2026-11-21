@@ -30,6 +30,22 @@ class AttemptsTests(unittest.TestCase):
             patch="diff --git a/main.py b/main.py\n--- a/main.py\n+++ b/main.py\n@@ -1 +1 @@\n-def bug():return 1\n+def bug():return 2\n"
         return Spec(),{"model":"mock-coder","provider_reported_usage_by_attempt":[{"total_tokens":10}]}
 
+    def test_failure_preserves_safe_provider_metrics_without_prediction(self):
+        from repopilot.agentic_benchmark import AgentToolError
+        metrics=[{"step":1,"phase":"discovery","message_chars":5000,
+                  "token_cap":256,"elapsed_ms":1000,"outcome":"error"}]
+        def failed(*args):
+            exc=AgentToolError("sanitized failure")
+            exc.provider_metrics=metrics
+            raise exc
+        output=self.root/"failed-telemetry"
+        report=attempt_one(self.manifest,INSTANCE,output,dataset_loader=self.dataset,
+                           checkout=self.checkout,model_proposer=failed)
+        self.assertEqual(report["status"],"failed_model_attempt")
+        self.assertEqual(report["provider_metrics"],metrics)
+        self.assertEqual(json.loads((output/"attempt.json").read_text())["provider_metrics"],metrics)
+        self.assertFalse((output/"unreviewed-prediction.json").exists())
+
     def test_long_real_issue_bounded_for_cpu_model_without_fabricated_patch(self):
         statement="Root cause and expected behavior.\n"+("middle details\n"*1600)+"\nFINAL REPRODUCTION CODE"
         excerpt=bounded_issue_context(statement)

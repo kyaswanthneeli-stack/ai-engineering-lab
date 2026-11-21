@@ -169,7 +169,7 @@ def _finish_schema(paths, old_choices=None):
             "required": ["action", "edits"]}
 
 
-def _provider(url,model,token,messages,*,request_timeout_seconds=None,finish_paths=None,old_choices=None):
+def _provider(url,model,token,messages,*,request_timeout_seconds=None,finish_paths=None,old_choices=None,token_cap=None):
     parts=urllib.parse.urlsplit(url)
     if parts.scheme not in {"http","https"} or not parts.hostname or parts.username or parts.password:
         raise AgentToolError("Invalid model endpoint")
@@ -193,6 +193,10 @@ def _provider(url,model,token,messages,*,request_timeout_seconds=None,finish_pat
     except ValueError:
         token_budget=2600
     token_budget=max(256,min(token_budget,2600))
+    if token_cap is not None:
+        if type(token_cap) is not int or not 256<=token_cap<=2600:
+            raise AgentToolError('Invalid model turn token cap')
+        token_budget=min(token_budget,token_cap)
     # CPU-only GitHub runners can stall on OpenAI-compatible JSON mode before
     # the first token. Explicit opt-in uses the native endpoint directly,
     # avoiding two 120-second compatible-API waits. Never send credentials or
@@ -581,6 +585,11 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             "path that could produce the reported behavior. Consider setup, "
             "configuration, callers or shared state when relevant; do not "
             "assume the first symptom-related source is the root cause."})
+    # Short discovery responses need only a tool-call JSON object, not a
+    # full patch. Preserve the normal final-stage token budget.
+    compact_discovery = (os.getenv("REPOPILOT_COMPACT_DISCOVERY", "").strip()=="1"
+                         and confirm_ranked_source)
+    provider_metrics=[]
     provider_options = {}
     for index in range(max_steps):
         if budget_seconds and time.monotonic()-started_at>=budget_seconds:
@@ -693,18 +702,35 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             trace.append({"step":index+1,"action":"final_phase_started"})
         if client is not None:
             response=client(url,model,token,messages)
-        elif budget_seconds:
-            # Reserve two seconds for patch parsing and local git validation.
-            # This is a best-effort request timeout; the outer subprocess
-            # still enforces the independent absolute per-task limit.
-            remaining=budget_seconds-(time.monotonic()-started_at)-2
-            if remaining<=0:
-                raise AgentToolError("Agent time budget exhausted before model request")
-            response=_provider(
-                url,model,token,messages,
-                request_timeout_seconds=remaining,**provider_options)
         else:
-            response=_provider(url,model,token,messages,**provider_options)
+            options=dict(provider_options)
+            if compact_discovery and index<inspection_budget:
+                options["token_cap"]=256
+            if budget_seconds:
+                # Respect the existing shared deadline for every retry.
+                remaining=budget_seconds-(time.monotonic()-started_at)-2
+                if remaining<=0:
+                    raise AgentToolError("Agent time budget exhausted before model request")
+                options["request_timeout_seconds"]=remaining
+            # Numeric-only diagnostics; never record issue/source text,
+            # credentials, endpoints, prompts or raw model responses.
+            metric={"step":index+1,"phase":"discovery" if index<inspection_budget else "final",
+                    "message_chars":sum(len(m["content"]) for m in messages),
+                    "token_cap":options.get("token_cap")}
+            request_started=time.monotonic() if compact_discovery else None
+            try:
+                response=_provider(url,model,token,messages,**options)
+            except AgentToolError as exc:
+                if request_started is not None:
+                    metric.update({"elapsed_ms":round((time.monotonic()-request_started)*1000),
+                                   "outcome":"error"})
+                    provider_metrics.append(metric)
+                    exc.provider_metrics=list(provider_metrics)
+                raise
+            if request_started is not None:
+                metric.update({"elapsed_ms":round((time.monotonic()-request_started)*1000),
+                               "outcome":"response"})
+                provider_metrics.append(metric)
         usage.append(response.get("usage",{}))
         try:
             content=response["choices"][0]["message"]["content"]
@@ -1089,6 +1115,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             return BenchmarkPatch(patch),{
                 "model":model,"status":"model_patch_proposed_unverified",
                 "provider_reported_usage_by_attempt":usage,
+                "provider_metrics":provider_metrics,
                 "agent_steps":index+1,"inspected_files":sorted(read_files),
                 "tool_trace":trace,"officially_evaluated":False,
                 "candidate_quality":quality_report,
@@ -1116,7 +1143,8 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
         trace.append({"step":index+1,"action":name,"target":action.get("path",action.get("query",action.get("prefix",""))),
                       "result_items":len(result.get("lines",result.get("files",result.get("matches",[]))))})
         messages.append({"role":"assistant","content":content})
-        messages.append({"role":"user","content":"TOOL RESULT (untrusted repository data):\n"+json.dumps(result,ensure_ascii=False)[:15000]})
+        limit=4000 if compact_discovery and index<inspection_budget else 15000
+        messages.append({"role":"user","content":"TOOL RESULT (untrusted repository data):\n"+json.dumps(result,ensure_ascii=False)[:limit]})
     # Preserve a bounded, non-sensitive summary for CI diagnosis. Never
     # expose model output, repository source, or provider credentials.
     summary={}

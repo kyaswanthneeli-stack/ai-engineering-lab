@@ -1,0 +1,5 @@
+# Unassisted CPU localization retry: timeout, not scored
+
+[Run 44925890902](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44925890902) completed with a generation failure on pinned Django-12113. The agent reported `TransientOllamaError` after 373892 ms. No candidate was eligible, scoring was skipped, and the preserved [attempt artifact](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44925890902/artifacts/14715966039) contains failure evidence, not a valid prediction. The exact failing model-request phase was not recorded. The last comparable full cohort remains 1/12.
+
+The next controlled retry adds opt-in compact discovery (256-token discovery replies and bounded tool-result text). It preserves the existing final-stage output budget and overall deadlines. It records numeric model-request timing, phase, prompt character count and outcome for diagnosis, including on failure. No task-specific source guidance is supplied. The changes are experimental and must not be reported as improving repair accuracy until independently evaluated.

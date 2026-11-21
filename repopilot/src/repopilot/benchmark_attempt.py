@@ -110,6 +110,8 @@ def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
         report["inspected_files"]=meta.get("inspected_files",[])
         report["tool_trace"]=meta.get("tool_trace",[])
         report["provider_usage"]=meta.get("provider_reported_usage_by_attempt",[])
+        if meta.get("provider_metrics"):
+            report["provider_metrics"]=meta["provider_metrics"]
         report["candidate_smoke"]=meta.get("candidate_smoke")
         report["candidate_quality"]=meta.get("candidate_quality")
         report["status"]="model_patch_proposed"
@@ -124,6 +126,9 @@ def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
         report["status"]="failed_model_attempt" if report["status"]=="attempted" else "setup_failed"
         report["error_type"]=type(exc).__name__
         report["error"]=str(exc)[:350]
+        from .agentic_benchmark import AgentToolError
+        if isinstance(exc,AgentToolError) and getattr(exc,"provider_metrics",None):
+            report["provider_metrics"]=exc.provider_metrics
     report["elapsed_ms"]=round((time.monotonic()-started)*1000)
     (output/"attempt.json").write_text(json.dumps(report,indent=2)+"\n",encoding="utf-8")
     return report
