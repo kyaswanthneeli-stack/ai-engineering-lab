@@ -1,8 +1,6 @@
 # RepoPilot v2.2.0 stable-release handoff
 
-**Prepared 21 November 2026. No stable v2.2.0 release has been published
-by this staging PR.** The public portfolio prototype is already available as
-stable v2.1.1 and prerelease v2.2.0rc1.
+**Published November 21, 2026:** [stable v2.2.0](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/releases/tag/v2.2.0). [Release evidence](RELEASE_EVIDENCE_v2.2.0.md) records the final workflow, assets, hashes and image digest.
 
 ## Gate A — model performance evidence (reviewed; accuracy target open)
 
@@ -39,5 +37,4 @@ deployment restrictions, known limitations and rollback guide.
 Never advertise an unattended production repair service, or a 2/12 solve
 rate without a comparable, independently verified result.
 
-**Release disposition now:** prepared/staged; blocked by the ongoing
-official v11 benchmark and the required reviewed source/version merge.
+**Release disposition:** PR #63 and PR #64 merged; [main publication workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44923164974) succeeded and the stable release is live. The accuracy goal remains an independent R&D gate, not an achieved 2/12 result.
