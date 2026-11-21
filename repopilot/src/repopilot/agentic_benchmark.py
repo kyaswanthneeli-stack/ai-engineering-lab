@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import ast
+import hashlib
 import os
 import re
 import socket
@@ -367,7 +368,8 @@ def _compact_final_context(chunks:list[str],max_chars:int)->list[str]:
 def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:str|None=None,
                               client=None,max_steps:int=8,required_targets:set[str]|None=None,
                               auto_issue_paths:bool=False, native_exact_edits:bool=False,
-                              exact_edit_anchors:tuple[str,...]=())->tuple[BenchmarkPatch,dict]:
+                              exact_edit_anchors:tuple[str,...]=(),
+                              rejected_patch_sha256s:tuple[str,...]|set[str]|frozenset[str]=())->tuple[BenchmarkPatch,dict]:
     if not model or not url or not issue_text.strip() or not 2<=max_steps<=24:
         raise AgentToolError("Model, issue and bounded step count required")
     # An optional whole-agent wall-clock budget prevents another model request
@@ -380,6 +382,14 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
         raise AgentToolError("Invalid agent time budget") from exc
     if budget_seconds!=0 and not 10<=budget_seconds<=3600:
         raise AgentToolError("Agent time budget must be 10–3600 seconds or 0 (disabled)")
+    try:
+        rejected_hashes=frozenset(rejected_patch_sha256s)
+    except TypeError as exc:
+        raise AgentToolError("Invalid previously failed patch hashes") from exc
+    if len(rejected_hashes)>128 or any(
+            not isinstance(sha,str) or re.fullmatch(r"[0-9a-f]{64}",sha) is None
+            for sha in rejected_hashes):
+        raise AgentToolError("Invalid previously failed patch SHA-256")
     started_at=time.monotonic()
     root=repo.resolve(strict=True)
     messages=[{"role":"system","content":SYSTEM},
@@ -914,6 +924,25 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 continue
             if not set(targets)<=read_files:
                 raise AgentToolError("Model modified a file it did not inspect")
+            # Never spend Docker or official-evaluator work on a patch whose
+            # SHA-256 was already confirmed unsuccessful by an earlier attempt.
+            # This guard runs after patch normalization but before apply-check,
+            # quality review, smoke tests or candidate submission.
+            candidate_sha=hashlib.sha256(patch.encode("utf-8")).hexdigest()
+            if candidate_sha in rejected_hashes:
+                trace.append({"step":index+1,
+                              "action":"duplicate_failed_patch_rejected",
+                              "patch_sha256":candidate_sha})
+                last_candidate_reason=(
+                    "This exact source patch was already tried and failed "
+                    "independent verification. It was NOT submitted again. "
+                    "Keep the inspected files, but propose a materially "
+                    "different source fix that preserves existing behavior.")
+                if index==max_steps-1:
+                    raise AgentToolError(
+                        "Previously failed patch repeated after model step budget")
+                messages.append({"role":"user","content":last_candidate_reason})
+                continue
             if (auto_issue_paths and not required and not test_focus and
                     targets and all(is_test_path(p) for p in targets) and
                     any(not is_test_path(p) for p in read_files)):
