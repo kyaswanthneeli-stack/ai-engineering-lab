@@ -1,12 +1,8 @@
 name: RepoPilot official v11 7B 12-task SWE-bench evaluation
 
 on:
-  # One experimental PR run, with the original fixed 12-task cohort.
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/repopilot-official-12-v11-7b-evaluation.yml'
-  # Later repeated experiments must be initiated explicitly by a human.
+  # The full 12-case evaluation is expensive; only rerun after a deliberate
+  # model-throughput preflight and manual operator approval.
   workflow_dispatch:
 
 concurrency:
@@ -18,7 +14,6 @@ permissions:
 
 jobs:
   generate-predictions:
-    if: github.event_name == 'workflow_dispatch' || (github.head_ref == 'bench/repopilot-django-behavior' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 165
     outputs:
@@ -114,6 +109,18 @@ jobs:
       - name: Stop model
         if: always()
         run: docker rm -f repopilot-batch-ollama || true
+      # Upload evidence before marking a zero-patch experiment failed.
+      # A green workflow must not imply an official resolution when scoring
+      # was skipped and no valid model prediction was produced.
+      - name: Fail empty prediction experiment without inventing a score
+        if: always()
+        env:
+          PREDICTION_COUNT: ${{ steps.count.outputs.prediction_count }}
+        run: |
+          if [ "${PREDICTION_COUNT:-0}" -eq 0 ]; then
+            echo "::error::No genuine model patches generated; official scorer skipped."
+            exit 1
+          fi
 
   score-predictions:
     needs: generate-predictions

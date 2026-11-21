@@ -1,5 +1,10 @@
 # SWE-bench Lite: 12-task evaluation protocol
 
+## Unscored v11 7B throughput investigation (November 21, 2026)
+
+The [unassisted v11 12-case attempt](OFFICIAL_V11_7B_2026-11-21.md) tried all 12 pinned issues using Qwen2.5-Coder 7B. It produced **zero valid predictions** (ten transient Ollama failures and two agent-deadline failures); its official SWE-bench scoring job was skipped. This is **unscored**, not a new 0/12 official result. The previously verified v10 full-cohort result remains **1/12 (8.3%)**. [Original GitHub run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44914670302) · [raw artifact](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44914670302/artifacts/14712604395).
+
+
 ## New assisted Django subset (November 21, 2026)
 
 [Qwen2.5-Coder 7B assisted Django evaluation](DJANGO_ASSISTED_7B_2026-11-21.md) generated a model patch for `django__django-12113`, passed **six/six** trusted SQLite probes, and received an official independent **1/1 resolved** verdict with zero evaluator errors. The full original prediction and official result are preserved with digest-verified provenance. **This does not change the 1/12 fixed-cohort autonomous benchmark below:** the local model was different and this Django retry used operator-supplied diagnostic guidance and exact source constraints.

@@ -30,6 +30,12 @@ The dedicated local Ollama `qwen2.5-coder:7b` model produced a valid two-line Dj
 
 **Acceptance condition:** Only the v11 official evidence can support a new full-cohort score; 2/12 is a target, not an achieved result. A changed model is an explicit experimental variable relative to the v10 3B baseline. Generation on a CPU runner can take substantial runtime; a workflow that merely completes, reports zero predictions, or skips scoring is not a verified resolution result.
 
+## Confirmed unscored v11 and CPU inference blocker
+
+The complete v11 unassisted Qwen2.5-Coder 7B trial generated no patches for all twelve selected tasks. Ten failed with local Ollama transient/timeout errors and two exhausted the agent deadline. The official evaluator was **skipped** because no predictions were submitted. [Run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44914670302) · [diagnostic report](../benchmarks/OFFICIAL_V11_7B_2026-11-21.md). This is not evidence of a 0/12 resolution score, and the official v10 **1/12** baseline remains.
+
+**Next accuracy milestone:** use a one-issue unassisted throughput preflight with a CPU-suitable model, then run a comparable 12-task official cohort only when the model demonstrably produces timely genuine patches. Production-readiness remains a separate target.
+
 ## Definition of done by scope
 
 | Target scope | Readiness | Unfinished evidence |

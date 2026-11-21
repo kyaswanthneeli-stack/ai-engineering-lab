@@ -22,6 +22,9 @@ class OfficialV11CohortScopeTests(unittest.TestCase):
         manifest = load_manifest(ROOT / "benchmarks/swebench-lite-12.json")
         self.assertEqual(len(manifest), 12)
         self.assertEqual(len({t["instance_id"] for t in manifest}), 12)
+        self.assertIn("  workflow_dispatch:", self.workflow)
+        self.assertNotIn("  pull_request:", self.workflow)
+        self.assertNotIn("  push:", self.workflow)
         self.assertIn("python -m repopilot.benchmark_batch", self.workflow)
         self.assertIn("--manifest benchmarks/swebench-lite-12.json", self.workflow)
         self.assertIn("repopilot-official-12-v11-7b-evaluation.yml", self.workflow)
@@ -56,6 +59,11 @@ class OfficialV11CohortScopeTests(unittest.TestCase):
         self.assertIn("model_predictions", self.workflow)
         self.assertIn("official-evaluation-result.json", self.workflow)
         self.assertNotIn("human_supplied_feedback", self.workflow)
+        self.assertIn("Fail empty prediction experiment", self.workflow)
+        self.assertIn('if [ "${PREDICTION_COUNT:-0}" -eq 0 ]; then', self.workflow)
+        self.assertLess(self.workflow.index("Save authentic attempts and prediction files"),
+                        self.workflow.index("Fail empty prediction experiment"))
+
 
 
 if __name__ == "__main__":
