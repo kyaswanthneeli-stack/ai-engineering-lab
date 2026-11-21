@@ -403,6 +403,11 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
     # For explicitly scoped multi-file tasks, never spend every model call on
     # searching. Switch from discovery to a fresh, patch-only prompt.
     inspection_budget=min(5 if required else 6,max_steps-2) if required or max_steps>=8 else max_steps
+    # Explicitly preinspected, schema-constrained retry jobs have no need for
+    # discovery. Keep the native exact-edit schema active from the FIRST model
+    # request, even when the operator increases max_steps for correction turns.
+    if required and native_exact_edits:
+        inspection_budget=0
     final_context=[]
     last_candidate_reason=""
     # The caller may name affected files (e.g. from the issue). Read them
