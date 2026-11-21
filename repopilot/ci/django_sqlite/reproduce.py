@@ -17,6 +17,9 @@ def exercise(mode):
                            "SERIALIZE": False}}
             if mode == "explicit":
                 db["NAME"] = str(Path(temp) / (alias + "-original.sqlite3"))
+            if mode == "memory_identity":
+                # Identical URI intentionally exercises memory-alias identity.
+                db["TEST"]["NAME"] = "file:shared_memory?mode=memory&cache=shared"
             return db
 
         settings.configure(DATABASES={alias: configuration(alias) for alias in ("default", "other")},
@@ -25,10 +28,15 @@ def exercise(mode):
         from django.db import connections
         from django.test.utils import setup_databases
 
-        if mode == "identity":
+        if mode in ("identity", "memory_identity"):
             default = connections["default"]
             other = connections["other"]
-            assert default.settings_dict["TEST"]["NAME"] != other.settings_dict["TEST"]["NAME"]
+            first = default.settings_dict["TEST"]["NAME"]
+            second = other.settings_dict["TEST"]["NAME"]
+            if mode == "identity":
+                assert first != second
+            else:
+                assert first == second and "mode=memory" in first
             if default.creation.test_db_signature() == other.creation.test_db_signature():
                 raise SystemExit(42)
             return

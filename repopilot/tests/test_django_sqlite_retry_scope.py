@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ci.django_sqlite.retry import method_anchors
+from ci.django_sqlite.retry import MODES, failure_clues, method_anchors
 
 
 class DjangoSQLiteRetryScopeTests(unittest.TestCase):
@@ -51,3 +51,28 @@ class DjangoSQLiteRetryScopeTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "one unique in-memory branch"):
             method_anchors(self.repo)
+    
+    def test_probe_failure_feedback_separates_disk_and_memory_requirements(self):
+        codes = {mode: 0 for mode in MODES}
+        codes["shared_setup"] = 42
+        message = failure_clues(codes)
+        self.assertIn("initialized twice", message)
+        self.assertNotIn("Different persistent", message)
+
+        codes["shared_setup"] = 0
+        codes["distinct"] = 42
+        message = failure_clues(codes)
+        self.assertIn("Different persistent", message)
+        self.assertNotIn("initialized twice", message)
+
+        codes["distinct"] = 0
+        codes["memory_identity"] = 42
+        self.assertIn("In-memory aliases", failure_clues(codes))
+
+    def test_probe_feedback_rejects_missing_or_invalid_modes(self):
+        self.assertIn("passed", failure_clues({mode: 0 for mode in MODES}))
+        with self.assertRaisesRegex(ValueError, "Invalid SQLite"):
+            failure_clues({"distinct": 42})
+        with self.assertRaisesRegex(ValueError, "Invalid SQLite"):
+            failure_clues({mode: "0" for mode in MODES})
+

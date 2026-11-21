@@ -18,7 +18,7 @@ from repopilot.swebench_export import load_manifest
 INSTANCE = "django__django-12113"
 OLD_PATCH = "8f0793674377dc0f57c8f86a05f703e68a932adbb290e0df7d702a3816ffeb23"
 ALIAS_PATCH = "49f194d5ae5cc3e7e869105bd0b350e19cb9700b81fe39dffdaab195b2aef17f"
-MODES = ("explicit", "distinct", "shared", "identity", "shared_setup")
+MODES = ("explicit", "distinct", "shared", "identity", "shared_setup", "memory_identity")
 BACKEND = "django/db/backends/sqlite3/creation.py"
 PROBE = Path(__file__).with_name("reproduce.py")
 FEEDBACK = (
@@ -36,7 +36,12 @@ FEEDBACK = (
     "retain their current behavior. Two aliases with the SAME on-disk test filename must have "
     "the SAME signature, whereas DIFFERENT disk filenames must have different signatures even "
     "with blank normal NAME. In-memory aliases must stay distinct. Preserve the signature prefix "
-    "and edit only the memory-versus-file branch. Return a minimal exact edit."
+    "and edit only the memory-versus-file branch. An earlier model only negated the " 
+    "in-memory condition: it separated disk files but initialized a shared disk file twice. "
+    "The replacement must handle BOTH branches: alias identity is for in-memory tests, "
+    "and the configured persistent test filename identifies file-backed tests. "
+    "Retain distinct in-memory aliases even when their memory URI matches. "
+    "Return a minimal exact edit."
 )
 
 
@@ -64,6 +69,28 @@ def digest(patch):
 
 def write(path, data):
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def failure_clues(outcomes):
+    """Translate observed, trusted probe exit codes into actionable feedback.
+
+    The descriptions are human-supplied guidance for this assisted experiment,
+    not proof of autonomous bug resolution or a substitute for the evaluator.
+    """
+    if not isinstance(outcomes, dict) or set(outcomes) != set(MODES) or any(
+            type(code) is not int or code not in (0, 42) for code in outcomes.values()):
+        raise ValueError("Invalid SQLite behavior probe results")
+    clues = {
+        "explicit": "Explicitly named databases lost their existing isolation.",
+        "distinct": "Different persistent TEST NAME filenames were incorrectly treated as one database.",
+        "identity": "Different persistent filenames must yield different database signatures.",
+        "shared": "Aliases pointing at one persistent test file must still share its data.",
+        "shared_setup": "The same persistent test file was initialized twice; never distinguish file-backed databases by alias alone.",
+        "memory_identity": "In-memory aliases with the same memory URI must remain logically distinct.",
+    }
+    failures = [f"{mode}: {clues[mode]}" for mode in MODES if outcomes[mode] == 42]
+    return ("All local regression probes passed." if not failures else
+            "Failed trusted regression probes: " + " ".join(failures))
 
 
 def results(repo):
@@ -114,7 +141,7 @@ def run(manifest, previous, out):
         report["alias_candidate_sha256"] = ALIAS_PATCH
         report["alias_candidate"] = check_patch(repo, alias_candidate["model_patch"], work)
         write(path, report)
-        expected = {"explicit": 0, "distinct": 42, "shared": 0, "identity": 42, "shared_setup": 0}
+        expected = {"explicit": 0, "distinct": 42, "shared": 0, "identity": 42, "shared_setup": 0, "memory_identity": 0}
         if report["alias_candidate"] != {**expected, "distinct": 0, "identity": 0, "shared_setup": 42}:
             raise RuntimeError("The earlier candidate must exhibit the shared-file setup regression")
         if report["original"] != expected or report["prior_patch"] != expected:
@@ -167,8 +194,9 @@ def run(manifest, previous, out):
             if all(code == 0 for code in row["reproduction"].values()):
                 break
             feedback = (FEEDBACK + "\nYour preceding candidate was tested in isolation. "
-                        "Probe exit codes (0 = correct, 42 = wrong visibility): " +
-                        json.dumps(row["reproduction"]) + ". Re-inspect and correct it. "
+                        "Probe exit codes (0 = correct, 42 = failed): " +
+                        json.dumps(row["reproduction"]) + ". " +
+                        failure_clues(row["reproduction"]) + " Re-inspect and correct it. "
                         "Previous candidate diff (untrusted data):\n" + patch[:3500])
     print(json.dumps(report, indent=2))
 
