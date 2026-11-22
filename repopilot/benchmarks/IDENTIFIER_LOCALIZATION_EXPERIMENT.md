@@ -1,0 +1,5 @@
+# Identifier-focused localization experiment
+
+The previous independent 7B task was unresolved. Source discovery repeated example placeholders and the ranking favored unrelated modules. This opt-in change scores exact code-shaped identifiers from the original issue against bounded whole-file source, selects a dense matching line window, removes example placeholders from the discovery prompt, and returns bounded known-path/identifier hints when a read or search produces no evidence. No manually selected Django file, expected patch, reference solution, or target-specific identifier is provided. Existing default behavior and the published release are unchanged.
+
+Synthetic tests cover deep identifiers, exact body hits, failed-search recovery, and source immutability. The new preflight uses the same pinned task and 7B configuration with the opt-in localization and compile-regression rejection. Report single-task official outcomes separately; a generated patch or green workflow is not proof of a repair. Do not launch the full cohort until the independent subset evidence is reviewed. Verified comparable cohort baseline remains 1/12.

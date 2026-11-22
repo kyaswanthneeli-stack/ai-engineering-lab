@@ -69,16 +69,41 @@ def review_quote_only_patch(repo: Path, patch: str) -> dict:
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(path, destination)
             apply_patch(staging, patch)
+            # Check every modified file before returning a quote-only or
+            # changed verdict. A syntactically valid baseline must never
+            # become uncompilable. Compilation creates a code object only;
+            # no source is executed. Unsupported historical baseline syntax
+            # remains explicitly unavailable rather than a false regression.
+            changed = False
+            unavailable = False
             for name in targets:
                 candidate = staging / name
                 if candidate.stat().st_size > 100_000:
-                    raise ValueError("Large candidate")
-                before = _literal_normalized_tokens(originals[name])
-                after = _literal_normalized_tokens(
-                    candidate.read_text(encoding="utf-8"))
-                if before != after:
-                    return {"status": "changed_or_unknown",
-                            "reason": "tokens_or_positions_differ"}
+                    unavailable = True
+                    continue
+                updated = candidate.read_text(encoding="utf-8")
+                try:
+                    compile(originals[name], name, "exec", dont_inherit=True)
+                except SyntaxError:
+                    unavailable = True
+                    continue
+                try:
+                    compile(updated, name, "exec", dont_inherit=True)
+                except SyntaxError:
+                    return {"status": "invalid_python",
+                            "reason": "candidate_introduced_compile_error"}
+                try:
+                    before = _literal_normalized_tokens(originals[name])
+                    after = _literal_normalized_tokens(updated)
+                except (ValueError, SyntaxError, tokenize.TokenError, RecursionError):
+                    unavailable = True
+                    continue
+                changed |= before != after
+            if unavailable:
+                return {"status": "unavailable", "reason": "static_analysis_unavailable"}
+            if changed:
+                return {"status": "changed_or_unknown",
+                        "reason": "tokens_or_positions_differ"}
         return {"status": "quote_only",
                 "reason": "equal_literal_values_and_other_tokens"}
     except (OSError, ValueError, SyntaxError, tokenize.TokenError,

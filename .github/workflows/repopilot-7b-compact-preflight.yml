@@ -1,0 +1,208 @@
+name: RepoPilot 7B compact single-task unassisted preflight
+on:
+  # One isolated, changed-localization experiment on the stacked PR.
+  pull_request:
+    branches: [main, bench/repopilot-cpu-preflight]
+    paths:
+      - '.github/workflows/repopilot-7b-compact-preflight.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repopilot-7b-compact-preflight-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    if: github.event_name == 'workflow_dispatch' || (github.head_ref == 'bench/repopilot-7b-compact-preflight' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: repopilot
+    outputs:
+      eligible: ${{ steps.report.outputs.eligible }}
+    env:
+      REPOPILOT_MODEL: qwen2.5-coder:7b
+      REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
+      REPOPILOT_MAX_TOKENS: '1024'
+      REPOPILOT_OLLAMA_NATIVE: '1'
+      REPOPILOT_PROVIDER_TIMEOUT_SECONDS: '120'
+      REPOPILOT_AGENT_BUDGET_SECONDS: '720'
+      REPOPILOT_FINAL_CONTEXT_CHARS: '6000'
+      REPOPILOT_CONFIRM_RANKED_SOURCE: '1'
+      REPOPILOT_COMPACT_DISCOVERY: '1'
+      REPOPILOT_COMPACT_FINAL: '1'
+      REPOPILOT_OLLAMA_DISABLE_THINKING: '1'
+      REPOPILOT_WEIGHT_RARE_TERMS: '1'
+      REPOPILOT_IDENTIFIER_LOCALIZATION: '1'
+      # Compact discovery and exact-edit grammar reduce CPU inference load.
+      REPOPILOT_CANDIDATE_SMOKE: '1'
+      REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP: '1'
+      REPOPILOT_CANDIDATE_SOURCE_EXAMPLES: '1'
+      REPOPILOT_CANDIDATE_SMOKE_IMAGE: repopilot-candidate-deps:py310
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install harness and dataset reader; build offline dependency image
+        run: |
+          python -m pip install -e . 'datasets>=3.0,<5.0'
+          docker build --pull -t repopilot-candidate-deps:py310 -f ci/Dockerfile.candidate-smoke ci
+      - name: Start stronger local 7B coding model
+        run: |
+          mkdir -p .runs/7b-compact-preflight
+          docker run -d --name repopilot-preflight-ollama -p 127.0.0.1:11434:11434 ollama/ollama:latest
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
+          for n in 1 2 3; do
+            if docker exec repopilot-preflight-ollama ollama pull qwen2.5-coder:7b; then break; fi
+            if [ "$n" -eq 3 ]; then exit 1; fi
+            sleep 10
+          done
+      - name: Measure native chat latency and throughput without issue-specific hints
+        run: |
+          python - <<'PY'
+          import json, time, urllib.request
+          from pathlib import Path
+          endpoint = "http://127.0.0.1:11434"
+          tags = json.load(urllib.request.urlopen(endpoint+"/api/tags", timeout=15))
+          model = next(m for m in tags["models"] if m["name"] == "qwen2.5-coder:7b")
+          payload = {"model":model["name"],"stream":False,"format":"json",
+                     "messages":[{"role":"user","content":"Return a JSON object with an ok boolean set to true and a brief description of a Python function."}],
+                     "options":{"temperature":0,"num_predict":100}}
+          started = time.monotonic()
+          request = urllib.request.Request(endpoint+"/api/chat", data=json.dumps(payload).encode(),
+                                           headers={"Content-Type":"application/json"})
+          with urllib.request.urlopen(request, timeout=120) as response:
+              reply=json.load(response)
+          answer=json.loads(reply["message"]["content"])
+          assert answer.get("ok") is True
+          evidence={"model":model["name"],"model_digest":model.get("digest"),
+                    "elapsed_seconds":round(time.monotonic()-started,3)}
+          for key in ("total_duration","load_duration","prompt_eval_count","prompt_eval_duration","eval_count","eval_duration"):
+              evidence[key]=reply.get(key)
+          if evidence["eval_duration"] and evidence["eval_count"]:
+              evidence["generated_tokens_per_second"]=round(evidence["eval_count"]*1e9/evidence["eval_duration"],3)
+          Path(".runs/7b-compact-preflight/provider.json").write_text(json.dumps(evidence,indent=2)+"\n")
+          print(json.dumps(evidence,indent=2))
+          PY
+      - name: Attempt one original pinned Django issue with ordinary autonomous discovery
+        id: attempt
+        continue-on-error: true
+        run: |
+          timeout 840s python -m repopilot.benchmark_attempt django__django-12113 \
+            --agentic --max-steps 12 --manifest benchmarks/swebench-lite-12.json \
+            --output .runs/7b-compact-preflight/attempt
+      - name: Verify candidate provenance or preserve explicit unscored failure
+        id: report
+        if: always()
+        run: |
+          python - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+          from repopilot.swebench_export import load_manifest
+          out=Path(".runs/7b-compact-preflight")
+          out.mkdir(parents=True,exist_ok=True)
+          task=next(t for t in load_manifest(Path("benchmarks/swebench-lite-12.json")) if t["instance_id"]=="django__django-12113")
+          patch=out/"attempt/unreviewed-prediction.json"
+          attempt=out/"attempt/attempt.json"
+          report=json.loads(attempt.read_text()) if attempt.is_file() else {"status":"no_attempt_record"}
+          eligible=False
+          if patch.is_file() and report.get("status")=="model_patch_proposed":
+              candidate=json.loads(patch.read_text())
+              eligible=(candidate.get("instance_id")==task["instance_id"] and
+                        candidate.get("base_commit")==task["base_commit"] and
+                        candidate.get("generated_by_model") is True and
+                        candidate.get("model_name_or_path")==os.environ["REPOPILOT_MODEL"] and
+                        isinstance(candidate.get("model_patch"),str) and
+                        candidate["model_patch"].startswith("diff --git a/") and
+                        candidate["model_patch"].endswith("\n"))
+              if eligible:
+                  entry={key:candidate[key] for key in ("instance_id","model_name_or_path","model_patch")}
+                  prediction=out/"predictions.jsonl"
+                  prediction.write_text(json.dumps(entry)+"\n")
+                  report["prediction_sha256"]=hashlib.sha256(prediction.read_bytes()).hexdigest()
+          report.update({"eligible_for_official_subset_scoring":eligible,"experiment_scope":"one unassisted pinned task; not the full cohort"})
+          (out/"preflight-summary.json").write_text(json.dumps(report,indent=2)+"\n")
+          with open(os.environ["GITHUB_OUTPUT"],"a") as stream:
+              stream.write("eligible="+str(eligible).lower()+"\n")
+          print(json.dumps(report,indent=2))
+          PY
+      - name: Preserve model latency and original attempt evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-7b-compact-preflight-unscored
+          path: repopilot/.runs/7b-compact-preflight/
+          include-hidden-files: true
+          if-no-files-found: error
+      - name: Fail preflight if no genuine patch was generated
+        if: always()
+        env:
+          ELIGIBLE: ${{ steps.report.outputs.eligible }}
+        run: test "$ELIGIBLE" = true
+      - name: Stop local provider
+        if: always()
+        run: docker rm -f repopilot-preflight-ollama || true
+
+  score:
+    needs: generate
+    if: needs.generate.outputs.eligible == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: repopilot-7b-compact-preflight-unscored
+          path: repopilot/.runs/7b-compact-preflight/
+      - name: Independently score the single genuine unassisted patch
+        run: |
+          python -m pip install -e . 'swebench>=3.0,<5.0'
+          python -m swebench.harness.run_evaluation \
+            --dataset_name princeton-nlp/SWE-bench_Lite --split test \
+            --predictions_path .runs/7b-compact-preflight/predictions.jsonl \
+            --instance_ids django__django-12113 --max_workers 1 --run_id compact-preflight-7b
+          python - <<'PY'
+          import json,hashlib,shutil
+          from pathlib import Path
+          from repopilot.swebench_results import official_summary
+          out=Path(".runs/7b-compact-preflight")
+          paths=list(Path(".").glob("*compact-preflight-7b.json"))
+          assert len(paths)==1, paths
+          shutil.copyfile(paths[0],out/"official.json")
+          result=official_summary(Path("benchmarks/swebench-lite-12.json"),out/"official.json",out/"predictions.jsonl")
+          assert result["submitted"]==result["evaluated"]==1 and result["error"]==0
+          result["experiment_scope"]="one unassisted pinned task; not a new full-cohort score"
+          result["official_sha256"]=hashlib.sha256((out/"official.json").read_bytes()).hexdigest()
+          (out/"official-subset-summary.json").write_text(json.dumps(result,indent=2)+"\n")
+          print("INDEPENDENT SINGLE-TASK RESOLVED:",result["resolved"],"/1")
+          PY
+      - name: Preserve independent subset evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-7b-compact-preflight-official-subset
+          path: |
+            repopilot/.runs/7b-compact-preflight/official.json
+            repopilot/.runs/7b-compact-preflight/official-subset-summary.json
+            repopilot/.runs/7b-compact-preflight/predictions.jsonl
+          include-hidden-files: true
+          if-no-files-found: warn
