@@ -168,6 +168,38 @@ def _candidate_paths(root: Path, issue: str, scan_limit: int):
             yield path, rel
 
 
+def issue_identifiers(issue: str) -> tuple[str, ...]:
+    """Bounded code-shaped tokens from the issue, not guessed solution hints."""
+    tokens = re.findall(r"\b[A-Za-z_][A-Za-z_0-9]{2,79}\b", issue[:12000])
+    counts = Counter(t for t in tokens if
+                     ("_" in t and any(ch.isalpha() for ch in t)) or
+                     (t.isupper() and len(t) >= 4) or
+                     bool(re.search(r"[a-z][A-Z]", t)))
+    return tuple(sorted(counts, key=lambda t: (-counts[t], -len(t), t))[:32])
+
+
+def identifier_window(source: str, identifiers: tuple[str, ...], *, count: int = 80) -> int:
+    """Choose a bounded line window around exact code-shaped token matches."""
+    if not 1 <= count <= 120:
+        raise ValueError("Invalid source window")
+    if not identifiers:
+        return 1
+    wanted = set(identifiers)
+    lines = source.splitlines()
+    scores = []
+    for line in lines:
+        hits = set(re.findall(r"\b[A-Za-z_][A-Za-z_0-9]*\b", line)) & wanted
+        scores.append(len(hits))
+    best, start, running = 0, 0, 0
+    for i, score in enumerate(scores):
+        running += score
+        if i >= count:
+            running -= scores[i-count]
+        if running > best:
+            best, start = running, max(0, i-count+1)
+    return start + 1
+
+
 def ranked_source_context(repo: Path, issue: str, *, max_files: int = 8,
                           max_chars: int = 32000, scan_limit: int = 1800) -> list[ContextItem]:
     root = repo.resolve(strict=True)
@@ -179,6 +211,10 @@ def ranked_source_context(repo: Path, issue: str, *, max_files: int = 8,
     candidates = []
     weighted = os.getenv("REPOPILOT_WEIGHT_RARE_TERMS", "").strip() == "1"
     frequencies = Counter()
+    focused = os.getenv("REPOPILOT_IDENTIFIER_LOCALIZATION", "").strip() == "1"
+    identifiers = set(issue_identifiers(issue)) if focused else set()
+    exact_frequency = Counter()
+    exact_hits = {}
     for path, rel in _candidate_paths(root, issue, scan_limit):
         try:
             source = path.read_text(encoding="utf-8")
@@ -212,6 +248,12 @@ def ranked_source_context(repo: Path, issue: str, *, max_files: int = 8,
         body_hits = terms & _tokens(source[:15000])
         if weighted:
             frequencies.update(path_hits | symbol_hits | body_hits)
+        if identifiers:
+            # Search the entire bounded source, including late methods and
+            # configuration uses. Exact tokens avoid incidental substrings.
+            hits = identifiers & set(re.findall(r"\b[A-Za-z_][A-Za-z_0-9]*\b", source))
+            exact_hits[rel] = hits
+            exact_frequency.update(hits)
         candidates.append((priority, score, rel, source, symbols,
                            path_hits, symbol_hits, body_hits))
     if weighted:
@@ -228,6 +270,19 @@ def ranked_source_context(repo: Path, issue: str, *, max_files: int = 8,
             score = round(12 * path_score + 8 * name_score + 2 * body_score)
             return priority, score, rel, source, symbols, paths, names, body
         candidates = [rerank(item) for item in candidates]
+    if identifiers:
+        count = len(candidates)
+        def exact_rerank(item):
+            priority, score, rel, source, symbols, paths, names, body = item
+            hits = exact_hits.get(rel, set())
+            strength = sum(sorted((math.log1p(count / exact_frequency[h])
+                                   for h in hits), reverse=True)[:8])
+            if strength:
+                score += round(36 * strength)
+                if not test_infrastructure and not is_test_path(rel):
+                    priority = 0
+            return priority, score, rel, source, symbols, paths, names, body
+        candidates = [exact_rerank(item) for item in candidates]
     candidates.sort(key=lambda x: (x[0], -x[1], x[2]))
     selected = []
     remaining = max_chars
