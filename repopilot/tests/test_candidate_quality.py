@@ -55,12 +55,43 @@ class CandidateQualityTests(unittest.TestCase):
         self.assertEqual(review_quote_only_patch(
             self.root, proposal)["status"], "changed_or_unknown")
 
-    def test_invalid_syntax_and_unappliable_patch_are_unavailable(self):
-        for proposal in (diff("hooks.py", self.before, "value = (\n"),
-                         diff("hooks.py", "missing = 1\n", "missing = 2\n")):
-            with self.subTest(proposal=proposal):
-                self.assertEqual(review_quote_only_patch(
-                    self.root, proposal)["status"], "unavailable")
+    def test_invalid_candidate_syntax_distinguished_from_unavailable_analysis(self):
+        self.assertEqual(review_quote_only_patch(
+            self.root, diff("hooks.py", self.before, "value = (\n"))["status"],
+            "invalid_python")
+        self.assertEqual(review_quote_only_patch(
+            self.root, diff("hooks.py", "missing = 1\n", "missing = 2\n"))["status"],
+            "unavailable")
+        self.assertEqual((self.root / "hooks.py").read_text(), self.before)
+
+    def test_compile_regression_in_second_file_not_hidden_by_first_valid_change(self):
+        (self.root / "other.py").write_text("def f():\n    return 1\n")
+        proposal = diff("hooks.py", self.before, "value = 3\n")
+        proposal += diff("other.py", "def f():\n    return 1\n",
+                         "def f():\nreturn 2\n")
+        self.assertEqual(review_quote_only_patch(
+            self.root, proposal)["status"], "invalid_python")
+        self.assertEqual((self.root / "other.py").read_text(), "def f():\n    return 1\n")
+
+    def test_original_unsupported_syntax_is_not_candidate_regression(self):
+        original = "print 1\n"
+        (self.root / "hooks.py").write_text(original)
+        self.assertEqual(review_quote_only_patch(
+            self.root, diff("hooks.py", original, "print 2\n"))["status"], "unavailable")
+
+    def test_rejects_invalid_compilation_even_when_quote_gate_disabled(self):
+        def client(*args):
+            return {"choices":[{"message":{"content":json.dumps({
+                "action":"finish","edits":[{"path":"hooks.py",
+                "old":self.before,"new":"return 2\n"}]})}}]}
+        with patch.dict("os.environ", {"REPOPILOT_REJECT_QUOTE_ONLY":"0",
+                                      "REPOPILOT_CANDIDATE_SMOKE":"1"}), patch(
+                "repopilot.agentic_benchmark.smoke_candidate") as smoke:
+            with self.assertRaisesRegex(AgentToolError,"Python compile regression"):
+                propose_agentic_benchmark(self.root,"Fix hook behavior","mock",
+                    "http://127.0.0.1:11434/v1",client=client,
+                    required_targets={"hooks.py"},max_steps=2)
+        smoke.assert_not_called()
         self.assertEqual((self.root / "hooks.py").read_text(), self.before)
 
     def test_symlinked_parent_and_oversized_source_unavailable(self):
