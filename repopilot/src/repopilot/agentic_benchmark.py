@@ -1089,6 +1089,22 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             quality_report=review_quote_only_patch(root,patch)
             trace.append({"step":index+1,"action":"candidate_quality",
                           **quality_report})
+            if quality_report["status"]=="invalid_python":
+                trace.append({"step":index+1,"action":"finish_rejected",
+                              "error_type":"PythonCompileRegression",
+                              "reason":"candidate_introduced_compile_error"})
+                last_candidate_reason=(
+                    "Your candidate introduced a Python syntax, indentation, or "
+                    "compilation error in an originally compilable file. "
+                    "Return a NEW valid source edit with correct indentation "
+                    "and preserve the existing public behavior.")
+                if index==max_steps-1:
+                    raise AgentToolError(
+                        "Python compile regression rejected after step budget")
+                if "finish_paths" in provider_options:
+                    messages=messages[:2]
+                messages.append({"role":"user","content":last_candidate_reason})
+                continue
             if (quality_report["status"]=="quote_only" and
                     os.getenv("REPOPILOT_REJECT_QUOTE_ONLY","1").strip()!="0"):
                 last_candidate_reason=("Your candidate changed only literal spelling "

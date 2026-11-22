@@ -1,9 +1,7 @@
 name: RepoPilot 7B compact single-task unassisted preflight
 on:
-  pull_request:
-    branches: [main, bench/repopilot-cpu-preflight]
-    paths:
-      - '.github/workflows/repopilot-7b-compact-preflight.yml'
+  # The completed experiment was unresolved. Do not automatically spend
+  # another CPU run on this exact task/configuration after maintenance edits.
   workflow_dispatch:
 
 permissions:
