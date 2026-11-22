@@ -1,7 +1,7 @@
 name: RepoPilot 7B compact single-task unassisted preflight
 on:
   pull_request:
-    branches: [main]
+    branches: [main, bench/repopilot-cpu-preflight]
     paths:
       - '.github/workflows/repopilot-7b-compact-preflight.yml'
   workflow_dispatch:
