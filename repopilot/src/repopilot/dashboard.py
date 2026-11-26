@@ -26,6 +26,7 @@ def render_dashboard(report: dict, output: Path, proposal:dict|None=None, issue:
         ("Baseline tests",report.get("baseline",{})),
         ("Before fix: reproduction",before),
         ("After fix: regression",after),
+        ("Execution timeline",report.get("events",report.get("attempts",[]))),
         ("Execution evidence",report)
     ]
     cards="".join(f'<section><h2>{html.escape(name)}</h2><pre>{_json(content)}</pre></section>' for name,content in sections)
