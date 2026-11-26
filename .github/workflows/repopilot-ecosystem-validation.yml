@@ -1,0 +1,121 @@
+name: RepoPilot ecosystem validation
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/repopilot-ecosystem-validation.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  services:
+    if: github.event_name == 'workflow_dispatch' || (github.head_ref == 'fix/repopilot-ecosystem-validation' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: agentgate
+            revision: 08f2cd183a4611f752eb7af8c949a69508893827
+          - name: routewise
+            revision: 9df9686530aee603d56c281a4720247478dda73e
+          - name: codeatlas-mcp
+            revision: 0c6c437d098d44d4bddb8154a3d2d03d10c67b5f
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/${{ matrix.name }}
+          ref: ${{ matrix.revision }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Clean install and integration tests
+        env:
+          COMPONENT: ${{ matrix.name }}
+        run: |
+          python -m venv .qa-venv
+          if [ "$COMPONENT" = codeatlas-mcp ]; then
+            .qa-venv/bin/python -m pip install -e .
+            .qa-venv/bin/python -m unittest discover -s tests -v
+          else
+            .qa-venv/bin/python -m pip install -r requirements.txt
+            .qa-venv/bin/python -m unittest -v
+          fi
+          .qa-venv/bin/python -m pip check
+          .qa-venv/bin/python -m pip freeze --exclude-editable > audit-installed.txt
+      - name: Audit installed dependencies against the Python advisory service
+        run: |
+          python -m pip install 'pip-audit>=2.9,<3'
+          python -m pip_audit --strict --disable-pip -r audit-installed.txt --format json --output audit-results.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: advisories-${{ matrix.name }}
+          path: audit-*.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: advisory-report-${{ matrix.name }}
+          path: audit-results.json
+          if-no-files-found: warn
+
+  browser:
+    if: github.event_name == 'workflow_dispatch' || (github.head_ref == 'fix/repopilot-ecosystem-validation' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/sourcedesk
+          ref: a920aa63ad3059a13dc173c6252e31704894e298
+          path: qa-sourcedesk
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run browser lab and SourceDesk unit suites
+        run: |
+          node --test tests/engine.test.js qa-sourcedesk/tests/search.test.js
+          (cd qa-sourcedesk && python -m unittest discover -s tests -v)
+      - name: Verify desktop and mobile end to end in Chromium
+        run: |
+          python -m pip install 'playwright>=1.50,<2'
+          python -m playwright install --with-deps chromium
+          python - <<'PY'
+          from pathlib import Path
+          from playwright.sync_api import expect, sync_playwright
+
+          with sync_playwright() as playwright:
+              browser = playwright.chromium.launch()
+              for width in (1280, 390):
+                  page = browser.new_page(viewport={"width": width, "height": 900})
+                  page.route("https://**", lambda route: route.abort())
+                  page.goto(Path("evalbench.html").resolve().as_uri())
+                  page.locator("#compare").click()
+                  expect(page.locator("#status")).to_contain_text("Compared")
+                  expect(page.locator("#cases article").first).to_be_visible()
+
+                  page.goto(Path("traceflow.html").resolve().as_uri())
+                  page.locator("#scenario").select_option("retry")
+                  page.locator("#run").click()
+                  expect(page.locator("#outcome")).to_contain_text("COMPLETED", ignore_case=True)
+                  expect(page.locator("#timeline")).to_contain_text("retry_scheduled")
+
+                  page.goto(Path("qa-sourcedesk/index.html").resolve().as_uri())
+                  page.get_by_role("button", name="Lost laptop").click()
+                  page.locator("#results button").first.click()
+                  expect(page.locator("dialog[open]")).to_be_visible()
+                  expect(page.locator("#sourceBody")).to_contain_text("laptop", ignore_case=True)
+                  page.close()
+              browser.close()
+          PY

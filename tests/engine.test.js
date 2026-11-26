@@ -15,3 +15,15 @@ test('budget bounds work',async()=>{const r=await E.runWorkflow({budget:2,delay:
 test('pre-cancelled run performs no calls',async()=>{const c=new AbortController();c.abort();const r=await E.runWorkflow({signal:c.signal,delay:0});assert.equal(r.status,'cancelled');assert.equal(r.calls,0)});
 test('cancel during active step',async()=>{const c=new AbortController();const r=await E.runWorkflow({signal:c.signal,delay:1,onEvent:e=>{if(e.status==='running')c.abort()}});assert.equal(r.status,'cancelled');assert.equal(r.calls,1)});
 test('invalid budgets rejected',async()=>assert.rejects(E.runWorkflow({budget:0})));
+
+test('a required phrase must contain searchable text', () => {
+  const testCase = {
+    id: 'case-phrase',
+    question: 'Question',
+    expected: 'expected response',
+    answerA: 'expected response',
+    answerB: 'expected response',
+    required: ['...'],
+  };
+  assert.throws(() => E.compare([testCase]), /letters or digits/);
+});
