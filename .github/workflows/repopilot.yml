@@ -300,6 +300,20 @@ jobs:
           assert data['model_success_rate'] is None
           print('Correctly excluded fixture from AI resolution claims')
           PY
+      - name: Verify read-only Docker Compose demo
+        run: |
+          trap 'docker compose down' EXIT
+          docker compose config --quiet
+          docker compose build cli
+          docker compose run --rm -T cli > .runs/compose-index.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          symbols = json.loads(Path(".runs/compose-index.json").read_text())
+          assert any(symbol["file"] == "calculator.py" and symbol["name"] == "divide"
+                     for symbol in symbols), symbols
+          PY
       - name: Upload reviewer evidence (fixture only)
         uses: actions/upload-artifact@v4
         with:

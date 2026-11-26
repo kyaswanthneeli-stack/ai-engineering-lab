@@ -1,0 +1,20 @@
+services:
+  cli:
+    build:
+      context: .
+      dockerfile: container/Dockerfile.cli
+    command: ["index", "/workspace/example"]
+    read_only: true
+    network_mode: none
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 1
+    volumes:
+      - type: bind
+        source: ./examples/calculator
+        target: /workspace/example
+        read_only: true
