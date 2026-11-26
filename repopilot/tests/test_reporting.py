@@ -27,8 +27,15 @@ class ReportingTests(unittest.TestCase):
     def test_dashboard_verified_logic(self):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/"run.html"
-            render_dashboard({"outcome":"verified_in_sandbox","before":{"exit_code":1},"after":{"exit_code":0}},p)
+            report={"outcome":"verified_in_sandbox",
+                "baseline":{"exit_code":0,"output":"Ran 1 test in 0s\n","timed_out":False},
+                "before":{"exit_code":1,"output":"FAIL: regression\nRan 2 tests in 0s\n","timed_out":False},
+                "after":{"exit_code":0,"output":"Ran 2 tests in 0s\n","timed_out":False}}
+            render_dashboard(report,p)
             self.assertIn("VERIFIED: fail before",p.read_text())
+            report["before"]["output"]="ERROR: failed import\nRan 2 tests in 0s\n"
+            render_dashboard(report,p)
+            self.assertIn("UNVERIFIED / FAILED",p.read_text())
     def test_benchmark_distinguishes_fixture(self):
         result=aggregate([{"outcome":"verified_in_sandbox","before":{"exit_code":1},"after":{"exit_code":0},"elapsed_ms":1000},{"outcome":"error","model_generated_proposal":True,"elapsed_ms":2000}],"test fixture")
         self.assertEqual(result["verified_patches"],1)

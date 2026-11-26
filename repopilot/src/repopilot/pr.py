@@ -9,15 +9,20 @@ import os
 from pathlib import Path
 import re
 import tempfile
-import shutil
+import urllib.error
 import urllib.request
 from urllib.parse import quote
 from .spec import IssueSpec
 from .patches import validate_patch, apply_patch
 from .review import review_proposal
 from .integrity import proposal_digest
+from .test_evidence import check_verification_report
+from .workspace import copy_workspace, WorkspaceError
 
 class PublishError(ValueError):
+    pass
+
+class GitHubPathNotFound(PublishError):
     pass
 
 def patch_targets(patch:str)->list[str]:
@@ -51,7 +56,15 @@ class GitHubApi:
             opener=urllib.request.build_opener(_RejectRedirect())
             with opener.open(request,timeout=20) as response:
                 raw=response.read(1_000_001)
+                if len(raw) > 1_000_000:
+                    raise PublishError("GitHub response exceeded size limit")
                 return json.loads(raw)
+        except PublishError:
+            raise
+        except urllib.error.HTTPError as exc:
+            if method == "GET" and exc.code == 404:
+                raise GitHubPathNotFound("GitHub resource was not found") from exc
+            raise PublishError(f"GitHub request failed ({method} {path.split('?')[0]})") from exc
         except Exception as exc:
             raise PublishError(f"GitHub request failed ({method} {path.split('?')[0]})") from exc
 
@@ -60,12 +73,14 @@ def publish_approved_draft(repo:Path,spec:IssueSpec,verification:dict,remote:str
         raise PublishError("Explicit human approval is required")
     if review_proposal(spec)["status"]=="blocked":
         raise PublishError("Static proposal review reported blockers; draft PR publishing refused")
-    if verification.get("outcome")!="verified_in_sandbox" or verification.get("baseline",{}).get("exit_code")!=0 or verification.get("before",{}).get("exit_code") in (None,0) or verification.get("after",{}).get("exit_code")!=0:
-        raise PublishError("Verified fail-before/pass-after evidence required")
-    if verification.get("issue_id")!=spec.issue_id:
+    if not isinstance(verification, dict) or verification.get("issue_id")!=spec.issue_id:
         raise PublishError("Issue mismatch")
     if verification.get("proposal_sha256")!=proposal_digest(spec):
         raise PublishError("Verification report does not match exact proposed patch and test")
+    try:
+        check_verification_report(verification)
+    except ValueError as exc:
+        raise PublishError("Verified fail-before/pass-after evidence required") from exc
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+",remote):
         raise PublishError("Invalid remote")
     if not spec.issue_id.startswith(remote+"#"):
@@ -93,24 +108,29 @@ def publish_approved_draft(repo:Path,spec:IssueSpec,verification:dict,remote:str
     base_sha=branch_info["object"]["sha"]
     with tempfile.TemporaryDirectory(prefix="repopilot-pr-") as td:
         root=Path(td)/"repo"
-        shutil.copytree(repo.resolve(strict=True),root,ignore=shutil.ignore_patterns(".git",".venv","__pycache__",".runs"),symlinks=True)
-        # Reject symlinks before using the copy
-        if any(p.is_symlink() for p in root.rglob("*")):
-            raise PublishError("Symlinks are forbidden")
-        originals={}
+        try:
+            copy_workspace(repo.resolve(strict=True), root)
+        except (WorkspaceError, OSError) as exc:
+            raise PublishError("Could not copy a safe publication workspace") from exc
+        ref_query = "?ref=" + quote(base_sha, safe="")
         for name in targets:
             local=root/name
             if not local.is_file() or local.is_symlink():
                 raise PublishError("Patch target missing")
-            remote_file=api.call("GET","/contents/"+quote(remote_path(name),safe="/")+"?ref="+quote(default,safe=""))
+            remote_file=api.call("GET","/contents/"+quote(remote_path(name),safe="/")+ref_query)
             if remote_file.get("type")!="file" or remote_file.get("encoding")!="base64":
                 raise PublishError("Remote file not regular")
             original=base64.b64decode(remote_file["content"])
             if local.read_bytes()!=original:
-                raise PublishError("Local source differs from remote default branch")
-            originals[name]=remote_file["sha"]
+                raise PublishError("Local source differs from pinned remote base")
         if (root/spec.test_path).exists():
             raise PublishError("Reproduction test path already exists locally")
+        try:
+            api.call("GET", "/contents/" + quote(remote_path(spec.test_path), safe="/") + ref_query)
+        except GitHubPathNotFound:
+            pass
+        else:
+            raise PublishError("Reproduction test path already exists in the remote base commit")
         apply_patch(root,spec.patch)
         branch="repopilot/issue-"+re.sub("[^A-Za-z0-9-]","-",spec.issue_id)[:70]
         branch=branch.rstrip("-")

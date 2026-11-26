@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from repopilot.pipeline import run_issue
 from repopilot.spec import IssueSpec
-from repopilot.pr import publish_approved_draft,PublishError,patch_targets
+from repopilot.pr import publish_approved_draft,PublishError,patch_targets,GitHubPathNotFound
 from repopilot.integrity import proposal_digest
 
 PATCH="diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x = 1\n+x = 2\n"
@@ -39,6 +39,7 @@ class PipelineTests(unittest.TestCase):
             publish_approved_draft(Path("."),SPEC,{"outcome":"failed","issue_id":"issue-2"},"a/b","I_APPROVE_DRAFT_PR")
     def test_mock_draft_pr_created_in_reviewed_subdirectory(self):
         class FakeApi:
+            test_exists = False
             def __init__(self):
                 self.calls=[]
             def call(self,method,path,data=None):
@@ -47,8 +48,12 @@ class PipelineTests(unittest.TestCase):
                     return {"full_name":"a/b","default_branch":"main"}
                 if path=="/git/ref/heads/main":
                     return {"object":{"sha":"012345abcdef"}}
-                if method=="GET" and "/contents/nested/a.py" in path:
+                if (method,path)==("GET","/contents/nested/a.py?ref=012345abcdef"):
                     return {"type":"file","encoding":"base64","content":base64.b64encode(b"x = 1\n").decode(),"sha":"blob1"}
+                if (method,path)==("GET","/contents/nested/tests/test_reproduction.py?ref=012345abcdef"):
+                    if self.test_exists:
+                        return {"type":"file"}
+                    raise GitHubPathNotFound("Missing test")
                 if method=="GET" and path=="/git/commits/012345abcdef":
                     return {"tree":{"sha":"basetree"}}
                 if method=="POST" and path=="/git/trees":
@@ -64,14 +69,17 @@ class PipelineTests(unittest.TestCase):
                 if method=="POST" and path=="/pulls":
                     assert data["draft"] is True
                     return {"html_url":"https://github.com/a/b/pull/2","number":2}
-                return {}
+                raise AssertionError((method,path))
         with tempfile.TemporaryDirectory() as t:
             src=Path(t)
             (src/"a.py").write_text("x = 1\n")
             spec=IssueSpec.from_dict({**{k:getattr(SPEC,k) for k in ("issue_id","summary","test_path","reproduction_test","patch")},
                                      "issue_id":"a/b#2","test_command":list(SPEC.test_command)})
-            verified={"outcome":"verified_in_sandbox","issue_id":"a/b#2","baseline":{"exit_code":0},
-                "before":{"exit_code":1},"after":{"exit_code":0},"proposal_sha256":proposal_digest(spec)}
+            verified={"outcome":"verified_in_sandbox","issue_id":"a/b#2",
+                "baseline":{"exit_code":0,"output":"Ran 1 test in 0.001s\n\nOK\n","timed_out":False},
+                "before":{"exit_code":1,"output":"FAIL: test_bug\nRan 2 tests in 0.001s\n","timed_out":False},
+                "after":{"exit_code":0,"output":"Ran 2 tests in 0.001s\n\nOK\n","timed_out":False},
+                "proposal_sha256":proposal_digest(spec)}
             api=FakeApi()
             result=publish_approved_draft(src,spec,verified,"a/b","I_APPROVE_DRAFT_PR",api=api,repo_subdir="nested")
             self.assertEqual(result["url"],"https://github.com/a/b/pull/2")
@@ -81,6 +89,18 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(len(trees),1)
             self.assertEqual({item["path"] for item in trees[0]["tree"]},
                              {"nested/a.py","nested/tests/test_reproduction.py"})
+            api=FakeApi()
+            api.test_exists=True
+            with self.assertRaisesRegex(PublishError,"already exists in the remote base"):
+                publish_approved_draft(src,spec,verified,"a/b","I_APPROVE_DRAFT_PR",api=api,repo_subdir="nested")
+            self.assertFalse(any(method=="POST" for method,_,_ in api.calls))
+
+            api=FakeApi()
+            verified["before"]["timed_out"]=True
+            with self.assertRaisesRegex(PublishError,"evidence required"):
+                publish_approved_draft(src,spec,verified,"a/b","I_APPROVE_DRAFT_PR",api=api,repo_subdir="nested")
+            self.assertEqual(api.calls,[])
+
     def test_draft_pr_rejects_changed_patch_after_verification(self):
         real_spec=IssueSpec.from_dict({
             "issue_id":"a/b#2","summary":"test","test_path":"tests/test_reproduction.py",
