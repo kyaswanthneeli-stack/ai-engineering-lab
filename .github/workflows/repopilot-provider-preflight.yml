@@ -5,13 +5,18 @@ on:
     paths:
       - .github/workflows/repopilot-provider-preflight.yml
   workflow_dispatch:
+    inputs:
+      prefer_title_paths:
+        description: Prioritize distinctive issue-title terms in source paths
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   subset:
-    if: github.event_name == 'workflow_dispatch' || (github.head_ref == 'fix/repopilot-provider-diagnostics' && github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.event_name == 'workflow_dispatch' || (github.head_ref == 'bench/repopilot-title-path-localization' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     defaults:
@@ -22,6 +27,7 @@ jobs:
       REPOPILOT_MODEL: qwen2.5-coder:3b
       REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
       REPOPILOT_OLLAMA_NATIVE: '1'
+      REPOPILOT_TITLE_PATH_PRIORITY: ${{ (github.head_ref == 'bench/repopilot-title-path-localization' || inputs.prefer_title_paths) && '1' || '0' }}
       REPOPILOT_PROVIDER_TIMEOUT_SECONDS: '120'
       REPOPILOT_AGENT_BUDGET_SECONDS: '420'
       REPOPILOT_MAX_TOKENS: '1024'
@@ -52,6 +58,7 @@ jobs:
       - name: Generate once from the original pinned issue statement
         run: |
           output=.runs/provider-preflight
+          printf '%s\n' "$REPOPILOT_TITLE_PATH_PRIORITY" > "$output/title-path-priority"
           sha256sum benchmarks/swebench-lite-12.json > "$output/manifest.sha256"
           status=0
           timeout 540s python -m repopilot.benchmark_attempt "$CASE_ID" --agentic --max-steps 12 --output "$output/attempt" || status=$?

@@ -129,5 +129,22 @@ class ContextSelectionTests(unittest.TestCase):
             max_files=20)
         self.assertFalse(any("private.py" in item.path for item in items))
 
+
+class TitlePathPriorityTests(unittest.TestCase):
+    def test_subsystem_in_issue_title_disambiguates_repeated_symptoms(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "cache3").mkdir()
+            (root / "cache3" / "adapter.py").write_text("def submit(): return 0\n")
+            (root / "symptom.py").write_text(
+                "def persistent_timeout(): return 'persistent timeout and delayed submit'\n"
+            )
+            issue = "Cache fails after timeout\nPersistent timeout happens after delayed submit."
+            ordinary = ranked_source_context(root, issue, max_files=2)
+            focused = ranked_source_context(root, issue, max_files=2, prefer_title_paths=True)
+            self.assertEqual(ordinary[0].path, "symptom.py")
+            self.assertEqual(focused[0].path, "cache3/adapter.py")
+
+
 if __name__=="__main__":
     unittest.main()

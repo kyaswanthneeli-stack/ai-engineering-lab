@@ -31,3 +31,9 @@ to complete a bounded, unassisted attempt and preserve separate provider
 communication, request timeout, and agent-deadline observations. A controlled
 behavior comparison should use a test that distinguishes a known failed
 candidate from the pinned original before spending compute on the full cohort.
+
+## Controlled provider retest
+
+[Run 45904411806](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/45904411806) ran the pinned Django SQLite test-database case using Docker and native loopback Ollama on a standard GitHub-hosted Linux runner. The archived Docker/Ollama preflight passed. The runner produced a patch in 50.496 seconds, including a 42.236-second model call. The first discovery request used 22,413 characters and 2,702 prompt tokens. It emitted a candidate after inspecting two symptom-level files. The import probe did not distinguish the original from the candidate.
+
+The independent evaluator recorded **0/1 resolved**, one unresolved and zero evaluator errors. The prediction SHA-256 was `65d12b223491befedd2a62cb530ffc8bc59476eadc1b22cdaed333f785ec7b6b`, byte-identical to the earlier unassisted 3B preflight prediction. The next experiment changes only source ranking and keeps the same case and model configuration. Distinctive words from the issue title can prioritize matching source path components, including names with numeric version suffixes. The original issue, pinned revision, and official evaluator are preserved. The full-cohort score remains **1/12**.
