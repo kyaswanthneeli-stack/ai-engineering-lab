@@ -31,3 +31,9 @@ to complete a bounded, unassisted attempt and preserve separate provider
 communication, request timeout, and agent-deadline observations. A controlled
 behavior comparison should use a test that distinguishes a known failed
 candidate from the pinned original before spending compute on the full cohort.
+
+## Repository-localization follow-up
+
+[Title-priority trial 45905101721](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/45905101721) used the same pinned case, model digest and Ollama image. It used a smaller discovery prompt (15,022 characters versus 22,413 in the control), chose a different file, and remained **0/1 resolved**. Its changed prediction was independently unresolved. The import probe again failed to distinguish candidate behavior.
+
+Read-only inspection of the pinned Django checkout identified a concrete cause the ranking-only experiment could not fix. None of the files in the SQLite backend package reached the broad discovery candidate set. The original issue explicitly identifies the package in its settings example. Inspecting that bounded package before the general walk puts its base and creation modules at the top of the static shortlist. The controlled follow-up uses this general rule with the unchanged official issue statement and evaluator. A shortlist improvement establishes source coverage only. Accuracy still requires an independent verdict.

@@ -472,6 +472,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
     # untrusted issue to authorize writes or shell access. This is opt-in
     # so ordinary issue-to-PR callers retain their discovery flow.
     if auto_issue_paths and not required:
+        inspect_packages=os.getenv("REPOPILOT_MENTIONED_PACKAGE_CONTEXT","").strip()=="1"
         mentions=list(dict.fromkeys(re.findall(
             r"[A-Za-z0-9_./-]+\.py",issue_text[:12000])))
         # A traceback that mentions tests does not imply the implementation
@@ -498,7 +499,8 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             # for semantically matching implementation before falling back
             # to that test. Keep scans, reads and inspected paths bounded.
             ranked=ranked_source_context(root,issue_text,max_files=6,
-                                         max_chars=15000,scan_limit=1800)
+                                         max_chars=15000,scan_limit=1800,
+                                         inspect_mentioned_packages=inspect_packages)
             for item in ranked:
                 if len(read_files)>=2:
                     break
@@ -545,7 +547,8 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             # Rank only safe parsed Python source; ignore low-confidence
             # matches rather than preinspecting alphabetical random files.
             ranked=ranked_source_context(root,issue_text,max_files=2,
-                                         max_chars=9000,scan_limit=1800)
+                                         max_chars=9000,scan_limit=1800,
+                                         inspect_mentioned_packages=inspect_packages)
             for item in ranked:
                 # Positive lexical/symbol evidence is sufficient to safely
                 # inspect source. An arbitrary score cutoff previously caused

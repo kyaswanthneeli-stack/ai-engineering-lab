@@ -129,5 +129,24 @@ class ContextSelectionTests(unittest.TestCase):
             max_files=20)
         self.assertFalse(any("private.py" in item.path for item in items))
 
+
+class MentionedPackageTests(unittest.TestCase):
+    def test_complex_repository_budget_does_not_hide_explicit_package(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "symptom.py").write_text("def duplicate_cache(): return None\n")
+            pkg = root / "lib" / "plugins" / "cache"
+            pkg.mkdir(parents=True)
+            (pkg / "adapter.py").write_text("def lookup(): return None\n")
+            unavailable = root / "lib" / "plugins" / "external"
+            unavailable.symlink_to(root, target_is_directory=True)
+            issue = "Duplicate cache values with lib.plugins.cache and lib.plugins.external."
+            baseline = ranked_source_context(root, issue, max_files=2, scan_limit=1)
+            focused = ranked_source_context(root, issue, max_files=2, scan_limit=1,
+                                            inspect_mentioned_packages=True)
+            self.assertEqual([item.path for item in baseline], ["symptom.py"])
+            self.assertEqual([item.path for item in focused], ["lib/plugins/cache/adapter.py", "symptom.py"])
+
+
 if __name__=="__main__":
     unittest.main()
