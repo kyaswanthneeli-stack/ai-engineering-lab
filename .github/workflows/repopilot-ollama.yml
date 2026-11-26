@@ -2,6 +2,11 @@ name: RepoPilot local Ollama integration
 
 on:
   push:
+    branches: [main]
+    paths:
+      - '.github/workflows/repopilot-ollama.yml'
+  pull_request:
+    branches: [main]
     paths:
       - '.github/workflows/repopilot-ollama.yml'
   workflow_dispatch:
@@ -12,6 +17,7 @@ permissions:
 
 jobs:
   real-model-attempt:
+    if: github.event_name != 'pull_request' || (github.head_ref == 'fix/repopilot-live-operator-check' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 25
     defaults:
@@ -19,6 +25,8 @@ jobs:
         working-directory: repopilot
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -43,8 +51,7 @@ jobs:
         env:
           REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
           REPOPILOT_MODEL: qwen2.5-coder:3b
-          REPOPILOT_DEBUG_CANDIDATE: '1' # Public synthetic fixture only; do not use for private repos
-          REPOPILOT_CHECKOUT_SHA: ${{ github.sha }}
+          REPOPILOT_CHECKOUT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           python -m repopilot.cli run-pinned https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/1 "$REPOPILOT_CHECKOUT_SHA" --repo-subdir repopilot/fixtures/calculator-buggy --output .runs/ollama-issue-1
       - name: Print verifiable attempt status

@@ -85,9 +85,11 @@ def propose(repo:Path,issue_text:str,model:str,url:str,token:str|None=None,clien
     if not issue_text.strip() or len(issue_text)>12000 or not model or len(model)>100:
         raise ProposalError("Invalid issue or model")
     parsed=urllib.parse.urlsplit(url)
-    if parsed.scheme not in ("http","https") or parsed.username or parsed.password or not parsed.hostname:
+    if (parsed.scheme not in ("http","https") or parsed.username or parsed.password or not parsed.hostname
+            or parsed.query or parsed.fragment):
         raise ProposalError("Invalid provider URL")
-    if parsed.scheme=="http" and parsed.hostname not in ("localhost","127.0.0.1","::1"):
+    loopback=parsed.hostname in ("localhost","127.0.0.1","::1")
+    if parsed.scheme=="http" and not loopback:
         raise ProposalError("HTTP only permitted for loopback model")
     repo=repo.resolve(strict=True)
     selected=ranked_source_context(repo,issue_text,max_files=8,max_chars=32000)
@@ -110,12 +112,20 @@ def propose(repo:Path,issue_text:str,model:str,url:str,token:str|None=None,clien
             body=json.dumps({"model":model,"temperature":0,"stream":False,"max_tokens":3600,
               "messages":[{"role":"system","content":system},{"role":"user","content":prompt}],
               "response_format":{"type":"json_object"}}).encode()
-            opener=urllib.request.build_opener(_RejectRedirect())
+            handlers=[_RejectRedirect()]
+            if loopback:
+                handlers.append(urllib.request.ProxyHandler({}))
+            opener=urllib.request.build_opener(*handlers)
             try:
                 with opener.open(urllib.request.Request(endpoint,data=body,headers=headers,method="POST"),timeout=75) as response:
                     if response.status!=200:
                         raise ProposalError("Provider returned non-200")
-                    result=json.loads(response.read(1000001))
+                    payload=response.read(1_000_001)
+                    if len(payload)>1_000_000:
+                        raise ProposalError("Provider response exceeded size limit")
+                    result=json.loads(payload)
+            except ProposalError:
+                raise
             except Exception as exc:
                 raise ProposalError("Model provider call failed") from exc
         try:

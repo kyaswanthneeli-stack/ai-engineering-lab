@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from repopilot.context import index_python
 from repopilot.spec import IssueSpec
@@ -74,6 +75,21 @@ class Tests(unittest.TestCase):
             result={"choices":[{"message":{"content":json.dumps(body)}}]}
             with self.assertRaises(ProposalError):
                 propose(Path(t),"fix bug","local","http://127.0.0.1:11434/v1",client=lambda *_:result)
+    def test_model_loopback_bypasses_ambient_proxy_and_limits_reply(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            (repo / "calculator.py").write_text("def divide(a,b): return 0\n")
+            with patch("repopilot.planner.urllib.request.build_opener") as opener:
+                response=opener.return_value.open.return_value.__enter__.return_value
+                response.status=200
+                response.read.return_value=b"x" * 1_000_001
+                with self.assertRaisesRegex(ProposalError, "exceeded size limit"):
+                    propose(repo,"fix division","local","http://127.0.0.1:11434/v1")
+                self.assertEqual(opener.call_args.args[-1].proxies,{})
+                response.read.assert_called_once_with(1_000_001)
+        with self.assertRaisesRegex(ProposalError,"Invalid provider URL"):
+            propose(Path("."),"fix division","local","http://127.0.0.1:11434/v1?x=1")
+
     def test_verify_mock(self):
         with tempfile.TemporaryDirectory() as t:
             root=Path(t,"repo");root.mkdir()
