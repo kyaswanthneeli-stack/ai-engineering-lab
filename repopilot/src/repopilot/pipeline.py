@@ -8,7 +8,7 @@ import os
 import time
 from .github_issue import fetch_public_issue
 from .planner import propose, save_proposal
-from .engine import execute
+from .engine import execute, VerificationError
 from .dashboard import render_dashboard
 from .review import review_proposal
 
@@ -23,6 +23,7 @@ def run_issue(repo:Path,issue_url:str,output:Path,issue_reader=fetch_public_issu
     report=None
     proposal_data=None
     issue_data=None
+    verification_path=output/"verification.json"
     try:
         issue_data=issue_reader(issue_url)
         record("issue_fetched",issue_data["issue_id"])
@@ -37,14 +38,24 @@ def run_issue(repo:Path,issue_url:str,output:Path,issue_reader=fetch_public_issu
         save_proposal(spec,meta,output/"proposal.json")
         proposal_data=json.loads((output/"proposal.json").read_text())
         record("proposal_saved_for_human_review","Generated changes are never pushed automatically")
-        report=verifier(repo,spec,output/"verification.json")
+        report=verifier(repo,spec,verification_path)
         record("docker_verification_complete",report["outcome"])
         report["model_generated_proposal"]=True
         report["model_metadata"]=meta
         report["static_review"]=static_review
     except Exception as exc:
         record("pipeline_failed",type(exc).__name__)
-        report=report or {"issue_id":(issue_data or {}).get("issue_id","unknown"),"outcome":"failed","model_generated_proposal":bool(proposal_data),"error_type":type(exc).__name__,"error":"Pipeline failed; consult the sanitized error type and CI checks","draft_pr_created":False}
+        if isinstance(exc, VerificationError) and verification_path.is_file():
+            report=json.loads(verification_path.read_text(encoding="utf-8"))
+            report["model_generated_proposal"]=bool(proposal_data)
+            report["model_metadata"]=meta
+            report["static_review"]=static_review
+        else:
+            report={"issue_id":(issue_data or {}).get("issue_id","unknown"),"outcome":"failed",
+                    "model_generated_proposal":bool(proposal_data),
+                    "error":"Pipeline failed; consult the sanitized error type and CI checks",
+                    "draft_pr_created":False}
+        report["error_type"]=type(exc).__name__
     report["events"]=events
     report["elapsed_ms"]=round((time.monotonic()-start)*1000)
     (output/"run.json").write_text(json.dumps(report,indent=2)+"\n",encoding="utf-8")

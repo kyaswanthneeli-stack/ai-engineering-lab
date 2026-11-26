@@ -2,14 +2,24 @@
 import json
 import statistics
 from pathlib import Path
+from .test_evidence import check_verification_report
 
 def aggregate(records:list[dict],dataset_name:str="unlabeled") -> dict:
     if not isinstance(records,list):
         raise ValueError("Expected a list")
     total=len(records)
-    verified=sum(1 for x in records if x.get("outcome")=="verified_in_sandbox" and x.get("before",{}).get("exit_code") not in (0,None) and x.get("after",{}).get("exit_code")==0)
-    model_attempts=sum(1 for x in records if x.get("model_generated_proposal") is True)
-    live_resolved=sum(1 for x in records if x.get("model_generated_proposal") is True and x.get("outcome")=="verified_in_sandbox" and x.get("before",{}).get("exit_code") not in (0,None) and x.get("after",{}).get("exit_code")==0)
+    verified=0
+    model_attempts=0
+    live_resolved=0
+    for record in records:
+        model_generated=record.get("model_generated_proposal") is True
+        model_attempts+=int(model_generated)
+        try:
+            check_verification_report(record)
+        except ValueError:
+            continue
+        verified+=1
+        live_resolved+=int(model_generated)
     times=[x["elapsed_ms"] for x in records if isinstance(x.get("elapsed_ms"),(int,float)) and x["elapsed_ms"]>=0]
     return {
         "dataset":dataset_name,"attempts":total,"verified_patches":verified,

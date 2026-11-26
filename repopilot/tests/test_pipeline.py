@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 from repopilot.pipeline import run_issue
+from repopilot.engine import execute
+from repopilot.sandbox import RunResult
 from repopilot.spec import IssueSpec
 from repopilot.pr import publish_approved_draft,PublishError,patch_targets,GitHubPathNotFound
 from repopilot.integrity import proposal_digest
@@ -31,6 +33,27 @@ class PipelineTests(unittest.TestCase):
                 model_proposer=lambda *a: (_ for _ in ()).throw(RuntimeError("no provider")))
             self.assertEqual(result["outcome"],"failed")
             self.assertFalse(result["model_generated_proposal"])
+    def test_pipeline_renders_recorded_baseline_failure(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)/"repo"
+            root.mkdir()
+            folder=Path(d)/"run"
+
+            def verifier(repo, spec, output):
+                return execute(repo,spec,output,runner=lambda *args,**kwargs:RunResult(
+                    124,30,"Timed out; Docker reported forced container removal",True))
+
+            report=run_issue(root,"https://github.com/a/b/issues/2",folder,
+                issue_reader=lambda _:{"issue_id":"a/b#2","text":"fix"},
+                model_proposer=lambda *a:(SPEC,{"model":"fixture"}),
+                verifier=verifier)
+            self.assertEqual(report["failed_stage"],"baseline_tests")
+            self.assertTrue(report["baseline"]["timed_out"])
+            self.assertEqual(report["model_metadata"]["model"],"fixture")
+            dashboard=(folder/"dashboard.html").read_text()
+            self.assertIn("Docker reported forced container removal",dashboard)
+            self.assertIn("UNVERIFIED / FAILED",dashboard)
+
     def test_draft_pr_needs_approval(self):
         with self.assertRaises(PublishError):
             publish_approved_draft(Path("."),SPEC,{"outcome":"verified_in_sandbox","issue_id":"issue-2","before":{"exit_code":1},"after":{"exit_code":0}},"a/b","NO")

@@ -100,10 +100,18 @@ class Tests(unittest.TestCase):
                     calls.append(1)
                     return RunResult(0,1,"passed")
                 execute(root,IssueSpec.from_dict(RAW),Path(t,"r.json"),runner=falsely_passing)
+            failure=json.loads(Path(t,"r.json").read_text())
+            self.assertEqual(failure["failed_stage"],"reproduction_tests")
+            self.assertEqual(failure["before"]["exit_code"],0)
+            self.assertNotIn("after",failure)
     def test_verify_rejects_preexisting_failures(self):
         with tempfile.TemporaryDirectory() as t:
             root=Path(t,"repo");root.mkdir()
             (root/"calculator.py").write_text("def divide(a, b):\n    if b == 0:\n        return 0  # BUG: should raise ZeroDivisionError\n    return a / b\n")
             with self.assertRaisesRegex(VerificationError,"Original test suite"):
-                execute(root,IssueSpec.from_dict(RAW),Path(t,"r.json"),runner=lambda *a,**kw:RunResult(1,1,"unrelated failed"))
+                execute(root,IssueSpec.from_dict(RAW),Path(t,"r.json"),runner=lambda *a,**kw:RunResult(124,1,"timed out",True))
+            failure=json.loads(Path(t,"r.json").read_text())
+            self.assertEqual(failure["failed_stage"],"baseline_tests")
+            self.assertTrue(failure["baseline"]["timed_out"])
+            self.assertNotIn("before",failure)
 if __name__=="__main__":unittest.main()
