@@ -14,7 +14,9 @@ patches without human review and trusted sandbox verification.
 * **Execution boundary:** The tested repair pipeline runs its fixed Python
   unittest command in a networkless Docker container using `--read-only`,
   `--cap-drop=ALL`, `--security-opt=no-new-privileges`, non-root UID,
-  PID/memory/CPU limits, an ephemeral `/tmp` and bounded timeouts. **Docker is
+  PID/memory/CPU limits, an ephemeral `/tmp`, bounded timeouts and a bounded
+  output tail. The main verifier streams Docker output and disables container
+  log-file storage for those test runs. **Docker is
   still a powerful host capability.** Only run it on a disposable, isolated
   worker with appropriately restricted GitHub permissions.
 * **Deployed CLI image:** `container/Dockerfile.cli` is unprivileged and
