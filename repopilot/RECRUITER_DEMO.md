@@ -2,7 +2,7 @@
 
 **Public interactive walkthrough:** https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/recruiter-demo.html
 
-Evidence status: November 19, 2026. This page documents actual completed runs, not simulated successful coding. Recheck live workflow status before reporting newer numbers.
+Evidence checked November 22, 2026. This page documents actual completed runs, not simulated successful coding. Recheck live workflow status before reporting newer numbers.
 
 ## What is genuinely verified
 
@@ -21,7 +21,7 @@ Evidence status: November 19, 2026. This page documents actual completed runs, n
 | 12–25 sec | [Issue #3](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/3) | This is a deliberately controlled two-module invoicing issue, not a public SWE-bench task. |
 | 25–43 sec | Interactive demo **Inspection** and **AI edits** | Qwen 7B proposed edits only for guarded inspected source. The system rejects unsafe targets and validates candidate diffs. |
 | 43–61 sec | [Actual GitHub Actions run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44540507015) | Baseline tests passed, the curated bug reproduction failed before repair, and Docker passed after the generated changes. |
-| 61–76 sec | [Draft PR #10](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/10) | The verified model-generated candidate was published to a branch and opened for **human review**. It is not merged automatically. |
+| 61–76 sec | [Merged PR #10](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/10) | Review caught a missing negative-price check in direct subtotal calls. PR #10 merged after the validation and regression tests were updated. |
 | 76–90 sec | [Honest benchmark tracker](https://kyaswanthneeli-stack.github.io/ai-engineering-lab/repopilot/benchmark-status.html) | We attempted twelve pinned SWE-bench Lite tasks and scored the four generated patches with the official harness: one resolved, three unresolved, eight tasks unsubmitted. I distinguish evaluated-patch success from selected-task coverage. |
 
 ## Suggested LinkedIn Featured item
