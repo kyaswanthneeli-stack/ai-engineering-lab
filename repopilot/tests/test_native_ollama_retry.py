@@ -62,6 +62,22 @@ class NativeOllamaRecoveryTests(unittest.TestCase):
         native.assert_called_once()
         sleep.assert_not_called()
 
+    def test_timeout_and_connection_are_distinct_without_raw_error_text(self):
+        cases = (
+            (TimeoutError("internal detail"), "provider_timeout"),
+            (urllib.error.URLError(TimeoutError("internal detail")), "provider_timeout"),
+            (urllib.error.URLError(ConnectionRefusedError("internal detail")), "provider_connection"),
+        )
+        for failure, category in cases:
+            with self.subTest(category=category), patch(
+                    "repopilot.agentic_benchmark.urllib.request.build_opener") as build:
+                build.return_value.open.side_effect = failure
+                with self.assertRaises(TransientOllamaError) as caught:
+                    _local_ollama_chat(URL,"coder",[],256)
+                self.assertEqual(caught.exception.category,category)
+                self.assertNotIn("internal detail",str(caught.exception))
+                self.assertEqual(build.call_args.args[0].proxies,{})
+
     def test_http_503_transient_but_400_permanent(self):
         class Opener:
             def __init__(self,status): self.status=status

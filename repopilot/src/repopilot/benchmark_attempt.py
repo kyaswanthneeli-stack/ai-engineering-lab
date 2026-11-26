@@ -71,6 +71,7 @@ def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
     report={"instance_id":instance_id,"repo":task["repo"],"base_commit":task["base_commit"],
             "status":"not_attempted","officially_evaluated":False,"officially_resolved":None,
             "is_reference_patch":False}
+    stage="dataset"
     try:
         if dataset_loader is None:
             try:
@@ -89,41 +90,55 @@ def attempt_one(manifest:Path,instance_id:str,output:Path,*,dataset_loader=None,
         issue=row["problem_statement"]
         if not isinstance(issue,str) or not issue.strip():
             raise ValueError("Official issue statement missing")
-        report["status"]="attempted"
+        stage="issue_context"
         issue_limit=configured_issue_context_chars()
         issue_context=bounded_issue_context(issue,max_chars=issue_limit)
         report["issue_context_limit_chars"]=issue_limit
         report["issue_context_chars"]=len(issue_context)
         report["issue_context_trimmed"]=len(issue)>issue_limit
         owner,repo=task["repo"].split("/")
+        stage="checkout"
         with tempfile.TemporaryDirectory(prefix="repopilot-swebench-") as tmp:
             # Checkout helper only parses the URL to derive the public repo;
             # the issue statement is read from the official pinned dataset.
             work=checkout(f"https://github.com/{owner}/{repo}/issues/1",
                           task["base_commit"],Path(tmp)/"repo")
+            stage="provider_or_planner"
+            report["status"]="attempted"
             spec,meta=model_proposer(work,issue_context,
                                      model or os.getenv("REPOPILOT_MODEL",""),
                                      url or os.getenv("REPOPILOT_BASE_URL",""),
                                      token if token is not None else os.getenv("REPOPILOT_API_KEY"))
+        stage="prediction_export"
         report["model"]=meta.get("model","")
         report["agent_steps"]=meta.get("agent_steps")
         report["inspected_files"]=meta.get("inspected_files",[])
         report["tool_trace"]=meta.get("tool_trace",[])
         report["provider_usage"]=meta.get("provider_reported_usage_by_attempt",[])
+        if "provider_metrics" in meta:
+            report["provider_metrics"]=meta["provider_metrics"]
         report["candidate_smoke"]=meta.get("candidate_smoke")
         report["candidate_quality"]=meta.get("candidate_quality")
-        report["status"]="model_patch_proposed"
-        report["model_generated"]=True
         # Model-reported provenance does not replace review or the official harness.
         submission={"instance_id":instance_id,"base_commit":task["base_commit"],
                     "model_name_or_path":meta["model"],"model_patch":spec.patch,
                     "generated_by_model":True,"human_reviewed":False}
         (output/"unreviewed-prediction.json").write_text(
             json.dumps(submission,indent=2)+"\n",encoding="utf-8")
+        report["status"]="model_patch_proposed"
+        report["model_generated"]=True
     except Exception as exc:
         report["status"]="failed_model_attempt" if report["status"]=="attempted" else "setup_failed"
         report["error_type"]=type(exc).__name__
-        report["error"]=str(exc)[:350]
+        report["failed_stage"]=stage
+        if stage=="provider_or_planner":
+            from .agentic_benchmark import AgentToolError
+            if isinstance(exc,AgentToolError):
+                report["error_category"]=exc.category
+                report["provider_metrics"]=exc.provider_metrics
+                report["error"]=str(exc)[:350]
+        if "error" not in report:
+            report["error"]="Failure while processing "+stage
     report["elapsed_ms"]=round((time.monotonic()-started)*1000)
     (output/"attempt.json").write_text(json.dumps(report,indent=2)+"\n",encoding="utf-8")
     return report
