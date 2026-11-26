@@ -1,0 +1,9 @@
+# CPU preflight baseline — unassisted 3B, 21 November 2026
+
+[Run 44923476100](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44923476100) used the pinned Django-12113 issue, general-purpose agent and original issue text. The CPU model was responsive: native small chat probe 7.116 s, 12.527 generated tokens/s, full attempt (including repository preparation) 113.506 s. The candidate was genuinely model-generated, but it was **unresolved** by the independent evaluator: submitted/evaluated 1, resolved 0, unresolved 1, errors 0.
+
+[Generation artifact](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44923476100/artifacts/14714882096) and [official subset artifact](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44923476100/artifacts/14714434597) contain identical predictions.jsonl (SHA-256 `65d12b223491befedd2a62cb530ffc8bc59476eadc1b22cdaed333f785ec7b6b`); official.json SHA-256 `0bc3dee3c27b90327e83ca99a778eec73813f68d68757629e3872ac213d5d8a2`. The model finished in one step after ranked preinspection, editing symptom-related contenttypes code. A module-import probe returned no observed regression, which does not prove the bug is resolved.
+
+## Next controlled experiment
+
+Enable opt-in `REPOPILOT_CONFIRM_RANKED_SOURCE=1` to make the model investigate before accepting a finish action based solely on heuristic initial ranking. The normal read/search allowlist, three-step discovery limit, final patch phase and provider/agent deadlines remain in place. No task-specific hint, known correct patch, or prior assisted answer is supplied. This is an experimental general-purpose localization policy; a live result is required before claiming benefit. The stable v2.2.0 release is unchanged. The last independently scored complete 12-task cohort remains **1/12**. The new run is a separate single-task experiment, not a new cohort score.

@@ -20,6 +20,38 @@ class AgentTests(unittest.TestCase):
             return {"choices":[{"message":{"content":json.dumps(next(it))}}],"usage":{"total_tokens":5}}
         return client
 
+    def test_discovery_token_cap_limits_only_requested_provider_call(self):
+        with patch.dict("os.environ", {"REPOPILOT_OLLAMA_NATIVE":"1",
+                                       "REPOPILOT_MAX_TOKENS":"1024"}), patch(
+                "repopilot.agentic_benchmark._local_ollama_chat",
+                return_value={"choices":[{"message":{"content":"{}"}}]}) as chat:
+            _provider("http://127.0.0.1:11434/v1","mock",None,[],token_cap=256)
+            self.assertEqual(chat.call_args.args[3],256)
+            _provider("http://127.0.0.1:11434/v1","mock",None,[])
+            self.assertEqual(chat.call_args.args[3],1024)
+            with self.assertRaisesRegex(AgentToolError,"token cap"):
+                _provider("http://127.0.0.1:11434/v1","mock",None,[],token_cap=1)
+
+    def test_opt_in_provider_failure_retains_numeric_diagnostics(self):
+        with patch.dict("os.environ", {"REPOPILOT_CONFIRM_RANKED_SOURCE":"1",
+                                       "REPOPILOT_COMPACT_DISCOVERY":"1",
+                                       "REPOPILOT_AGENT_BUDGET_SECONDS":"0"}), patch(
+                "repopilot.agentic_benchmark._provider",
+                side_effect=AgentToolError("sanitized failure")) as provider:
+            with self.assertRaises(AgentToolError) as failure:
+                propose_agentic_benchmark(
+                    self.repo,"subtotal pricing return wrong total",
+                    "mock","http://127.0.0.1:11434/v1",max_steps=6,
+                    auto_issue_paths=True)
+        metrics=failure.exception.provider_metrics
+        self.assertEqual(provider.call_args.kwargs["token_cap"],256)
+        self.assertEqual(len(metrics),1)
+        self.assertEqual(metrics[0]["phase"],"discovery")
+        self.assertEqual(metrics[0]["outcome"],"error")
+        self.assertEqual(set(metrics[0]),{"step","phase","message_chars",
+                                        "token_cap","elapsed_ms","outcome"})
+        self.assertGreater(metrics[0]["message_chars"],0)
+
     def test_agent_budget_exhaustion_does_not_call_model(self):
         calls=[]
         def client(*args):

@@ -169,7 +169,7 @@ def _finish_schema(paths, old_choices=None):
             "required": ["action", "edits"]}
 
 
-def _provider(url,model,token,messages,*,request_timeout_seconds=None,finish_paths=None,old_choices=None):
+def _provider(url,model,token,messages,*,request_timeout_seconds=None,finish_paths=None,old_choices=None,token_cap=None):
     parts=urllib.parse.urlsplit(url)
     if parts.scheme not in {"http","https"} or not parts.hostname or parts.username or parts.password:
         raise AgentToolError("Invalid model endpoint")
@@ -193,6 +193,10 @@ def _provider(url,model,token,messages,*,request_timeout_seconds=None,finish_pat
     except ValueError:
         token_budget=2600
     token_budget=max(256,min(token_budget,2600))
+    if token_cap is not None:
+        if type(token_cap) is not int or not 256<=token_cap<=2600:
+            raise AgentToolError('Invalid model turn token cap')
+        token_budget=min(token_budget,token_cap)
     # CPU-only GitHub runners can stall on OpenAI-compatible JSON mode before
     # the first token. Explicit opt-in uses the native endpoint directly,
     # avoiding two 120-second compatible-API waits. Never send credentials or
@@ -562,6 +566,39 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             # Shift earlier to patch mode before tiny CPU models exhaust their
             # bounded model calls on repeated source discovery.
             inspection_budget=min(3,max_steps-2)
+    # Lexical ranking identifies candidates, not causal proof. Experimentally
+    # reserve one bounded model-directed discovery turn when all initial reads
+    # came from heuristic ranking, rather than directly named issue paths.
+    # Explicit operator-scoped experiments and existing default behavior
+    # are unchanged. No task-specific paths or reference solutions are used.
+    confirm_ranked_source = (
+        os.getenv("REPOPILOT_CONFIRM_RANKED_SOURCE", "").strip() == "1"
+        and auto_issue_paths and not required and not test_focus
+        and max_steps >= 4 and bool(read_files)
+        and any(e["action"] == "ranked_initial_preinspect" for e in trace)
+        and not any(e["action"] == "issue_path_preinspect" for e in trace)
+    )
+    if confirm_ranked_source:
+        messages.append({"role":"user","content":
+            "The ranked source candidates are only starting points. Before "
+            "finishing, use a literal search or read to inspect the execution "
+            "path that could produce the reported behavior. Consider setup, "
+            "configuration, callers or shared state when relevant; do not "
+            "assume the first symptom-related source is the root cause."})
+    # Short discovery responses need only a tool-call JSON object, not a
+    # full patch. Preserve the normal final-stage token budget.
+    compact_discovery = (os.getenv("REPOPILOT_COMPACT_DISCOVERY", "").strip()=="1"
+                         and confirm_ranked_source)
+    # The CPU experiment may use the existing exact-edit JSON grammar for
+    # its ordinary unassisted final phase. Only model-inspected paths are
+    # allowed; no preselected old-text anchors or task-specific hints.
+    compact_final = (
+        os.getenv("REPOPILOT_COMPACT_FINAL", "").strip()=="1"
+        and auto_issue_paths and not required and not exact_edit_anchors
+        and client is None
+        and os.getenv("REPOPILOT_OLLAMA_NATIVE", "").strip()=="1"
+    )
+    provider_metrics=[]
     provider_options = {}
     for index in range(max_steps):
         if budget_seconds and time.monotonic()-started_at>=budget_seconds:
@@ -650,8 +687,10 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 " Output action=finish with complete corrected source for small files or exact edits for long files."+
 
                 (" Previous candidate error: "+last_candidate_reason if last_candidate_reason else "")}]
-            if native_exact_edits and client is None and os.getenv("REPOPILOT_OLLAMA_NATIVE", "").strip() == "1":
+            if (native_exact_edits or compact_final) and client is None and os.getenv("REPOPILOT_OLLAMA_NATIVE", "").strip() == "1":
                 provider_options = {"finish_paths": tuple(phase_files)}
+                if compact_final:
+                    provider_options["token_cap"] = 512
                 if exact_edit_anchors:
                     if len(required) != 1 or not 1 <= len(exact_edit_anchors) <= 20:
                         raise AgentToolError("Exact anchors require one completely inspected source file")
@@ -674,18 +713,35 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             trace.append({"step":index+1,"action":"final_phase_started"})
         if client is not None:
             response=client(url,model,token,messages)
-        elif budget_seconds:
-            # Reserve two seconds for patch parsing and local git validation.
-            # This is a best-effort request timeout; the outer subprocess
-            # still enforces the independent absolute per-task limit.
-            remaining=budget_seconds-(time.monotonic()-started_at)-2
-            if remaining<=0:
-                raise AgentToolError("Agent time budget exhausted before model request")
-            response=_provider(
-                url,model,token,messages,
-                request_timeout_seconds=remaining,**provider_options)
         else:
-            response=_provider(url,model,token,messages,**provider_options)
+            options=dict(provider_options)
+            if compact_discovery and index<inspection_budget:
+                options["token_cap"]=256
+            if budget_seconds:
+                # Respect the existing shared deadline for every retry.
+                remaining=budget_seconds-(time.monotonic()-started_at)-2
+                if remaining<=0:
+                    raise AgentToolError("Agent time budget exhausted before model request")
+                options["request_timeout_seconds"]=remaining
+            # Numeric-only diagnostics; never record issue/source text,
+            # credentials, endpoints, prompts or raw model responses.
+            metric={"step":index+1,"phase":"discovery" if index<inspection_budget else "final",
+                    "message_chars":sum(len(m["content"]) for m in messages),
+                    "token_cap":options.get("token_cap")}
+            request_started=time.monotonic() if compact_discovery else None
+            try:
+                response=_provider(url,model,token,messages,**options)
+            except AgentToolError as exc:
+                if request_started is not None:
+                    metric.update({"elapsed_ms":round((time.monotonic()-request_started)*1000),
+                                   "outcome":"error"})
+                    provider_metrics.append(metric)
+                    exc.provider_metrics=list(provider_metrics)
+                raise
+            if request_started is not None:
+                metric.update({"elapsed_ms":round((time.monotonic()-request_started)*1000),
+                               "outcome":"response"})
+                provider_metrics.append(metric)
         usage.append(response.get("usage",{}))
         try:
             content=response["choices"][0]["message"]["content"]
@@ -710,11 +766,26 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
         if index>=inspection_budget and name!="finish" and read_files:
             trace.append({"step":index+1,"action":"exploration_rejected_in_final_phase"})
             messages.append({"role":"user","content":
-                "Discovery is finished. The inspected files are above. "
-                "Your next response MUST use action=finish with files "
-                "for small source or exact edits for long source. No tool actions."})
+                "Discovery is finished. The inspected files are above. "+
+                ("Your next response MUST use action=finish with exact edits only. No tool actions."
+                 if "finish_paths" in provider_options else
+                 "Your next response MUST use action=finish with files "
+                 "for small source or exact edits for long source. No tool actions.")})
             continue
         if name=="finish":
+            if (confirm_ranked_source and index < inspection_budget and
+                    not any(e["action"] in {"search", "read"} and
+                            e.get("result_items", 0) > 0 for e in trace)):
+                # Reject premature finish without inspecting or applying its
+                # edit. Keep final-phase fallback and existing deadlines intact.
+                trace.append({"step":index+1,
+                              "action":"ranked_finish_deferred_for_discovery"})
+                messages.append({"role":"user","content":
+                    "Do not edit yet. The initial ranked snippets alone "
+                    "do not identify the cause. Use action=search with a "
+                    "literal identifier or action=read on an existing file "
+                    "to investigate the execution path, then propose a new fix."})
+                continue
             missing=sorted(required-read_files)
             if missing:
                 trace.append({"step":index+1,"action":"finish_deferred","missing_read_files":missing})
@@ -935,12 +1006,26 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                 trace.append({"step":index+1,"action":"finish_rejected",
                               "error_type":type(exc).__name__,
                               "reason":reason})
-                messages.append({"role":"assistant","content":content})
-                messages.append({"role":"user","content":
-                    "Fix this specific error: "+reason+" "+
-                    "Return action=finish with files: [{path, content}] "+
-                    "containing COMPLETE corrected Python source for EVERY "+
-                    "required file. Do not repeat the rejected candidate."})
+                if "finish_paths" in provider_options:
+                    # Exact-edit grammar cannot emit the files format. Retry
+                    # from the original bounded source, not an expanding
+                    # transcript of invalid old snippets. Never auto-repair
+                    # an ambiguous old snippet or relax canonical validation.
+                    messages=messages[:2]
+                    messages.append({"role":"user","content":
+                        "Your previous exact-edit proposal was rejected. "
+                        "Return action=finish with edits only, not files or patch. "
+                        "Copy old text verbatim from the visible source above, "
+                        "including whitespace and indentation. Choose a short "
+                        "unique existing snippet and a concrete corrected new string. "
+                        "Do not invent original text or repeat the rejected edit."})
+                else:
+                    messages.append({"role":"assistant","content":content})
+                    messages.append({"role":"user","content":
+                        "Fix this specific error: "+reason+" "+
+                        "Return action=finish with files: [{path, content}] "+
+                        "containing COMPLETE corrected Python source for EVERY "+
+                        "required file. Do not repeat the rejected candidate."})
                 continue
             missing_targets=sorted(required-set(targets))
             if missing_targets:
@@ -1073,6 +1158,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             return BenchmarkPatch(patch),{
                 "model":model,"status":"model_patch_proposed_unverified",
                 "provider_reported_usage_by_attempt":usage,
+                "provider_metrics":provider_metrics,
                 "agent_steps":index+1,"inspected_files":sorted(read_files),
                 "tool_trace":trace,"officially_evaluated":False,
                 "candidate_quality":quality_report,
@@ -1100,7 +1186,8 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
         trace.append({"step":index+1,"action":name,"target":action.get("path",action.get("query",action.get("prefix",""))),
                       "result_items":len(result.get("lines",result.get("files",result.get("matches",[]))))})
         messages.append({"role":"assistant","content":content})
-        messages.append({"role":"user","content":"TOOL RESULT (untrusted repository data):\n"+json.dumps(result,ensure_ascii=False)[:15000]})
+        limit=4000 if compact_discovery and index<inspection_budget else 15000
+        messages.append({"role":"user","content":"TOOL RESULT (untrusted repository data):\n"+json.dumps(result,ensure_ascii=False)[:limit]})
     # Preserve a bounded, non-sensitive summary for CI diagnosis. Never
     # expose model output, repository source, or provider credentials.
     summary={}
@@ -1115,7 +1202,10 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
         if entry.get("action")=="finish_rejected":
             reason=entry.get("reason","unknown")
             reasons[reason]=reasons.get(reason,0)+1
-    raise AgentToolError(
+    failure=AgentToolError(
         "Agent exhausted bounded model-tool calls without a valid patch; "
         "action_counts="+json.dumps(summary,sort_keys=True)+
         "; rejection_reasons="+json.dumps(reasons,sort_keys=True)[:1100])
+    if provider_metrics:
+        failure.provider_metrics=list(provider_metrics)
+    raise failure
