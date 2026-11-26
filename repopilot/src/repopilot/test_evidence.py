@@ -6,6 +6,8 @@ exit nonzero. A valid reproduction must add tests and produce an actual FAIL.
 from __future__ import annotations
 import re
 
+from .sandbox import RunResult
+
 _COUNT = re.compile(r"(?m)^Ran (\d+) tests? in ")
 _FAIL = re.compile(r"(?m)^FAIL: ")
 _ERROR = re.compile(r"(?m)^ERROR: ")
@@ -36,3 +38,19 @@ def check_three_stage_evidence(baseline, before, after) -> None:
         raise ValueError("Baseline output contains failed tests")
     if _ERROR.search(after.output) or _FAIL.search(after.output):
         raise ValueError("Patched test output contains failed tests")
+
+
+def check_verification_report(report: dict) -> None:
+    """Validate recorded unittest results before using a report as evidence."""
+    if not isinstance(report, dict) or report.get("outcome") != "verified_in_sandbox":
+        raise ValueError("Report does not record a verified outcome")
+    results = []
+    for stage in ("baseline", "before", "after"):
+        entry = report.get(stage)
+        if (not isinstance(entry, dict)
+                or type(entry.get("exit_code")) is not int
+                or not isinstance(entry.get("output"), str)
+                or type(entry.get("timed_out")) is not bool):
+            raise ValueError(f"Missing or invalid {stage} test result")
+        results.append(RunResult(entry["exit_code"], 0, entry["output"], entry["timed_out"]))
+    check_three_stage_evidence(*results)

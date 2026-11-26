@@ -2,7 +2,7 @@
 
 ## Supported deployment boundaries
 
-**RepoPilot v2.2.0rc1 is a human-supervised Python CLI, not an authenticated
+**RepoPilot v2.2.0 is a human-supervised Python CLI, not an authenticated
 multi-tenant web application or fully autonomous production repair service.**
 Do not expose it on a public HTTP endpoint. Do not use its model-generated
 patches without human review and trusted sandbox verification.
@@ -25,7 +25,10 @@ patches without human review and trusted sandbox verification.
   on a separate trusted, Docker-capable operator machine.
 * **PR permissions:** Publishing a draft PR requires exact
   `--approve I_APPROVE_DRAFT_PR`, matching verification evidence, and a
-  scoped GitHub token. Auto-merge is not implemented or recommended.
+  scoped GitHub token. The publisher reads the changed files and checks
+  the reproduction path against the same pinned GitHub commit it uses as
+  the draft branch parent. Use reports produced on a trusted worker and
+  retain their original artifacts for review.
 * **Secrets:** Store tokens in an operator's secure environment/secret
   manager, not in `.env.example`, command lines, committed JSON or dashboards.
   The pipeline's error records use sanitized failure categories rather than
@@ -52,6 +55,6 @@ existing trusted channel. Do not assume a security response SLA exists.
 There is no hosted API authentication, authorization, tenant isolation,
 public job queue, durable service database, or production uptime guarantee.
 The public SWE-bench Lite subset has an independently verified baseline of
-**1/12 resolved (8.3%)** in v9; fixture test passes do not make the agent
+**1/12 resolved (8.3%)** in v10; fixture test passes do not make the agent
 reliably autonomous. Do not use this candidate release for unreviewed
 changes to critical systems.

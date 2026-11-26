@@ -2,8 +2,6 @@
 from pathlib import Path
 from dataclasses import asdict
 import json
-import os
-import shutil
 import tempfile
 import time
 from .context import index_python
@@ -12,6 +10,7 @@ from .sandbox import run_tests
 from .spec import IssueSpec
 from .test_evidence import check_three_stage_evidence
 from .integrity import proposal_digest
+from .workspace import copy_workspace, WorkspaceError
 
 class VerificationError(RuntimeError):
     pass
@@ -20,15 +19,13 @@ def execute(repo:Path,spec:IssueSpec,output:Path,timeout:int=30,runner=run_tests
     repo=repo.resolve(strict=True)
     if not repo.is_dir():
         raise VerificationError("Repository must be directory")
-    for folder,dirs,files in os.walk(repo,followlinks=False):
-        dirs[:]=[d for d in dirs if d not in {".git",".venv","venv","node_modules","__pycache__"}]
-        for name in dirs+files:
-            if (Path(folder)/name).is_symlink():
-                raise VerificationError("Workspace symlink rejected")
     start=time.monotonic()
     with tempfile.TemporaryDirectory(prefix="repopilot-") as temp:
         work=Path(temp)/"repo"
-        shutil.copytree(repo,work,ignore=shutil.ignore_patterns(".git",".venv","__pycache__",".runs"))
+        try:
+            copy_workspace(repo, work)
+        except (WorkspaceError, OSError) as exc:
+            raise VerificationError("Could not copy a safe verification workspace") from exc
         baseline=runner(work,spec.test_command,timeout=timeout)
         if baseline.timed_out or baseline.exit_code!=0:
             raise VerificationError("Original test suite must pass before reproduction test is added")
