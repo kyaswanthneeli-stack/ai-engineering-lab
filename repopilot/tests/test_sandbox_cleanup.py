@@ -8,6 +8,23 @@ from repopilot.sandbox import run_tests
 COMMAND=("python","-m","unittest","discover","-s","tests","-v")
 
 class SandboxCleanupTests(unittest.TestCase):
+    def test_retains_only_end_of_combined_output(self):
+        def run(args, **kwargs):
+            self.assertIn("--log-driver=none", args)
+            self.assertEqual(kwargs["stderr"], subprocess.STDOUT)
+            stream = kwargs["stdout"]
+            for _ in range(128):
+                stream.write(b"x" * 8192)
+            stream.write(b"\xff\nRan 2 tests in 0.1s\nOK\n")
+            return subprocess.CompletedProcess(args, 0)
+
+        with tempfile.TemporaryDirectory() as temp:
+            with patch("repopilot.sandbox.shutil.which", return_value="/usr/bin/docker"):
+                with patch("repopilot.sandbox.subprocess.run", side_effect=run):
+                    result=run_tests(Path(temp),COMMAND)
+        self.assertEqual(len(result.output), 12000)
+        self.assertTrue(result.output.endswith("�\nRan 2 tests in 0.1s\nOK\n"))
+
     def test_failed_cleanup_is_not_reported_as_success(self):
         with tempfile.TemporaryDirectory() as temp:
             def run(args, **kwargs):

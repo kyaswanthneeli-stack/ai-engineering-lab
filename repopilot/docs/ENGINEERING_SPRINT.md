@@ -12,3 +12,22 @@ Audit started 26 November 2026 from main at commit `35457d5`. The published stab
 | P2 | Distribution | The repository has release artifacts and contribution instructions. The original software and documentation now have an MIT license. | Upstream sources and benchmark material retain their terms. Validate packaging and the release checklist before making a new tag. |
 
 Open benchmark branches reviewed include [Django deadline recovery](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/62), [CPU preflight](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/65), and [compact 7B preflight](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/pull/67). Keep independent evaluator outcomes, assisted subset results, and ordinary tests in separate totals.
+
+## v10 failure investigation
+
+Both [original archives](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44814488203) matched the published SHA-256 hashes. The generation and scoring prediction files were byte-identical. The official result and scorecard hashes also matched the preserved provenance.
+
+| Cases | Confirmed observation | What the evidence leaves open |
+| --- | --- | --- |
+| Django 12113, 12589, 14730 and SymPy 11870, 20212 | Native Ollama communication-or-timeout failure after roughly 271–272 seconds in each case. No submitted patch. | The records combine transport errors and timeouts, so the underlying cause of each failure is unknown. |
+| xarray 4493 and pytest 11148 | The remaining agent deadline expired before a native retry after about 270 seconds. No submitted patch. | The artifacts do not establish that a different time budget would have produced a valid patch. |
+| SymPy 13773 | The native provider returned HTTP 500 after about 144 seconds. No submitted patch. | The saved attempt and workflow summary do not establish the provider's internal cause. |
+| Django 12125 | The original and candidate passed a module import probe. The official evaluator found the repair unresolved. | Import success could not verify issue behavior. |
+| Matplotlib 22835 | The original and candidate passed the issue example in the pinned native runtime. The official evaluator found the repair unresolved. | The example did not distinguish the candidate from the baseline. |
+| scikit-learn 12471 | The local module import baseline exited nonzero. A prediction still reached the independent evaluator and remained unresolved. | The local smoke comparison was inconclusive. The evaluator did not record an infrastructure error. |
+
+The first controlled experiment needs a local model worker with enough compute
+to complete a bounded, unassisted attempt and preserve separate provider
+communication, request timeout, and agent-deadline observations. A controlled
+behavior comparison should use a test that distinguishes a known failed
+candidate from the pinned original before spending compute on the full cohort.
