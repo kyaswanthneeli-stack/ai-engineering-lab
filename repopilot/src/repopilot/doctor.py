@@ -112,7 +112,7 @@ def inspect_runtime(*, live: bool = False, model: str | None = None,
             url = urllib.parse.urlunsplit((
                 parts.scheme, parts.netloc, "/api/tags", "", ""))
             request = urllib.request.Request(url, method="GET")
-            opener = urllib.request.build_opener(_NoRedirect())
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
             with opener.open(request, timeout=4) as response:
                 payload = response.read(200_001)
             if len(payload) <= 200_000:
