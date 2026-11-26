@@ -1,0 +1,108 @@
+name: RepoPilot pinned provider preflight
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/repopilot-provider-preflight.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  subset:
+    if: github.event_name == 'workflow_dispatch' || (github.head_ref == 'fix/repopilot-provider-diagnostics' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: repopilot
+    env:
+      CASE_ID: django__django-12113
+      REPOPILOT_MODEL: qwen2.5-coder:3b
+      REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
+      REPOPILOT_OLLAMA_NATIVE: '1'
+      REPOPILOT_PROVIDER_TIMEOUT_SECONDS: '120'
+      REPOPILOT_AGENT_BUDGET_SECONDS: '420'
+      REPOPILOT_MAX_TOKENS: '1024'
+      REPOPILOT_CANDIDATE_SMOKE: '1'
+      REPOPILOT_CANDIDATE_SMOKE_IMAGE: repopilot-candidate-deps:py310
+      REPOPILOT_CANDIDATE_SMOKE_BOOTSTRAP: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare isolated Docker and loopback Ollama
+        run: |
+          mkdir -p .runs/provider-preflight
+          python -m pip install -e . 'datasets>=3,<5'
+          docker build -t repopilot-candidate-deps:py310 -f ci/Dockerfile.candidate-smoke ci
+          docker run -d --name repopilot-preflight-ollama -p 127.0.0.1:11434:11434 ollama/ollama:latest
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          docker exec repopilot-preflight-ollama ollama pull "$REPOPILOT_MODEL"
+          docker inspect --format '{{.Image}}' repopilot-preflight-ollama > .runs/provider-preflight/ollama-image.txt
+          curl -fsS http://127.0.0.1:11434/api/tags > .runs/provider-preflight/models.json
+          python -m repopilot.cli doctor --live > .runs/provider-preflight/doctor.json
+      - name: Generate once from the original pinned issue statement
+        run: |
+          output=.runs/provider-preflight
+          sha256sum benchmarks/swebench-lite-12.json > "$output/manifest.sha256"
+          status=0
+          timeout 540s python -m repopilot.benchmark_attempt "$CASE_ID" --agentic --max-steps 12 --output "$output/attempt" || status=$?
+          printf '%s\n' "$status" > "$output/attempt-exit-status"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from repopilot.swebench_export import load_manifest
+
+          out = Path(".runs/provider-preflight")
+          spec = next(task for task in load_manifest(Path("benchmarks/swebench-lite-12.json"))
+                      if task["instance_id"] == os.environ["CASE_ID"])
+          attempt_path = out / "attempt/attempt.json"
+          if not attempt_path.is_file():
+              raise SystemExit("No completed attempt record. Inspect attempt-exit-status.")
+          attempt = json.loads(attempt_path.read_text())
+          if attempt["status"] != "model_patch_proposed":
+              raise SystemExit("Unscored. The attempt did not produce a model prediction.")
+          candidate = json.loads((out / "attempt/unreviewed-prediction.json").read_text())
+          assert candidate["instance_id"] == spec["instance_id"]
+          assert candidate["base_commit"] == spec["base_commit"]
+          assert candidate["generated_by_model"] is True
+          assert candidate["model_name_or_path"] == os.environ["REPOPILOT_MODEL"]
+          assert candidate["model_patch"].startswith("diff --git a/")
+          assert candidate["model_patch"].endswith("\n")
+          keys = ("instance_id", "model_name_or_path", "model_patch")
+          (out / "predictions.jsonl").write_text(json.dumps({key: candidate[key] for key in keys}) + "\n")
+          PY
+      - name: Independently score the one submitted candidate
+        run: |
+          docker rm -f repopilot-preflight-ollama
+          python -m pip install 'swebench>=3,<5'
+          output=.runs/provider-preflight
+          python -m swebench.harness.run_evaluation --dataset_name princeton-nlp/SWE-bench_Lite \
+            --split test --predictions_path "$output/predictions.jsonl" --instance_ids "$CASE_ID" \
+            --max_workers 1 --run_id provider-preflight
+          official=$(find . -maxdepth 1 -type f -name '*provider-preflight.json')
+          test -f "$official"
+          cp "$official" "$output/official.json"
+          python -m repopilot.swebench_results benchmarks/swebench-lite-12.json \
+            "$output/official.json" "$output/predictions.jsonl" > "$output/official-summary.json"
+          cat "$output/official-summary.json"
+      - name: Preserve diagnostic and independent evaluation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-provider-preflight
+          path: repopilot/.runs/provider-preflight/
+          include-hidden-files: true
+          if-no-files-found: warn
+      - name: Stop Ollama
+        if: always()
+        run: docker rm -f repopilot-preflight-ollama >/dev/null 2>&1 || true

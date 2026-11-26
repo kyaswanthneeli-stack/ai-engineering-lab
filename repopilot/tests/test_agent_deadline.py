@@ -101,7 +101,7 @@ class DeadlineAwareCallsTests(unittest.TestCase):
             with patch.dict("os.environ",
                             {"REPOPILOT_AGENT_BUDGET_SECONDS":"30"}), \
                  patch("repopilot.agentic_benchmark.time.monotonic",
-                       side_effect=[0.0, 1.0, 2.0]), \
+                       side_effect=[0.0, 1.0, 2.0, 2.4]), \
                  patch("repopilot.agentic_benchmark._provider",
                        return_value=response) as provider:
                 patch_spec, meta=propose_agentic_benchmark(
@@ -110,6 +110,7 @@ class DeadlineAwareCallsTests(unittest.TestCase):
                     max_steps=2, required_targets={"pricing.py"})
             self.assertIn("round(sum(values), 2)", patch_spec.patch)
             self.assertEqual(meta["agent_steps"], 1)
+            self.assertEqual(meta["provider_metrics"][0]["elapsed_ms"], 400)
             self.assertEqual(
                 provider.call_args.kwargs["request_timeout_seconds"], 26.0)
 

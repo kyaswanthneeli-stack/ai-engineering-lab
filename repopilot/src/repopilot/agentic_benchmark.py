@@ -43,12 +43,15 @@ claims about tests passing. The caller will verify any final patch independently
 
 
 class AgentToolError(BenchmarkProposalError):
-    pass
+    def __init__(self, message: str, *, category: str = "agent_error", http_status: int | None = None):
+        super().__init__(message)
+        self.category = category
+        self.http_status = http_status
+        self.provider_metrics: list[dict] = []
 
 
 class TransientOllamaError(AgentToolError):
     """Retryable failure of the explicitly approved local Ollama endpoint."""
-    pass
 
 
 def _safe_candidate_feedback(exc:Exception)->str:
@@ -133,24 +136,30 @@ def _local_ollama_chat(url,model,messages,token_budget,request_timeout_seconds=N
     if request_timeout_seconds is not None:
         timeout=min(timeout,request_timeout_seconds)
     try:
-        with urllib.request.build_opener(_NoRedirect()).open(
+        with urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect()).open(
                 request,timeout=timeout) as response:
             payload=response.read(1_000_001)
     except urllib.error.HTTPError as exc:
         error=TransientOllamaError if exc.code in {408,429,500,502,503,504} else AgentToolError
-        raise error("Local Ollama native API HTTP "+str(exc.code)) from exc
-    except (TimeoutError,socket.timeout,urllib.error.URLError) as exc:
-        raise TransientOllamaError("Local Ollama native chat failed or timed out") from exc
+        raise error("Local Ollama native API HTTP "+str(exc.code),
+                    category="provider_http", http_status=exc.code) from exc
+    except OSError as exc:
+        reason=exc.reason if isinstance(exc,urllib.error.URLError) else exc
+        if isinstance(reason,TimeoutError):
+            raise TransientOllamaError("Local Ollama native request timed out",
+                                       category="provider_timeout") from exc
+        raise TransientOllamaError("Local Ollama native connection failed",
+                                   category="provider_connection") from exc
     if len(payload)>1_000_000:
-        raise AgentToolError("Local Ollama native response exceeded size limit")
+        raise AgentToolError("Local Ollama native response exceeded size limit", category="provider_protocol")
     try:
         result=json.loads(payload)
     except (UnicodeDecodeError,ValueError) as exc:
-        raise AgentToolError("Local Ollama native response was invalid JSON") from exc
+        raise AgentToolError("Local Ollama native response was invalid JSON", category="provider_protocol") from exc
     if (not isinstance(result,dict) or
             not isinstance(result.get("message"),dict) or
             not isinstance(result["message"].get("content"),str)):
-        raise AgentToolError("Local Ollama native response missing message content")
+        raise AgentToolError("Local Ollama native response missing message content", category="provider_protocol")
     return {"choices":[{"message":{"content":result["message"]["content"]}}],
             "usage":{"prompt_tokens":result.get("prompt_eval_count"),
                      "completion_tokens":result.get("eval_count")}}
@@ -211,7 +220,7 @@ def _provider(url,model,token,messages,*,request_timeout_seconds=None,finish_pat
             else:
                 remaining=provider_deadline-time.monotonic()
                 if remaining<=0:
-                    raise AgentToolError("Remaining agent model deadline expired")
+                    raise AgentToolError("Remaining agent model deadline expired", category="agent_deadline")
                 timeout=min(request_timeout,remaining)
             try:
                 if timeout is None:
@@ -219,13 +228,14 @@ def _provider(url,model,token,messages,*,request_timeout_seconds=None,finish_pat
                 return _local_ollama_chat(
                     url,model,messages,token_budget,
                     request_timeout_seconds=timeout,**native_options)
-            except TransientOllamaError:
+            except TransientOllamaError as exc:
                 if attempt==1:
                     raise
                 if (provider_deadline is not None and
                         provider_deadline-time.monotonic()<=3):
                     raise AgentToolError(
-                        "Remaining agent model deadline expired before native retry")
+                        "Remaining agent model deadline expired before native retry",
+                        category="agent_deadline") from exc
                 time.sleep(2)
         raise AgentToolError("Local Ollama retry budget exhausted")
     data=json.dumps({"model":model,"temperature":0,"max_tokens":token_budget,
@@ -243,7 +253,7 @@ def _provider(url,model,token,messages,*,request_timeout_seconds=None,finish_pat
         if provider_deadline is not None:
             remaining=provider_deadline-time.monotonic()
             if remaining<=0:
-                raise AgentToolError("Remaining agent model deadline expired")
+                raise AgentToolError("Remaining agent model deadline expired", category="agent_deadline")
             timeout=min(timeout,remaining)
         try:
             with urllib.request.build_opener(_NoRedirect()).open(
@@ -271,7 +281,7 @@ def _provider(url,model,token,messages,*,request_timeout_seconds=None,finish_pat
                     return _local_ollama_chat(url,model,messages,token_budget)
                 remaining=provider_deadline-time.monotonic()
                 if remaining<=0:
-                    raise AgentToolError("Remaining agent model deadline expired")
+                    raise AgentToolError("Remaining agent model deadline expired", category="agent_deadline")
                 return _local_ollama_chat(
                     url,model,messages,token_budget,
                     request_timeout_seconds=min(request_timeout,remaining))
@@ -421,6 +431,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
     test_focus=is_test_infrastructure_issue(issue_text) if auto_issue_paths else False
     trace=[]
     usage=[]
+    provider_metrics=[]
     # For explicitly scoped multi-file tasks, never spend every model call on
     # searching. Switch from discovery to a fresh, patch-only prompt.
     inspection_budget=min(5 if required else 6,max_steps-2) if required or max_steps>=8 else max_steps
@@ -672,20 +683,41 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
                     "\nReturn {\"action\":\"finish\",\"edits\":[{\"path\":...,\"old\":...,\"new\":...}]}." +
                     (" Previous candidate error: " + last_candidate_reason if last_candidate_reason else ""))
             trace.append({"step":index+1,"action":"final_phase_started"})
-        if client is not None:
+        request_started=time.monotonic() if client is None else None
+        if request_started is None:
             response=client(url,model,token,messages)
-        elif budget_seconds:
-            # Reserve two seconds for patch parsing and local git validation.
-            # This is a best-effort request timeout; the outer subprocess
-            # still enforces the independent absolute per-task limit.
-            remaining=budget_seconds-(time.monotonic()-started_at)-2
-            if remaining<=0:
-                raise AgentToolError("Agent time budget exhausted before model request")
-            response=_provider(
-                url,model,token,messages,
-                request_timeout_seconds=remaining,**provider_options)
         else:
-            response=_provider(url,model,token,messages,**provider_options)
+            metric={
+                "step":index+1,
+                "phase":"final" if index>=inspection_budget and read_files else "discovery",
+                "prompt_chars":sum(len(message["content"]) for message in messages),
+            }
+            try:
+                if budget_seconds:
+                    # Reserve two seconds for local patch validation.
+                    remaining=budget_seconds-(request_started-started_at)-2
+                    if remaining<1:
+                        raise AgentToolError("Agent time budget exhausted before model request",
+                                             category="agent_deadline")
+                    response=_provider(url,model,token,messages,
+                                       request_timeout_seconds=remaining,**provider_options)
+                else:
+                    response=_provider(url,model,token,messages,**provider_options)
+            except AgentToolError as exc:
+                metric.update(outcome="error",error_category=exc.category)
+                if exc.http_status is not None:
+                    metric["http_status"]=exc.http_status
+                cause=exc.__cause__
+                if isinstance(cause,AgentToolError):
+                    metric["last_provider_error_category"]=cause.category
+                    if cause.http_status is not None:
+                        metric["last_provider_http_status"]=cause.http_status
+                metric["elapsed_ms"]=round((time.monotonic()-request_started)*1000)
+                provider_metrics.append(metric)
+                exc.provider_metrics=provider_metrics
+                raise
+            metric.update(outcome="response",elapsed_ms=round((time.monotonic()-request_started)*1000))
+            provider_metrics.append(metric)
         usage.append(response.get("usage",{}))
         try:
             content=response["choices"][0]["message"]["content"]
@@ -1073,6 +1105,7 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
             return BenchmarkPatch(patch),{
                 "model":model,"status":"model_patch_proposed_unverified",
                 "provider_reported_usage_by_attempt":usage,
+                "provider_metrics":provider_metrics,
                 "agent_steps":index+1,"inspected_files":sorted(read_files),
                 "tool_trace":trace,"officially_evaluated":False,
                 "candidate_quality":quality_report,
@@ -1115,7 +1148,9 @@ def propose_agentic_benchmark(repo:Path,issue_text:str,model:str,url:str,token:s
         if entry.get("action")=="finish_rejected":
             reason=entry.get("reason","unknown")
             reasons[reason]=reasons.get(reason,0)+1
-    raise AgentToolError(
+    error=AgentToolError(
         "Agent exhausted bounded model-tool calls without a valid patch; "
         "action_counts="+json.dumps(summary,sort_keys=True)+
         "; rejection_reasons="+json.dumps(reasons,sort_keys=True)[:1100])
+    error.provider_metrics=provider_metrics
+    raise error

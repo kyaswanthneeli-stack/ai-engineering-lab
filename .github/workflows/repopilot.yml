@@ -300,6 +300,28 @@ jobs:
           assert data['model_success_rate'] is None
           print('Correctly excluded fixture from AI resolution claims')
           PY
+      - name: Verify generated dashboard in desktop and mobile Chromium
+        run: |
+          python -m pip install 'playwright>=1.50,<2'
+          python -m playwright install --with-deps chromium
+          python - <<'PY'
+          from pathlib import Path
+          from playwright.sync_api import sync_playwright
+
+          dashboard = Path(".runs/dashboard.html").resolve().as_uri()
+          with sync_playwright() as playwright:
+              browser = playwright.chromium.launch()
+              for name, width, height in (("desktop", 1280, 900), ("mobile", 320, 720)):
+                  page = browser.new_page(viewport={"width": width, "height": height})
+                  page.goto(dashboard)
+                  assert "VERIFIED: fail before / pass after" in page.locator(".tag").inner_text()
+                  assert page.get_by_role("heading", name="Baseline tests").is_visible()
+                  assert page.get_by_role("heading", name="After fix: regression").is_visible()
+                  assert page.locator("html").evaluate("(el) => el.scrollWidth === el.clientWidth"), name
+                  page.screenshot(path=f".runs/dashboard-{name}.png", full_page=True)
+                  page.close()
+              browser.close()
+          PY
       - name: Verify read-only Docker Compose demo
         run: |
           trap 'docker compose down' EXIT
@@ -320,6 +342,8 @@ jobs:
           name: repopilot-verification-fixture
           path: |
             repopilot/.runs/dashboard.html
+            repopilot/.runs/dashboard-desktop.png
+            repopilot/.runs/dashboard-mobile.png
             repopilot/.runs/benchmark-fixture.json
             repopilot/.runs/sample-verification.json
             repopilot/.runs/invoice-multifile-verification.json
