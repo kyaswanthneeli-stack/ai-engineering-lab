@@ -123,6 +123,9 @@ write credentials to the Docker test container.
 * [Stable release notes](../RELEASE_NOTES_v2.2.0.md) and [published evidence](RELEASE_EVIDENCE_v2.2.0.md) describe the shipped scope.
 * Full SWE-bench accuracy remains **1/12 officially resolved (8.3%)** from v10. v11 was unscored; the human-assisted Django subset cannot improve the full-cohort numerator.
 
+The [operator validation guide](OPERATOR_VALIDATION.md) covers a local Mac
+worker and live draft publication in a private calculator fixture repository.
+
 ## D. Rollback and incident response
 
 1. Stop model-driven runs and disable GitHub write tokens if unsafe or
