@@ -13,10 +13,22 @@ The [unassisted v11 12-case attempt](OFFICIAL_V11_7B_2026-11-21.md) tried all 12
 
 **RepoPilot resolved 1 of 12 selected issues (8.3%).** The model attempted all 12 pinned SWE-bench Lite tasks and submitted four patches. The official harness evaluated all four, resolving one (25% of submissions). Eight attempts produced no submission. The harness recorded zero evaluator errors.
 
-| Official outcome | Instance IDs |
+| Selected issue | v10 outcome |
 |---|---|
-| Resolved | `sympy__sympy-14774` |
-| Unresolved | `django__django-12125`, `matplotlib__matplotlib-22835`, `scikit-learn__scikit-learn-12471` |
+| `django__django-12113` | No submission · Ollama chat failure or timeout |
+| `django__django-12125` | Unresolved |
+| `django__django-12589` | No submission · Ollama chat failure or timeout |
+| `django__django-14730` | No submission · Ollama chat failure or timeout |
+| `matplotlib__matplotlib-22835` | Unresolved |
+| `pydata__xarray-4493` | No submission · agent deadline expired before retry |
+| `pytest-dev__pytest-11148` | No submission · agent deadline expired before retry |
+| `scikit-learn__scikit-learn-12471` | Unresolved |
+| `sympy__sympy-11870` | No submission · Ollama chat failure or timeout |
+| `sympy__sympy-13773` | No submission · Ollama HTTP 500 |
+| `sympy__sympy-14774` | Resolved |
+| `sympy__sympy-20212` | No submission · Ollama chat failure or timeout |
+
+The eight missing predictions account for two-thirds of the cohort. Five attempts reported an Ollama chat failure or timeout, one reported HTTP 500, and two ran out of agent time before a retry. Patch quality was evaluated on the four submissions.
 
 The selected-task score matched v9, while submissions fell from six to four. Both runs resolved the same SymPy issue.
 
