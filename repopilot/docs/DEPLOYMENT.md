@@ -44,6 +44,18 @@ docker run --rm --read-only --network none --cap-drop ALL \
   repopilot-cli:2.2.0 index /workspace/example
 ```
 
+Docker Compose v2 runs the same read-only example from `repopilot/`:
+
+```bash
+docker compose build cli
+docker compose run --rm cli
+docker compose down
+```
+
+The default command lists Python symbols from the bundled calculator example
+and exits. To inspect its import graph, use
+`docker compose run --rm cli graph /workspace/example`.
+
 This read-only image intentionally does **not** include Docker access, a model
 or a GitHub token; therefore `doctor --live` will not report readiness for
 end-to-end repair. **Never mount `/var/run/docker.sock`** into this image.
@@ -64,8 +76,18 @@ docker build -t repopilot-candidate-deps:py310 \
   -f ci/Dockerfile.candidate-smoke ci
 ```
 
-Set credentials and endpoints through your OS credential manager; do not add
-real secrets to the repository. See `../.env.example` as a *sample* only.
+Set credentials and endpoints through your OS credential manager. RepoPilot
+reads settings from the process environment. The read-only Compose demo needs
+none of these variables.
+
+| Variable | Operator setting |
+| --- | --- |
+| `REPOPILOT_MODEL` | Identifier installed on your local model server or supported by your configured provider |
+| `REPOPILOT_BASE_URL` | Approved model endpoint, including its API prefix |
+| `REPOPILOT_OLLAMA_NATIVE` | Set to `1` for the local Ollama native benchmark client |
+| `REPOPILOT_API_KEY` | Model provider credential when the endpoint requires one |
+| `GITHUB_TOKEN` | Scoped token for the separately approved draft PR command |
+
 Local Ollama example:
 
 ```bash

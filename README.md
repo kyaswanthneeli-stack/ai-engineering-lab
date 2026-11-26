@@ -108,3 +108,10 @@ EvalBench: dataset versioning, semantic evaluation with reviewed rubrics, human 
 TraceFlow: injectable real tool adapters, schema validation, persisted traces and idempotency. A real service would also need authentication, authorization, secrets management and operational monitoring.
 
 [Portfolio](https://kyaswanthneeli-stack.github.io/) · [GitHub](https://github.com/kyaswanthneeli-stack)
+
+## License
+
+The original software and documentation in this repository use the [MIT License](LICENSE).
+Upstream repositories, benchmark datasets, and third-party material referenced
+or preserved as evaluation evidence retain their respective terms. See the
+[SWE-bench evidence and provenance](repopilot/benchmarks/README.md).
