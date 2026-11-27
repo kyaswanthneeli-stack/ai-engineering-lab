@@ -11,14 +11,21 @@ permissions:
 
 jobs:
   subset:
-    if: github.event_name == 'workflow_dispatch' || (github.head_ref == 'fix/repopilot-provider-diagnostics' && github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.event_name == 'workflow_dispatch' || (github.head_ref == 'bench/repopilot-provider-no-patch-cases' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        case:
+          - sympy__sympy-11870
+          - pytest-dev__pytest-11148
+          - sympy__sympy-13773
     defaults:
       run:
         working-directory: repopilot
     env:
-      CASE_ID: django__django-12113
+      CASE_ID: ${{ matrix.case }}
       REPOPILOT_MODEL: qwen2.5-coder:3b
       REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
       REPOPILOT_OLLAMA_NATIVE: '1'
@@ -99,7 +106,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-provider-preflight
+          name: repopilot-provider-preflight-${{ matrix.case }}
           path: repopilot/.runs/provider-preflight/
           include-hidden-files: true
           if-no-files-found: warn
