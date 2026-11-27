@@ -1,0 +1,16 @@
+{
+  "source": "official_swebench_results_json",
+  "results_path": ".runs/official-evidence/official-evaluation-result.json",
+  "selected": 12,
+  "submitted": 7,
+  "evaluated": 7,
+  "resolved": 1,
+  "unresolved": 6,
+  "error": 0,
+  "submitted_but_unreported": 0,
+  "not_submitted": 5,
+  "resolved_over_evaluated": 0.1429,
+  "resolved_over_selected": 0.0833,
+  "is_complete_12_task_evaluation": false,
+  "notes": "Error cases count as not resolved. No result is claimed for missing evaluations. This parser validates structure, not the provenance of supplied files."
+}
