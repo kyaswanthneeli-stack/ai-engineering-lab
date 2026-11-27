@@ -46,7 +46,7 @@
       background: #020617; border: 1px solid var(--border); border-radius: 8px;
       padding: 0.9rem; overflow-x: auto; font-size: 0.85rem; white-space: pre-wrap;
     }
-    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 1rem; }
     .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.8rem; background: var(--bg); }
   </style>
 </head>
@@ -54,7 +54,7 @@
   <main class="container">
     <section class="card">
       <h1>RepoPilot Cloud Runner</h1>
-      <p class="subtitle">Unified GitHub Actions localization, Gemini inference, and isolated Docker verification (zero local execution).</p>
+      <p class="subtitle">Generate a calculator repair with Qwen2.5-Coder and inspect the Docker test results from GitHub Actions.</p>
       <form id="run-form" class="form-grid">
         <div>
           <label for="issue-url">Calculator demo issue URL</label>
@@ -62,10 +62,10 @@
         </div>
         <div>
           <label for="access-token">Operator access token</label>
-          <input id="access-token" type="password" placeholder="Required to start a repair" />
+          <input id="access-token" type="password" required placeholder="Required to start a repair" />
         </div>
         <div class="row">
-          <button id="submit-btn" type="submit">Run Remote Verification</button>
+          <button id="submit-btn" type="submit" disabled>Run Remote Verification</button>
           <span id="health-pill" class="badge">Checking remote status...</span>
         </div>
       </form>
@@ -90,7 +90,8 @@
         </div>
       </div>
 
-      <h3 style="margin: 1rem 0 0.5rem;">Independently Verified Patch</h3>
+      <p><a id="workflow-link" hidden target="_blank" rel="noopener noreferrer">View the GitHub Actions run</a></p>
+      <h3 style="margin: 1rem 0 0.5rem;">Model proposal</h3>
       <pre id="patch-preview"># Waiting for remote GitHub Actions worker...</pre>
 
       <div class="row">
@@ -107,7 +108,9 @@
     let activeAccessToken = '';
 
     fetch('/health').then(r => r.json()).then(h => {
-      el('health-pill').textContent = `Model: ${h.model} (${h.free_tier_model_valid ? 'free-tier' : 'invalid'}) · Sandbox: remote-only`;
+      const configured = h.github_actions_configured && h.auth_required;
+      el('health-pill').textContent = configured ? `Model: ${h.model} · GitHub Actions` : 'Operator setup required';
+      el('submit-btn').disabled = !configured;
     }).catch(() => { el('health-pill').textContent = 'Health check failed'; });
 
     function authHeaders() {
@@ -126,7 +129,12 @@
       el('progress-fill').style.width = `${job.progress || 0}%`;
       el('before-text').textContent = `${job.before_tests.status}: ${job.before_tests.summary}`;
       el('after-text').textContent = `${job.after_tests.status}: ${job.after_tests.summary}`;
-      el('patch-preview').textContent = job.patch || '# No verified patch produced';
+      el('patch-preview').textContent = job.patch || '# No model patch produced';
+      if (Number.isSafeInteger(job.workflow_run_id)) {
+        const link = el('workflow-link');
+        link.href = `https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/${job.workflow_run_id}`;
+        link.hidden = false;
+      }
       if (job.error) {
         el('error-text').hidden = false;
         el('error-text').textContent = job.error;
@@ -145,6 +153,7 @@
       el('submit-btn').disabled = true;
       el('error-text').hidden = true;
       el('status-card').hidden = false;
+      el('workflow-link').hidden = true;
       activeAccessToken = el('access-token').value.trim();
       const headers = { 'Content-Type': 'application/json' };
       if (activeAccessToken) headers['X-RepoPilot-Token'] = activeAccessToken;

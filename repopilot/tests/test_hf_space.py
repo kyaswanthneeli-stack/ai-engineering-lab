@@ -117,6 +117,12 @@ class TestHuggingFaceSpace(unittest.TestCase):
         except urllib.error.HTTPError as exc:
             return exc.code, dict(exc.headers), exc.read().decode("utf-8")
 
+    def test_download_redirect_never_forwards_github_authorization(self):
+        req = urllib.request.Request("https://api.github.com/fixture", headers={"Authorization": "Bearer test"})
+        redirect = hf_app._ArtifactRedirect().redirect_request(
+            req, None, 302, "Redirect", {}, "https://fixture.blob.core.windows.net/result")
+        self.assertIsNone(redirect.get_header("Authorization"))
+
     def test_successful_dispatch_verification_and_job_authorization(self) -> None:
         st, _, raw = self._req(
             "/api/jobs",

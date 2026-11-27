@@ -138,6 +138,8 @@ class JobStore:
             "patch": "",
             "outcome": "",
             "failed_stage": "",
+            "baseline_exit_code": None,
+            "model_generated_proposal": False,
             "before_tests": {"status": "not_run", "summary": "Awaiting remote GitHub Actions verification"},
             "after_tests": {"status": "not_run", "summary": "Awaiting remote GitHub Actions verification"},
             "verification_mode": "remote_github_actions_only",
@@ -422,9 +424,10 @@ def format_markdown_report(job: dict) -> str:
         f"- **Outcome:** `{job.get('outcome') or 'N/A'}`\n"
         f"- **Workflow URL:** {job.get('workflow_url') or 'N/A'}\n\n"
         f"## Before / After Verification\n"
+        f"- **Baseline exit code:** `{job.get('baseline_exit_code')}`\n"
         f"- **Before:** `{job['before_tests'].get('status')}` — {job['before_tests'].get('summary')}\n"
         f"- **After:** `{job['after_tests'].get('status')}` — {job['after_tests'].get('summary')}\n\n"
-        f"## Independently Verified Patch\n"
+        f"## Model Proposal\n"
         f"```diff\n{job.get('patch') or '# No verified patch produced'}\n```\n"
         + (f"\n## Diagnostics\n- {job['error']}\n" if job.get("error") else "")
     )
@@ -452,17 +455,17 @@ def make_handler(
 
         def _send_security_headers(self) -> None:
             self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("X-Frame-Options", "DENY")
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header(
                 "Content-Security-Policy",
-                "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'",
+                "default-src 'self'; frame-ancestors 'self' https://huggingface.co; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'",
             )
 
         def _send_json(self, code: int, payload: dict, extra_headers: dict | None = None) -> None:
             body = json.dumps(redact_secrets_recursive(payload)).encode("utf-8")
             self.send_response(code)
             self._send_security_headers()
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             if extra_headers:
@@ -538,6 +541,7 @@ def make_handler(
                     md = format_markdown_report(job).encode("utf-8")
                     self.send_response(200)
                     self._send_security_headers()
+                    self.send_header("Cache-Control", "no-store")
                     self.send_header("Content-Type", "text/markdown; charset=utf-8")
                     self.send_header("Content-Disposition", f'attachment; filename="repopilot-{job_id}.md"')
                     self.send_header("Content-Length", str(len(md)))
@@ -637,6 +641,8 @@ def make_handler(
                         progress=100,
                         outcome=outcome,
                         failed_stage=str(verified.get("failed_stage") or ""),
+                        baseline_exit_code=(verified.get("baseline") or {}).get("exit_code"),
+                        model_generated_proposal=verified.get("model_generated_proposal") is True,
                         patch=str(verified.get("patch") or ""),
                         workflow_run_id=verified.get("workflow_run_id"),
                         workflow_url=str(verified.get("workflow_url") or workflow_url),
