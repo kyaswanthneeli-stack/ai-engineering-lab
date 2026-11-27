@@ -15,6 +15,7 @@ from pathlib import Path, PurePosixPath
 
 _SKIP = {".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache", ".runs", ".pytest_cache", ".ruff_cache", "dist", "build"}
 _WORD = re.compile(r"[A-Za-z][A-Za-z0-9_]{2,}")
+_DOTTED_MODULE = re.compile(r"(?<![\w.])[A-Za-z_]\w*(?:\.[A-Za-z_]\w*){2,}(?!\w|\.[A-Za-z_])")
 
 
 def is_test_path(name: str) -> bool:
@@ -124,6 +125,38 @@ def _symlink_component(root: Path, name: str) -> bool:
     return False
 
 
+def _mentioned_package_paths(root: Path, issue: str) -> list[tuple[Path, str]]:
+    """Inspect a few named packages before spending the broad scan budget."""
+    files = []
+    visited_packages = set()
+    for match in _DOTTED_MODULE.finditer(issue[:12000]):
+        parts = match[0].split(".")
+        if len(parts) > 10 or any(part in _SKIP for part in parts):
+            continue
+        name = "/".join(parts)
+        if name in visited_packages or _symlink_component(root, name):
+            continue
+        directory = root / name
+        if not directory.is_dir():
+            continue
+        visited_packages.add(name)
+        package_files = []
+        try:
+            with os.scandir(directory) as entries:
+                for index, entry in enumerate(entries):
+                    if index >= 48:
+                        break
+                    if (entry.name.endswith(".py") and entry.is_file(follow_symlinks=False)
+                            and entry.stat(follow_symlinks=False).st_size <= 100_000):
+                        package_files.append((Path(entry.path), name + "/" + entry.name))
+        except OSError:
+            continue
+        files.extend(sorted(package_files, key=lambda item: item[1])[:16])
+        if len(visited_packages) >= 4:
+            break
+    return files
+
+
 def _candidate_paths(root: Path, issue: str, scan_limit: int):
     """Prioritize explicit issue paths and nested basename matches.
 
@@ -168,7 +201,8 @@ def _candidate_paths(root: Path, issue: str, scan_limit: int):
 
 
 def ranked_source_context(repo: Path, issue: str, *, max_files: int = 8,
-                          max_chars: int = 32000, scan_limit: int = 1800) -> list[ContextItem]:
+                          max_chars: int = 32000, scan_limit: int = 1800,
+                          inspect_mentioned_packages: bool = False) -> list[ContextItem]:
     root = repo.resolve(strict=True)
     if (not root.is_dir() or not 1 <= max_files <= 20 or
             not 300 <= max_chars <= 100000 or not 1 <= scan_limit <= 20000):
@@ -176,7 +210,13 @@ def ranked_source_context(repo: Path, issue: str, *, max_files: int = 8,
     terms = _tokens(issue[:12000])
     test_infrastructure = is_test_infrastructure_issue(issue)
     candidates = []
-    for path, rel in _candidate_paths(root, issue, scan_limit):
+    mentioned = {
+        relative: path for path, relative in _mentioned_package_paths(root, issue)
+    } if inspect_mentioned_packages else {}
+    paths = dict(mentioned)
+    for path, relative in _candidate_paths(root, issue, scan_limit):
+        paths.setdefault(relative, path)
+    for rel, path in paths.items():
         try:
             source = path.read_text(encoding="utf-8")
             tree = ast.parse(source)
@@ -200,7 +240,11 @@ def ranked_source_context(repo: Path, issue: str, *, max_files: int = 8,
         implementation_match = (
             not test_infrastructure and not is_test_path(rel) and
             path_score + symbol_score > 0)
-        priority = 0 if implementation_match else 1
+        if rel in mentioned and (test_infrastructure or not is_test_path(rel)):
+            priority = -1
+            score += 12
+        else:
+            priority = 0 if implementation_match else 1
         candidates.append((priority, score, rel, source, symbols))
     candidates.sort(key=lambda x: (x[0], -x[1], x[2]))
     selected = []
