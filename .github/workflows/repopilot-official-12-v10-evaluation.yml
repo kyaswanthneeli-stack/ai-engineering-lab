@@ -1,13 +1,11 @@
 name: RepoPilot official v10 12-task SWE-bench evaluation
 
 on:
-  # Run the same 12 cases on the integrated release when this file lands.
-  push:
-    branches:
-      - main
+  pull_request:
+    types: [opened]
+    branches: [main]
     paths:
       - '.github/workflows/repopilot-official-12-v10-evaluation.yml'
-  # Any later manual re-evaluation needs an explicit human dispatch.
   workflow_dispatch:
 
 concurrency:
@@ -19,6 +17,7 @@ permissions:
 
 jobs:
   generate-predictions:
+    if: github.event_name == 'workflow_dispatch' || (github.head_ref == 'bench/repopilot-v23-official-rerun' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 95
     outputs:
@@ -28,6 +27,8 @@ jobs:
         working-directory: repopilot
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -105,6 +106,7 @@ jobs:
         with:
           name: repopilot-12-model-attempts-v10-unscored
           path: repopilot/.runs/swebench-batch/
+          include-hidden-files: true
           if-no-files-found: warn
           retention-days: 30
       - name: Stop model
@@ -121,6 +123,8 @@ jobs:
         working-directory: repopilot
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
@@ -238,5 +242,6 @@ jobs:
         with:
           name: repopilot-12-official-harness-v10
           path: repopilot/.runs/official-evidence/
+          include-hidden-files: true
           if-no-files-found: warn
           retention-days: 30
