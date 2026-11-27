@@ -8,6 +8,13 @@ on:
       - 'repopilot/hf_space/**'
   workflow_dispatch:
     inputs:
+      provider:
+        description: Gemini requires a key from a billing-disabled project
+        type: choice
+        default: ollama
+        options:
+          - ollama
+          - gemini
       target_repo:
         required: true
         type: string
@@ -86,16 +93,29 @@ jobs:
           curl --retry 12 --retry-all-errors --retry-delay 1 --max-time 5 -fsS http://127.0.0.1:7860/health
           curl -fsS http://127.0.0.1:7860/ | grep -F 'Calculator demo issue URL'
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:7860/api/jobs)" = 401
-      - name: Start local inference and prepare restricted Docker
+      - name: Prepare restricted Docker
+        run: docker pull python:3.12-alpine
+      - name: Start local inference
+        if: inputs.provider != 'gemini'
         run: |
-          docker pull python:3.12-alpine
           docker run --detach --name repopilot-cloud-ollama -p 127.0.0.1:11434:11434 ollama/ollama:latest
           curl --retry 45 --retry-all-errors --retry-delay 2 --max-time 5 -fsS http://127.0.0.1:11434/api/tags >/dev/null
           docker exec repopilot-cloud-ollama ollama pull "$REPOPILOT_MODEL"
+      - name: Select free-tier Gemini for the manually requested test
+        if: github.event_name == 'workflow_dispatch' && inputs.provider == 'gemini'
+        run: |
+          echo 'REPOPILOT_MODEL=gemini-3.1-flash-lite' >> "$GITHUB_ENV"
+          echo 'REPOPILOT_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai' >> "$GITHUB_ENV"
       - name: Obtain a real model proposal and verify the calculator case
         id: repair
         continue-on-error: true
+        env:
+          REPOPILOT_API_KEY: ${{ github.event_name == 'workflow_dispatch' && inputs.provider == 'gemini' && secrets.REPOPILOT_GEMINI_FREE_TIER_KEY || '' }}
         run: |
+          if [ "$REPOPILOT_MODEL" = 'gemini-3.1-flash-lite' ] && [ -z "$REPOPILOT_API_KEY" ]; then
+            echo "::error::Missing REPOPILOT_GEMINI_FREE_TIER_KEY from a billing-disabled project"
+            exit 1
+          fi
           python -m repopilot.cli run-pinned "https://github.com/$TARGET_REPO/issues/$ISSUE_NUMBER" \
             "$BASE_SHA" --repo-subdir repopilot/fixtures/calculator-buggy --output .runs/cloud-run
       - name: Package the observed outcome
