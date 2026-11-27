@@ -1,5 +1,16 @@
 # SWE-bench Lite: 12-task evaluation protocol
 
+## RepoPilot v2.3 official rerun (November 27, 2026)
+
+RepoPilot attempted the same 12 pinned SWE-bench Lite tasks with Qwen2.5-Coder 3B. It submitted seven model-generated patches. The official harness evaluated all seven and resolved `sympy__sympy-14774`, with six unresolved and zero evaluator errors. The selected-cohort score remains **1/12 (8.3%)**. The submitted-patch score is **1/7 (14.3%)**. The previous run submitted four patches and resolved the same issue.
+
+| Unsubmitted tasks | Recorded failure |
+|---|---|
+| Django 12589, SymPy 11870 and 13773 | Agent deadline expired before a native inference retry |
+| Django 14730 and SymPy 20212 | Local Ollama native request timed out |
+
+Both downloaded archives matched their published SHA-256 digests. [Saved score and provenance](evidence/v23-2026-11-27/) · [Workflow](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/45995020812) · [Generation archive](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/45995020812/artifacts/15196509869) · [Scoring archive](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/45995020812/artifacts/15198246118).
+
 ## Unscored v11 7B throughput investigation (November 21, 2026)
 
 The [unassisted v11 12-case attempt](OFFICIAL_V11_7B_2026-11-21.md) tried all 12 pinned issues using Qwen2.5-Coder 7B. It produced **zero valid predictions** (ten transient Ollama failures and two agent-deadline failures); its official SWE-bench scoring job was skipped. This is **unscored**, not a new 0/12 official result. The previously verified v10 full-cohort result remains **1/12 (8.3%)**. [Original GitHub run](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44914670302) · [raw artifact](https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/44914670302/artifacts/14712604395).
