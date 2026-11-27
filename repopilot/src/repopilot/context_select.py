@@ -15,6 +15,10 @@ from pathlib import Path, PurePosixPath
 
 _SKIP = {".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache", ".runs", ".pytest_cache", ".ruff_cache", "dist", "build"}
 _WORD = re.compile(r"[A-Za-z][A-Za-z0-9_]{2,}")
+_GENERIC_TITLE_WORDS = {"test", "tests", "error", "fails", "failed", "failure",
+                        "fix", "issue", "with", "from", "when", "using", "return",
+                        "base", "core", "utils", "common", "config", "module", "file"}
+_VERSION_SUFFIX = re.compile(r"([a-z]{4,})[0-9]+$")
 
 
 def is_test_path(name: str) -> bool:
@@ -168,12 +172,17 @@ def _candidate_paths(root: Path, issue: str, scan_limit: int):
 
 
 def ranked_source_context(repo: Path, issue: str, *, max_files: int = 8,
-                          max_chars: int = 32000, scan_limit: int = 1800) -> list[ContextItem]:
+                          max_chars: int = 32000, scan_limit: int = 1800,
+                          prefer_title_paths: bool = False) -> list[ContextItem]:
     root = repo.resolve(strict=True)
     if (not root.is_dir() or not 1 <= max_files <= 20 or
             not 300 <= max_chars <= 100000 or not 1 <= scan_limit <= 20000):
         raise ValueError("Invalid context request")
     terms = _tokens(issue[:12000])
+    title_terms = set()
+    if prefer_title_paths:
+        title = next((line for line in issue[:2000].splitlines() if line.strip()), "")
+        title_terms = _tokens(title[:240]) - _GENERIC_TITLE_WORDS
     test_infrastructure = is_test_infrastructure_issue(issue)
     candidates = []
     for path, rel in _candidate_paths(root, issue, scan_limit):
@@ -201,11 +210,16 @@ def ranked_source_context(repo: Path, issue: str, *, max_files: int = 8,
             not test_infrastructure and not is_test_path(rel) and
             path_score + symbol_score > 0)
         priority = 0 if implementation_match else 1
-        candidates.append((priority, score, rel, source, symbols))
-    candidates.sort(key=lambda x: (x[0], -x[1], x[2]))
+        title_matches = 0
+        if title_terms and (test_infrastructure or not is_test_path(rel)):
+            components = _tokens(rel.removesuffix(".py").replace("_", " "))
+            unversioned = {_VERSION_SUFFIX.sub(r"\1", token) for token in components}
+            title_matches = len(title_terms & (components | unversioned))
+        candidates.append((priority, title_matches, score, rel, source, symbols))
+    candidates.sort(key=lambda item: (item[0], -item[1], -item[2], item[3]))
     selected = []
     remaining = max_chars
-    for _, score, rel, source, symbols in candidates:
+    for _, title_matches, score, rel, source, symbols in candidates:
         if len(selected) >= max_files or remaining < 300:
             break
         max_per_file = min(9000, remaining)
@@ -216,7 +230,7 @@ def ranked_source_context(repo: Path, issue: str, *, max_files: int = 8,
         else:
             chunk = source
         remaining -= len(chunk)
-        selected.append(ContextItem(rel, score, symbols[:80], chunk))
+        selected.append(ContextItem(rel, score + title_matches, symbols[:80], chunk))
     return selected
 
 
