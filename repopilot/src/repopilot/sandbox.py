@@ -48,7 +48,7 @@ def run_tests(repo:Path,command:tuple[str,...],timeout:int=30)->RunResult:
     if command!=("python","-m","unittest","discover","-s","tests","-v"):
         raise ValueError("Unapproved command")
     container="repopilot-"+uuid.uuid4().hex[:16]
-    args=["docker","run","--name",container,"--rm","--log-driver=none","--pull=never","--network=none","--cap-drop=ALL","--security-opt=no-new-privileges","--pids-limit=64","--memory=512m","--cpus=1","--read-only","--tmpfs=/tmp:rw,nosuid,nodev,size=32m,mode=1777","--user=65534:65534","-e","PYTHONDONTWRITEBYTECODE=1","-e","PYTHONPATH=/workspace","-v",f"{repo.resolve()}:/workspace:ro","-w","/workspace","python:3.12-alpine",*command]
+    args=["docker","run","--name",container,"--rm","--log-driver=none","--pull=never","--network=none","--cap-drop=ALL","--security-opt=no-new-privileges","--pids-limit=64","--memory=512m","--cpus=1","--read-only","--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777","--user=65534:65534","-e","PYTHONDONTWRITEBYTECODE=1","-e","PYTHONPATH=/workspace","-v",f"{repo.resolve()}:/workspace:ro","-w","/workspace","python:3.12-alpine",*command]
     start=time.monotonic()
     try:
         code, output=_run_with_output_tail(args, timeout)
