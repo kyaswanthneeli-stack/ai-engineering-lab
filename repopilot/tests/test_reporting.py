@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +12,19 @@ class ReportingTests(unittest.TestCase):
         result=fetch_public_issue("https://github.com/example/project/issues/12",transport=lambda req:json.dumps({"title":"Handle a zero value","body":"Fix division"}).encode())
         self.assertEqual(result["issue_id"],"example/project#12")
         self.assertIn("Fix division",result["text"])
+    def test_issue_reader_only_uses_token_for_workflow_repository(self):
+        headers = []
+
+        def read(request):
+            headers.append(request.get_header("Authorization"))
+            return b'{"title":"Fixture","body":"Description"}'
+
+        with patch.dict("os.environ", {"REPOPILOT_GITHUB_READ_TOKEN":"fixture-token",
+                                       "GITHUB_REPOSITORY":"test/project"}):
+            fetch_public_issue("https://github.com/test/project/issues/1", transport=read)
+            fetch_public_issue("https://github.com/test/other/issues/1", transport=read)
+        self.assertEqual(headers, ["Bearer fixture-token", None])
+
     def test_issue_rejects_non_github_host(self):
         with self.assertRaises(IssueFetchError):
             fetch_public_issue("https://github.com.evil.test/org/repo/issues/1")

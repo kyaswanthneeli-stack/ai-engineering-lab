@@ -50,3 +50,26 @@ with write access only to that Space. Run **Deploy RepoPilot to Hugging Face**
 from GitHub Actions on `main`. The workflow uploads to an existing Space on
 CPU Basic. Then open the app and submit the calculator issue using the operator
 token. Retain the resulting run link before publishing a stable release.
+
+## Free Docker fallback on Render
+
+The repository's root `render.yaml` declares a free Web Service using the same
+Dockerfile and GitHub Actions verifier. Connect this repository to Render and
+apply the blueprint with the Free plan selected. Supply a fine-grained GitHub
+token restricted to this repository with Actions write access as the service's
+`GITHUB_TOKEN`. Render generates the separate `REPOPILOT_ACCESS_TOKEN`.
+Keep both credentials in the host's secret settings.
+
+The welcome page and archived evidence are public. Operators start calculator
+repairs using the access token. The free instance can sleep after inactivity
+and lose in-memory jobs on a restart. GitHub Actions retains each completed
+repair artifact. No worker runs on the operator's laptop.
+
+## Optional Gemini verification
+
+The hosted calculator workflow has a manual `gemini` mode for
+`gemini-3.1-flash-lite`. Set repository secret
+`REPOPILOT_GEMINI_FREE_TIER_KEY` using a Google AI Studio project with billing
+disabled. The workflow checks for the secret before making any request.
+It uses the same fixture and Docker verification. Requests launched from the
+web UI use Qwen2.5-Coder 3B on GitHub Actions by default.

@@ -1,0 +1,35 @@
+{
+  "job_id": "a0000045926620971",
+  "base_sha": "6d8f12a9a1a5dad50d077e21c5dfe4b11879ea52",
+  "target_repo": "kyaswanthneeli-stack/ai-engineering-lab",
+  "model": "qwen2.5-coder:3b",
+  "model_generated_proposal": true,
+  "outcome": "verified_in_sandbox",
+  "failed_stage": "",
+  "baseline": {
+    "exit_code": 0,
+    "elapsed_ms": 5677,
+    "output": "test_normal_division (test_existing.TestCalculate.test_normal_division) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nOK\n",
+    "timed_out": false
+  },
+  "before_tests": {
+    "exit_code": 1,
+    "elapsed_ms": 465,
+    "output": "test_normal_division (test_existing.TestCalculate.test_normal_division) ... ok\ntest_division_by_zero (test_reproduction.TestReproduction.test_division_by_zero) ... FAIL\n\n======================================================================\nFAIL: test_division_by_zero (test_reproduction.TestReproduction.test_division_by_zero)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/workspace/tests/test_reproduction.py\", line 6, in test_division_by_zero\n    with self.assertRaises(ZeroDivisionError):\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: ZeroDivisionError not raised\n\n----------------------------------------------------------------------\nRan 2 tests in 0.001s\n\nFAILED (failures=1)\n",
+    "timed_out": false
+  },
+  "after_tests": {
+    "exit_code": 0,
+    "elapsed_ms": 465,
+    "output": "test_normal_division (test_existing.TestCalculate.test_normal_division) ... ok\ntest_division_by_zero (test_reproduction.TestReproduction.test_division_by_zero) ... ok\n\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nOK\n",
+    "timed_out": false
+  },
+  "patch": "diff --git a/calculator.py b/calculator.py\n--- a/calculator.py\n+++ b/calculator.py\n@@ -1,4 +1,4 @@\n def divide(a, b):\n     if b == 0:\n-        return 0  # BUG: should raise ZeroDivisionError\n+        raise ZeroDivisionError\n     return a / b\n",
+  "patch_sha256": "92663a15eb52479a3da8b7b111a926e23f6e51a294b4d2072f6da8c7d53e0b5d",
+  "provenance": {
+    "workflow_run": 45926620971,
+    "artifact": 15167245005,
+    "original_archive_sha256": "ad53803edc300b6cba7deef6117f005d6d3ba9957ef466029137c5deae87fbe9",
+    "scope": "GitHub Actions repair of the calculator fixture; archived before public web deployment."
+  }
+}

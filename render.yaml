@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: repopilot-cloud
+    runtime: docker
+    plan: free
+    rootDir: repopilot
+    dockerfilePath: ./hf_space/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: REPOPILOT_ACCESS_TOKEN
+        generateValue: true
