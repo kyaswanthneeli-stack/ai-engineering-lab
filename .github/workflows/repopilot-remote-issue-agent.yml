@@ -30,6 +30,7 @@ on:
 
 permissions:
   contents: read
+  issues: read
 
 concurrency:
   group: repopilot-hosted-calculator-${{ github.event_name }}
@@ -110,6 +111,7 @@ jobs:
         id: repair
         continue-on-error: true
         env:
+          REPOPILOT_GITHUB_READ_TOKEN: ${{ github.token }}
           REPOPILOT_API_KEY: ${{ github.event_name == 'workflow_dispatch' && inputs.provider == 'gemini' && secrets.REPOPILOT_GEMINI_FREE_TIER_KEY || '' }}
         run: |
           if [ "$REPOPILOT_MODEL" = 'gemini-3.1-flash-lite' ] && [ -z "$REPOPILOT_API_KEY" ]; then

@@ -1,5 +1,7 @@
 """Read a public GitHub issue via the official REST API (read-only)."""
 import json
+import os
+import urllib.error
 import re
 import urllib.request
 
@@ -21,7 +23,11 @@ def fetch_public_issue(url: str, transport=None) -> dict:
         def transport(request):
             with urllib.request.build_opener(_NoRedirect()).open(request, timeout=12) as response:
                 return response.read(150_001)
-    request = urllib.request.Request(endpoint,headers={"Accept":"application/vnd.github+json","User-Agent":"RepoPilot/0.3"})
+    headers = {"Accept":"application/vnd.github+json","User-Agent":"RepoPilot/0.3"}
+    token = os.getenv("REPOPILOT_GITHUB_READ_TOKEN", "")
+    if token and f"{owner}/{repo}".lower() == os.getenv("GITHUB_REPOSITORY", "").lower():
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(endpoint, headers=headers)
     try:
         data = transport(request)
         if len(data) > 150_000:
@@ -29,6 +35,8 @@ def fetch_public_issue(url: str, transport=None) -> dict:
         payload=json.loads(data)
     except IssueFetchError:
         raise
+    except urllib.error.HTTPError as exc:
+        raise IssueFetchError(f"GitHub issue request returned HTTP {exc.code}") from exc
     except Exception as exc:
         raise IssueFetchError("Could not retrieve issue") from exc
     if not isinstance(payload,dict) or "pull_request" in payload or not isinstance(payload.get("title"),str) or not isinstance(payload.get("body"),(str,type(None))):
