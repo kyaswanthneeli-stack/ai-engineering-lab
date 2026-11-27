@@ -1,0 +1,59 @@
+name: Deploy RepoPilot to Hugging Face
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repopilot-hugging-face
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      HF_SPACE_ID: ${{ vars.REPOPILOT_HF_SPACE_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare the Space build context
+        run: |
+          python -m pip install 'huggingface-hub>=0.34,<2'
+          space="$RUNNER_TEMP/repopilot-space"
+          mkdir -p "$space/src/repopilot" "$space/hf_space"
+          cp repopilot/hf_space/{Dockerfile,README.md} "$space/"
+          cp repopilot/hf_space/app.py "$space/hf_space/"
+          cp -R repopilot/hf_space/static "$space/hf_space/"
+          cp repopilot/src/repopilot/{__init__,security,inference_resilience}.py "$space/src/repopilot/"
+      - name: Upload to the existing Space
+        env:
+          HF_TOKEN: ${{ secrets.REPOPILOT_HF_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+          from huggingface_hub import HfApi
+
+          space = os.environ["HF_SPACE_ID"]
+          if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*/repopilot-cloud", space):
+              raise SystemExit("Set REPOPILOT_HF_SPACE_ID to the existing OWNER/repopilot-cloud Space")
+          if not os.environ["HF_TOKEN"]:
+              raise SystemExit("Configure the repository secret REPOPILOT_HF_TOKEN")
+          root = Path(os.environ["RUNNER_TEMP"]) / "repopilot-space"
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          runtime = api.get_space_runtime(space)
+          if (runtime.hardware not in (None, "cpu-basic")
+                  or runtime.requested_hardware not in (None, "cpu-basic")):
+              raise SystemExit("This deployment requires CPU Basic and does not change your hardware")
+          commit = api.upload_folder(repo_id=space, repo_type="space", folder_path=root,
+                                     commit_message=f"Deploy RepoPilot {os.environ['GITHUB_SHA'][:12]}")
+          print(f"Space commit: {commit.oid}")
+          PY

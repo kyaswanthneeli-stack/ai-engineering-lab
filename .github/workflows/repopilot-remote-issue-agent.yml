@@ -1,0 +1,157 @@
+name: RepoPilot hosted calculator verification
+run-name: RepoPilot demo ${{ inputs.job_id || github.run_id }}
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/repopilot-remote-issue-agent.yml'
+      - 'repopilot/hf_space/**'
+  workflow_dispatch:
+    inputs:
+      target_repo:
+        required: true
+        type: string
+      issue_number:
+        required: true
+        type: string
+      base_sha:
+        required: true
+        type: string
+      job_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repopilot-hosted-calculator-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+      || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: repopilot
+    env:
+      TARGET_REPO: ${{ inputs.target_repo || github.repository }}
+      ISSUE_NUMBER: ${{ inputs.issue_number || '1' }}
+      BASE_SHA: ${{ inputs.base_sha || github.event.pull_request.head.sha }}
+      JOB_ID: ${{ inputs.job_id || format('a00000{0}', github.run_id) }}
+      REPOPILOT_MODEL: qwen2.5-coder:3b
+      REPOPILOT_BASE_URL: http://127.0.0.1:11434/v1
+    steps:
+      - name: Validate the fixture request
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          env = os.environ
+          assert env["TARGET_REPO"] == "kyaswanthneeli-stack/ai-engineering-lab"
+          assert env["ISSUE_NUMBER"] == "1"
+          assert re.fullmatch(r"[a-f0-9]{40}", env["BASE_SHA"])
+          if env["EVENT_NAME"] == "workflow_dispatch":
+              assert re.fullmatch(r"[a-f0-9]{16}", env["JOB_ID"])
+          PY
+        working-directory: .
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Ensure the selected fixture revision belongs to the trusted history
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            git merge-base --is-ancestor "$BASE_SHA" "$GITHUB_SHA"
+          else
+            git merge-base --is-ancestor "$BASE_SHA" HEAD
+          fi
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the verifier
+        run: python -m pip install -e .
+      - name: Build and check the Space image
+        if: github.event_name == 'pull_request'
+        run: |
+          docker build -t repopilot-space:ci -f hf_space/Dockerfile .
+          docker run --detach --name repopilot-ci-space -p 127.0.0.1:7860:7860 repopilot-space:ci
+          trap 'docker logs repopilot-ci-space; docker rm -f repopilot-ci-space >/dev/null' EXIT
+          curl --retry 12 --retry-all-errors --retry-delay 1 --max-time 5 -fsS http://127.0.0.1:7860/health
+          curl -fsS http://127.0.0.1:7860/ | grep -F 'Calculator demo issue URL'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:7860/api/jobs)" = 401
+      - name: Start local inference and prepare restricted Docker
+        run: |
+          docker pull python:3.12-alpine
+          docker run --detach --name repopilot-cloud-ollama -p 127.0.0.1:11434:11434 ollama/ollama:latest
+          curl --retry 45 --retry-all-errors --retry-delay 2 --max-time 5 -fsS http://127.0.0.1:11434/api/tags >/dev/null
+          docker exec repopilot-cloud-ollama ollama pull "$REPOPILOT_MODEL"
+      - name: Obtain a real model proposal and verify the calculator case
+        id: repair
+        continue-on-error: true
+        run: |
+          python -m repopilot.cli run-pinned "https://github.com/$TARGET_REPO/issues/$ISSUE_NUMBER" \
+            "$BASE_SHA" --repo-subdir repopilot/fixtures/calculator-buggy --output .runs/cloud-run
+      - name: Package the observed outcome
+        id: evidence
+        if: always()
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          from repopilot.test_evidence import check_verification_report
+
+          out = Path(".runs/cloud-run")
+          report_path = out / "run.json"
+          report = json.loads(report_path.read_text()) if report_path.is_file() else {}
+          proposal_path = out / "proposal.json"
+          proposal = json.loads(proposal_path.read_text()) if proposal_path.is_file() else {}
+          patch = proposal.get("patch", "")
+          verified = False
+          try:
+              check_verification_report(report)
+          except ValueError:
+              pass
+          else:
+              verified = report.get("model_generated_proposal") is True and bool(patch)
+          evidence = {
+              "job_id": os.environ["JOB_ID"], "base_sha": os.environ["BASE_SHA"],
+              "target_repo": os.environ["TARGET_REPO"], "model": os.environ["REPOPILOT_MODEL"],
+              "model_generated_proposal": report.get("model_generated_proposal", False),
+              "outcome": "verified_in_sandbox" if verified else "failed_verification",
+              "failed_stage": report.get("failed_stage", report.get("error_type", "")),
+              "baseline": report.get("baseline", {}), "before_tests": report.get("before", {}),
+              "after_tests": report.get("after", {}), "patch": patch,
+              "patch_sha256": hashlib.sha256(patch.encode()).hexdigest(),
+          }
+          result = Path(".runs/cloud-evidence") / f"repopilot-result-{evidence['job_id']}.json"
+          result.parent.mkdir(parents=True, exist_ok=True)
+          result.write_text(json.dumps(evidence, indent=2) + "\n")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              print(f"verified={str(verified).lower()}", file=output)
+          print("Verified a genuine model patch:", verified)
+          PY
+      - name: Upload actual run evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repopilot-result-${{ env.JOB_ID }}
+          path: repopilot/.runs/cloud-evidence/
+          include-hidden-files: true
+          if-no-files-found: error
+      - name: Stop local inference
+        if: always()
+        run: docker rm -f repopilot-cloud-ollama >/dev/null 2>&1 || true
+      - name: Require genuine verification
+        if: always()
+        env:
+          VERIFIED: ${{ steps.evidence.outputs.verified }}
+        run: test "$VERIFIED" = true

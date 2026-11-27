@@ -74,6 +74,10 @@ class Tests(unittest.TestCase):
             result={"choices":[{"message":{"content":json.dumps(body)}}]}
             with self.assertRaises(ProposalError):
                 propose(Path(t),"fix bug","local","http://127.0.0.1:11434/v1",client=lambda *_:result)
+    def test_patch_headers_must_match_declared_file(self):
+        with self.assertRaisesRegex(UnsafePatch, "Diff paths must match"):
+            validate_patch(PATCH.replace("--- a/calculator.py", "--- a/other.py"))
+
     def test_verify_mock(self):
         with tempfile.TemporaryDirectory() as t:
             root=Path(t,"repo");root.mkdir()

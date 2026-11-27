@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RepoPilot — Remote Issue-to-Patch Runner</title>
+  <style>
+    :root {
+      --bg: #0f172a; --card: #1e293b; --border: #334155;
+      --text: #f1f5f9; --muted: #94a3b8; --accent: #38bdf8;
+      --ok: #22c55e; --warn: #f59e0b; --err: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg); color: var(--text); line-height: 1.5;
+      padding: 1.25rem;
+    }
+    .container { max-width: 960px; margin: 0 auto; display: grid; gap: 1.25rem; }
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 1.25rem;
+    }
+    h1 { margin: 0 0 0.25rem; font-size: 1.5rem; }
+    .subtitle { color: var(--muted); font-size: 0.92rem; margin: 0; }
+    .form-grid { display: grid; gap: 0.75rem; margin-top: 1rem; }
+    label { font-size: 0.85rem; color: var(--muted); display: block; margin-bottom: 0.25rem; }
+    input {
+      width: 100%; padding: 0.65rem 0.8rem; border-radius: 6px;
+      border: 1px solid var(--border); background: var(--bg); color: var(--text);
+      font-size: 0.95rem;
+    }
+    button {
+      background: var(--accent); color: #0f172a; font-weight: 600;
+      border: none; border-radius: 6px; padding: 0.7rem 1.1rem;
+      cursor: pointer; font-size: 0.95rem;
+    }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+    .row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+    .progress-bar {
+      height: 8px; background: var(--bg); border-radius: 999px; overflow: hidden; margin: 0.75rem 0;
+    }
+    .progress-fill { height: 100%; background: var(--accent); width: 0%; transition: width 0.25s ease; }
+    pre {
+      background: #020617; border: 1px solid var(--border); border-radius: 8px;
+      padding: 0.9rem; overflow-x: auto; font-size: 0.85rem; white-space: pre-wrap;
+    }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 1rem; }
+    .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.8rem; background: var(--bg); }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <section class="card">
+      <h1>RepoPilot Cloud Runner</h1>
+      <p class="subtitle">Generate a calculator repair with Qwen2.5-Coder and inspect the Docker test results from GitHub Actions.</p>
+      <form id="run-form" class="form-grid">
+        <div>
+          <label for="issue-url">Calculator demo issue URL</label>
+          <input id="issue-url" type="url" required value="https://github.com/kyaswanthneeli-stack/ai-engineering-lab/issues/1" readonly />
+        </div>
+        <div>
+          <label for="access-token">Operator access token</label>
+          <input id="access-token" type="password" required placeholder="Required to start a repair" />
+        </div>
+        <div class="row">
+          <button id="submit-btn" type="submit" disabled>Run Remote Verification</button>
+          <span id="health-pill" class="badge">Checking remote status...</span>
+        </div>
+      </form>
+    </section>
+
+    <section id="status-card" class="card" hidden>
+      <div class="row" style="justify-content: space-between;">
+        <strong>Execution Status: <span id="status-text">queued</span></strong>
+        <span class="badge" id="stage-text">queued</span>
+      </div>
+      <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
+      <p id="error-text" style="color: var(--err); margin: 0.5rem 0;" hidden></p>
+
+      <div class="grid-2" style="margin-top: 1rem;">
+        <div class="card" style="background: var(--bg);">
+          <strong>Before Verification</strong>
+          <pre id="before-text" style="margin-top: 0.45rem;">—</pre>
+        </div>
+        <div class="card" style="background: var(--bg);">
+          <strong>After Verification</strong>
+          <pre id="after-text" style="margin-top: 0.45rem;">—</pre>
+        </div>
+      </div>
+
+      <p><a id="workflow-link" hidden target="_blank" rel="noopener noreferrer">View the GitHub Actions run</a></p>
+      <h3 style="margin: 1rem 0 0.5rem;">Model proposal</h3>
+      <pre id="patch-preview"># Waiting for remote GitHub Actions worker...</pre>
+
+      <div class="row">
+        <button id="dl-md" class="secondary" type="button" disabled>Download Markdown Report</button>
+        <button id="dl-json" class="secondary" type="button" disabled>Download JSON Report</button>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const el = (id) => document.getElementById(id);
+    let activeJobId = null;
+    let activeJobToken = null;
+    let activeAccessToken = '';
+
+    fetch('/health').then(r => r.json()).then(h => {
+      const configured = h.github_actions_configured && h.auth_required;
+      el('health-pill').textContent = configured ? `Model: ${h.model} · GitHub Actions` : 'Operator setup required';
+      el('submit-btn').disabled = !configured;
+    }).catch(() => { el('health-pill').textContent = 'Health check failed'; });
+
+    function authHeaders() {
+      const h = {};
+      if (activeAccessToken) h['X-RepoPilot-Token'] = activeAccessToken;
+      if (activeJobToken) h['X-Job-Token'] = activeJobToken;
+      return h;
+    }
+
+    async function pollJob(jobId) {
+      const res = await fetch(`/api/jobs/${jobId}`, { headers: authHeaders() });
+      if (!res.ok) return;
+      const job = await res.json();
+      el('status-text').textContent = job.status;
+      el('stage-text').textContent = job.stage;
+      el('progress-fill').style.width = `${job.progress || 0}%`;
+      el('before-text').textContent = `${job.before_tests.status}: ${job.before_tests.summary}`;
+      el('after-text').textContent = `${job.after_tests.status}: ${job.after_tests.summary}`;
+      el('patch-preview').textContent = job.patch || '# No model patch produced';
+      if (Number.isSafeInteger(job.workflow_run_id)) {
+        const link = el('workflow-link');
+        link.href = `https://github.com/kyaswanthneeli-stack/ai-engineering-lab/actions/runs/${job.workflow_run_id}`;
+        link.hidden = false;
+      }
+      if (job.error) {
+        el('error-text').hidden = false;
+        el('error-text').textContent = job.error;
+      }
+      if (job.status === 'completed' || job.status === 'failed') {
+        el('submit-btn').disabled = false;
+        el('dl-md').disabled = false;
+        el('dl-json').disabled = false;
+        return;
+      }
+      setTimeout(() => pollJob(jobId), 2000);
+    }
+
+    el('run-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      el('submit-btn').disabled = true;
+      el('error-text').hidden = true;
+      el('status-card').hidden = false;
+      el('workflow-link').hidden = true;
+      activeAccessToken = el('access-token').value.trim();
+      const headers = { 'Content-Type': 'application/json' };
+      if (activeAccessToken) headers['X-RepoPilot-Token'] = activeAccessToken;
+      const res = await fetch('/api/jobs', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ issue_url: el('issue-url').value.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        el('error-text').hidden = false;
+        el('error-text').textContent = data.error || 'Submission failed';
+        el('submit-btn').disabled = false;
+        return;
+      }
+      activeJobId = data.job_id;
+      activeJobToken = data.job_token;
+      pollJob(activeJobId);
+    });
+
+    async function downloadReport(fmt) {
+      if (!activeJobId) return;
+      const res = await fetch(`/api/jobs/${activeJobId}/report?format=${fmt}`, { headers: authHeaders() });
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `repopilot-${activeJobId}.${fmt}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    el('dl-md').addEventListener('click', () => downloadReport('md'));
+    el('dl-json').addEventListener('click', () => downloadReport('json'));
+  </script>
+</body>
+</html>

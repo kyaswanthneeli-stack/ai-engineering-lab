@@ -1,4 +1,4 @@
-name: RepoPilot v2.2.0 stable package preflight
+name: RepoPilot stable package preflight
 
 on:
   pull_request:
@@ -39,10 +39,9 @@ jobs:
           from importlib.metadata import version
           from pathlib import Path
           project=tomllib.loads(Path("pyproject.toml").read_text())
-          assert project["project"]["version"] == "2.2.0"
-          assert version("repopilot") == repopilot.__version__ == "2.2.0"
-          assert Path("RELEASE_NOTES_v2.2.0.md").is_file()
-          assert Path("docs/STABLE_RELEASE_HANDOFF_v2.2.0.md").is_file()
+          current = project["project"]["version"]
+          assert version("repopilot") == repopilot.__version__ == current
+          assert Path(f"RELEASE_NOTES_v{current}.md").is_file()
           PY
       - name: Compile and run Python tests with coverage
         run: |
@@ -66,10 +65,11 @@ jobs:
       - name: Build and smoke-test versioned wheel and source distribution
         run: |
           python -m build --sdist --wheel --outdir dist .
-          test "$(find dist -maxdepth 1 -name 'repopilot-2.2.0-*.whl' | wc -l)" -eq 1
-          test -f dist/repopilot-2.2.0.tar.gz
+          current="$(python -c 'from repopilot import __version__; print(__version__)')"
+          test "$(find dist -maxdepth 1 -name "repopilot-${current}-*.whl" | wc -l)" -eq 1
+          test -f "dist/repopilot-${current}.tar.gz"
           python -m venv .runs/stable-clean-install
-          .runs/stable-clean-install/bin/python -m pip install --no-index --no-deps dist/repopilot-2.2.0-*.whl
+          .runs/stable-clean-install/bin/python -m pip install --no-index --no-deps dist/repopilot-"${current}"-*.whl
           .runs/stable-clean-install/bin/python -m repopilot.cli --help
           .runs/stable-clean-install/bin/python -m repopilot.cli doctor
           sha256sum dist/* | tee .runs/stable-dist-sha256.txt
@@ -91,7 +91,7 @@ jobs:
       - name: Upload preflight evidence (not a public release)
         uses: actions/upload-artifact@v4
         with:
-          name: repopilot-v2.2.0-stable-preflight-evidence
+          name: repopilot-stable-preflight-evidence
           path: |
             repopilot/dist/
             repopilot/.runs/stable-dist-sha256.txt

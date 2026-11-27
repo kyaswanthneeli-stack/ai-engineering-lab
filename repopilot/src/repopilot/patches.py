@@ -20,11 +20,18 @@ def validate_patch(patch: str):
         p=PurePosixPath(a)
         if a!=b or not a.endswith(".py") or p.is_absolute() or ".." in p.parts or ".git" in p.parts or "\\" in a or a.startswith("-"):
             raise UnsafePatch("Only existing local Python files may be changed")
-    for line in patch.splitlines():
-        if line.startswith(("--- ","+++ ")):
-            target=line[4:].split("\t",1)[0]
-            if target=="/dev/null" or not target.startswith(("a/","b/")):
-                raise UnsafePatch("New and deleted files are not permitted")
+    sections=re.split(r"(?m)(?=^diff --git )",patch)
+    for section in filter(str.strip,sections):
+        lines=section.splitlines()
+        match=re.fullmatch(r"diff --git a/(.+?) b/(.+?)",lines[0])
+        if not match or len(lines)<4:
+            raise UnsafePatch("Incomplete unified diff headers")
+        old_path=lines[1].split("\t",1)[0]
+        new_path=lines[2].split("\t",1)[0]
+        if old_path!="--- a/"+match[1] or new_path!="+++ b/"+match[2]:
+            raise UnsafePatch("Diff paths must match the declared Python file")
+        if not lines[3].startswith("@@ "):
+            raise UnsafePatch("Expected a unified diff hunk")
 
 def apply_patch(repo:Path,patch:str):
     validate_patch(patch)

@@ -15,6 +15,7 @@ from .engine import execute
 from .github_issue import fetch_public_issue
 from .planner import propose,save_proposal
 from .review import review_proposal
+from .security import redact_secrets
 
 
 def run_with_repair(repo:Path,issue_url:str,output:Path,*,max_attempts:int=3,
@@ -45,7 +46,7 @@ def run_with_repair(repo:Path,issue_url:str,output:Path,*,max_attempts:int=3,
                 return ""
             stage=record.get("failed_stage","unknown")
             after=record.get("after",{}) or {}
-            text=str(after.get("output",""))[-1200:]
+            text=redact_secrets(str(after.get("output","")))[-1200:]
             return f"Failed verification stage: {stage}. Test exit={after.get('exit_code')}. Test output excerpt:\\n{text}"
         except (ValueError,TypeError,OSError):
             return ""
