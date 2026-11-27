@@ -1,0 +1,90 @@
+name: Publish RepoPilot v2.3.0
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repopilot-stable-v2-3-0
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'kyaswanthneeli-stack/ai-engineering-lab' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: write
+      actions: read
+    defaults:
+      run:
+        working-directory: repopilot
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Check the live repair against its GitHub Actions artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          record=evidence/v2.3-render-verification.json
+          run_id="$(jq -er '.workflow_run_id | tostring | select(test("^[0-9]+$"))' "$record")"
+          job_id="$(jq -er '.job_id | select(test("^[a-f0-9]{16}$"))' "$record")"
+          origin="$(jq -er '.url | select(test("^https://repopilot-cloud[-a-z0-9]*\\.onrender\\.com$"))' "$record")"
+          gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json conclusion,event,headBranch,displayTitle,workflowName \
+            | jq -e --arg title "RepoPilot demo $job_id" '
+              .conclusion == "success" and .event == "workflow_dispatch" and .headBranch == "main"
+              and .displayTitle == $title and .workflowName == "RepoPilot hosted calculator verification"'
+          mkdir -p .runs/release
+          gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name "repopilot-result-$job_id" --dir .runs/release
+          python - "$record" ".runs/release/repopilot-result-$job_id.json" <<'PY'
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
+
+          observed, artifact = (json.loads(Path(path).read_text()) for path in sys.argv[1:])
+          assert observed["job_id"] == artifact["job_id"]
+          assert observed["base_sha"] == artifact["base_sha"]
+          assert artifact["target_repo"] == "kyaswanthneeli-stack/ai-engineering-lab"
+          assert artifact["model_generated_proposal"] is True
+          assert artifact["outcome"] == "verified_in_sandbox"
+          assert artifact["patch"].startswith("diff --git")
+          assert observed["patch_sha256"] == artifact["patch_sha256"]
+          assert hashlib.sha256(artifact["patch"].encode()).hexdigest() == observed["patch_sha256"]
+          assert [artifact[key]["exit_code"] for key in ("baseline", "before_tests", "after_tests")] == [0, 1, 0]
+          PY
+          curl --retry 4 --retry-all-errors --retry-delay 3 --max-time 90 -fsS "$origin/health" \
+            | jq -e '.status == "ok" and .auth_required and .github_actions_configured and .sandbox_mode == "remote_only_no_local_exec"'
+          test "$(curl --max-time 30 -sS -o /dev/null -w '%{http_code}' -X POST "$origin/api/jobs")" = 401
+      - name: Build and verify the versioned packages
+        run: |
+          set -euo pipefail
+          python -m pip install 'build>=1,<3'
+          python -m build --sdist --wheel
+          python -m venv .runs/v23-clean
+          .runs/v23-clean/bin/python -m pip install --no-index --no-deps dist/repopilot-2.3.0-*.whl
+          .runs/v23-clean/bin/python -c 'from importlib.metadata import version; assert version("repopilot") == "2.3.0"'
+          .runs/v23-clean/bin/python -m repopilot.cli doctor
+          (cd dist && sha256sum repopilot-2.3.0-* repopilot-2.3.0.tar.gz > SHA256SUMS.txt)
+      - name: Publish the verified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v2.3.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Stable v2.3.0 already exists"
+            exit 1
+          fi
+          existing_tag="$(git ls-remote --tags origin refs/tags/v2.3.0)"
+          test -z "$existing_tag"
+          gh release create v2.3.0 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "RepoPilot 2.3.0 — Supervised cloud repair" --notes-file RELEASE_NOTES_v2.3.0.md \
+            dist/repopilot-2.3.0-*.whl dist/repopilot-2.3.0.tar.gz dist/SHA256SUMS.txt \
+            .runs/release/repopilot-result-*.json
